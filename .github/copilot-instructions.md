@@ -50,8 +50,8 @@ Flask-Migrateは採用済みの技術として扱う。詳細は `docs/architect
 - `flask db migrate` でmigrationを生成したら、`flask db upgrade` を実行する前に、次をチャットで報告してKomaの承認を待つ
   - 作成・変更されるテーブルとカラム（名前・型・NULL可否）、外部キー
   - `docs/architecture.md` のデータ設計との差異の有無
-  - 削除（drop）や変更（alter）を含む操作がないか
-- 設計資料にない変更や、削除・変更を含む操作がmigrationに含まれていた場合は、適用せず「設計上の問題を見つけたとき」の手順に従う
+  - `upgrade()` の中に、削除（drop）や変更（alter）を含む操作がないか（`downgrade()` の巻き戻し用の処理は対象外）
+- 設計資料にない変更や、`upgrade()` の中に削除・変更を含む操作がmigrationに含まれていた場合は、適用せず「設計上の問題を見つけたとき」の手順に従う
 - `instance/app.db` や `migrations/` の削除・作り直しは、Komaの確認なしに行わない
 
 ## すでに完了している環境構築（やり直さない・変更しない）
