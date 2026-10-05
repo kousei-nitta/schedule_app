@@ -16,4 +16,8 @@ def create_app():
     from app import models
 
     migrate.init_app(app, db, render_as_batch=True)
+
+    from app.routes.main import main as main_blueprint
+
+    app.register_blueprint(main_blueprint)
     return app
