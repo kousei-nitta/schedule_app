@@ -13,10 +13,22 @@
 | テンプレート | Jinja2（Flask標準） | |
 | フロントエンドJS | バニラJavaScript | fetch APIでFlaskの小さなAPIエンドポイント（JSONを返す）を呼ぶ |
 | カレンダー描画 | FullCalendar | MIT・無料範囲の週／月／一覧表示のみ使用。リソース／タイムライン表示などの有料機能は使わない |
-| CSS | Bootstrap | モーダル（詳細パネル）やバッジ（カテゴリ表示）などに利用 |
+| CSS（UI部品） | Bootstrap 5.3.8 | CDN（jsDelivr）から、バージョンを固定して読み込む（「Bootstrapの読み込み」を参照）。タブ（モード切り替え）、モーダル（詳細パネル）、バッジ（カテゴリ表示）などに利用 |
 | 認証 | なし | ログイン機能は実装しない |
+| 起動 | `run.py` | 開発用サーバーを `127.0.0.1:5001`（`debug=True`）で起動する。5001番を使うのは、macOSではAirPlayレシーバーが5000番を使うことがあるため |
 
 制約：費用をかけない（大学の授業の一環のため）。
+
+### Bootstrapの読み込み（確定）
+- **CDN（jsDelivr）から読み込み、バージョンを固定する。** 固定するバージョンは **5.3.8**（2026年10月時点の最新の安定版）。`latest` など、バージョンを固定しないURLは使わない。
+- 読み込むのは2つ。CSS（`bootstrap.min.css`）を `<head>` 内に、JavaScript（`bootstrap.bundle.min.js`。Popperを含む）を `</body>` の直前に置く。
+- 改ざんの検出用に `integrity`（ハッシュ値）と `crossorigin="anonymous"` を付ける。
+- バージョンを変えるときは、この資料、Task MD、タグの `integrity` を、そろえて更新する（開発者の承認を得る）。`integrity` の値は、公式サイトの掲載値を使う。
+
+```html
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+```
 
 ## 未決定事項
 現時点で決まっていない事項の一覧。**実装側（Copilot）は、これらを自分の判断で決めない。** 該当する実装に入る前に、開発者（Koma）が決定し、このファイルを更新する。いずれもTask 001の実装には影響しない。
@@ -30,6 +42,7 @@
 | 学期名の決め方 | `Semester.name` を開発者が入力するのか、「前期／後期」から選ぶのか、期間から自動で付けるのか | 授業モードを実装するタスクの前 |
 | 学期の変更・削除時の扱い | 学期の期間を修正したときのEventの作り直し、学期を削除したときの授業・Event・Taskの扱い、授業の所属学期の付け替え | 授業モードの編集・削除を実装するタスクの前 |
 | 一覧表示の「今日以降」の範囲 | FullCalendarのリスト表示は期間を指定する方式のため、期間の上限（例：今日から3か月）が必要 | カレンダー表示を実装するタスクの前 |
+| FullCalendarの読み込み方法 | CDNから読み込むか、ファイルを `app/static/` に置くか（Bootstrapは、CDN方式で確定済み） | カレンダー表示を実装するタスクの前 |
 
 ## データ設計
 テーブルは4つ（Semester・Subject・Event・Task）。関係は **Semester → Subject → Event / Task**。
@@ -184,6 +197,7 @@ schedule_app/
 │   │   ├── event.py         # 時間型の予定
 │   │   └── task.py          # 課題・タスク（期限型）
 │   ├── routes/
+│   │   ├── __init__.py      # routesをパッケージにする（空のファイル）
 │   │   ├── main.py          # トップページ（カレンダー・授業・課題の3モードを含む1画面）
 │   │   ├── subjects.py      # 授業モードのAPI（登録・編集・削除・一覧）
 │   │   ├── events.py        # カレンダーからの予定のAPI（登録・編集・削除）
@@ -205,12 +219,12 @@ schedule_app/
 ├── tests/                   # 実装後、必要に応じて追加
 ├── requirements.txt
 ├── README.md                # 作成済み
-└── run.py                   # 起動スクリプト
+└── run.py                   # 起動スクリプト（127.0.0.1:5001）
 ```
 
 注意：
 - 授業のモデル名は、Pythonの予約語 `class` と紛らわしいため `Subject` とする。
-- 画面はカレンダー／授業／課題・タスクの3モードを1ページ（`index.html`）に持たせ、JavaScriptで表示を切り替える。
+- 画面はカレンダー／授業／課題・タスクの3モードを1ページ（`index.html`）に持たせ、Bootstrapのタブ機能（Bootstrap JavaScript）で表示を切り替える。
 - ログインがないため、認証関連のファイルは作らない。
 
 ## 開発の役割分担とGit運用
