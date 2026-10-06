@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, time
 from typing import Any
 
 from flask import Flask, Response, jsonify, request
@@ -107,14 +107,113 @@ def validate_required_string(
     field: str,
     required_message: str,
     type_message: str,
+    *,
+    max_length: int | None = None,
+    length_message: str | None = None,
+    strip: bool = False,
 ) -> tuple[str | None, str | None]:
     """必須文字列の欠落と型を検査し、値またはエラーメッセージを返す。"""
+    if max_length is not None and length_message is None:
+        raise ValueError("max_lengthを指定する場合はlength_messageが必要です")
+
     value = payload.get(field)
     if field not in payload or value is None or value == "":
         return None, required_message
     if not isinstance(value, str):
         return None, type_message
+    if strip:
+        value = value.strip()
+        if value == "":
+            return None, required_message
+    if max_length is not None and len(value) > max_length:
+        return None, length_message
     return value, None
+
+
+def validate_optional_string(
+    payload: dict[str, Any],
+    field: str,
+    type_message: str,
+    *,
+    max_length: int | None = None,
+    length_message: str | None = None,
+) -> tuple[str | None, str | None]:
+    """任意文字列を正規化し、型と長さを検査する。"""
+    if max_length is not None and length_message is None:
+        raise ValueError("max_lengthを指定する場合はlength_messageが必要です")
+
+    value = payload.get(field)
+    if field not in payload or value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, type_message
+
+    value = value.strip()
+    if value == "":
+        return None, None
+    if max_length is not None and len(value) > max_length:
+        return None, length_message
+    return value, None
+
+
+def validate_required_integer(
+    payload: dict[str, Any],
+    field: str,
+    required_message: str,
+    type_message: str,
+    *,
+    min_value: int | None = None,
+    max_value: int | None = None,
+    range_message: str | None = None,
+) -> tuple[int | None, str | None]:
+    """必須整数を検査し、必要に応じて範囲も確認する。"""
+    value = payload.get(field)
+    if field not in payload or value is None or value == "":
+        return None, required_message
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None, type_message
+    if (
+        (min_value is not None and value < min_value)
+        or (max_value is not None and value > max_value)
+    ):
+        return None, range_message or type_message
+    return value, None
+
+
+def parse_time(value: Any) -> time | None:
+    """HH:MMの厳密な形式と時刻の範囲を確認して変換する。"""
+    if not isinstance(value, str):
+        return None
+    if re.fullmatch(r"[0-9]{2}:[0-9]{2}", value) is None:
+        return None
+
+    hour, minute = (int(part) for part in value.split(":"))
+    try:
+        return time(hour, minute)
+    except ValueError:
+        return None
+
+
+def format_time(value: time) -> str:
+    """時刻をAPIのHH:MM形式にする。"""
+    return value.strftime("%H:%M")
+
+
+def validate_required_time(
+    payload: dict[str, Any],
+    field: str,
+    required_message: str,
+    format_message: str,
+) -> tuple[time | None, str | None]:
+    """必須時刻を検査し、Pythonのtimeに変換する。"""
+    value = payload.get(field)
+    if field not in payload or value is None or value == "":
+        return None, required_message
+
+    parsed_value = parse_time(value)
+    if parsed_value is None:
+        return None, format_message
+    return parsed_value, None
 
 
 def parse_date(value: Any) -> date | None:
