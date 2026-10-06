@@ -2,6 +2,7 @@ import os
 
 from flask import Flask
 
+from app.api_helpers import register_api_error_handlers
 from app.config import Config
 from app.extensions import db, migrate
 
@@ -20,4 +21,10 @@ def create_app():
     from app.routes.main import main as main_blueprint
 
     app.register_blueprint(main_blueprint)
+
+    register_api_error_handlers(app)
+
+    from app.routes.semesters import semesters_bp
+
+    app.register_blueprint(semesters_bp)
     return app
