@@ -199,6 +199,10 @@ NAMING_CONVENTION = {
 - 更新はPATCHだけを使い、PUTは使わない
 - まだ決まっていない操作（例：学期のPATCH・DELETE）は、提供しない（405を返す）
 - 他のオリジンからのアクセスを許可する設定（CORS）は行わない
+- IDを受け取るURLは、`<int(max=MAX_ID):id>` の形で、IDの上限を指定する（上の表の `<int:id>` は、この上限つきの形を指す）
+  - 上限は、SQLiteのINTEGERの最大値 **`9223372036854775807`**。`app/api_helpers.py` の `MAX_ID` に定義する。これを超える数をDBに渡すとエラーになるため
+  - `MAX_ID` は、ルールの文字列を作るときに、数値として埋め込む（例：`f"/<int(max={MAX_ID}):semester_id>"`）
+  - 上限を超える値は、URLに一致しないものとして、404（`not_found`）になる（「404の使い分け」を参照）
 
 ### リクエストとレスポンス（JSON）
 - **Content-Type**：JSON本文を持つ `POST` と `PATCH` だけが、`Content-Type: application/json`（`charset` 付きも可）を必須とする。違う場合は400（`invalid_json`）。`GET` と `DELETE` には要求せず、本文も読まない
@@ -246,6 +250,11 @@ NAMING_CONVENTION = {
 | 他のデータとの関係で実行できない操作 | 409 | `conflict`（予約。必要になったとき使う） |
 | サーバー内部のエラー | 500 | `server_error` |
 
+### 404の使い分け
+- **URL自体が存在しない、IDの形式が不正（`abc` など）、IDが上限（`MAX_ID`）を超える**場合：共通のエラーハンドラーが、「URLが見つかりません」を返す
+- **URLは正しいが、対象のデータが存在しない**場合（形式が正しく、上限以内のID）：各リソースのrouteが、そのリソースのメッセージで `not_found` を返す（例：学期なら「学期が見つかりません」）
+- 共通のエラーハンドラーは、特定のリソースの情報を持たない
+
 ### エラーをJSONにする範囲
 - JSONで返すのは、**URLのパスが `/api` または `/api/` で始まるリクエストのエラーだけ**（404・405・400・409・500を含む）。判定はパスだけで行う
 - **通常のHTMLページのエラーは、変更しない。** `/` や、`/api` 以外の存在しないURLなどは、Flaskの標準のHTMLのままにする
@@ -261,6 +270,8 @@ NAMING_CONVENTION = {
   - JSON本文の受け取り（`Content-Type` の検査、オブジェクトであることの検査）
   - 項目の共通検査（未知の項目や `id` の拒否、必須・型、空文字の `null` 化）
   - 日付・時刻・日時の文字列と、Pythonの値との相互変換（厳密な形式の検査を含む）
+  - IDの上限の定数 `MAX_ID` を定義する
+- **DBの操作は行わない。** このモジュールが扱うのは、API共通の処理とIDの上限の定数だけ。データの取得・保存は、各route（`routes/<名前>.py`）が担当する
 - リソース固有の検証（例：学期名の形式）と、モデルをJSONにする変換は、各リソースのroute（`routes/<名前>.py`）に置く。モデルにAPI用の処理は持たせない
 
 ### 学期API（`/api/semesters`）
@@ -315,7 +326,7 @@ schedule_app/
 │   ├── __init__.py          # Flaskアプリの作成
 │   ├── config.py            # SQLiteのパスなどの設定
 │   ├── extensions.py        # db = SQLAlchemy(命名規則つきのMetaData)、migrate = Migrate() など
-│   ├── api_helpers.py       # API共通処理（エラー応答、エラーハンドラー、JSON本文の受け取り、項目の検査、日付の変換）
+│   ├── api_helpers.py       # API共通処理（エラー応答、エラーハンドラー、JSON本文の受け取り、項目の検査、日付の変換、IDの上限 MAX_ID）。DBの操作は行わない
 │   ├── models/
 │   │   ├── __init__.py      # 各モデルの読み込み
 │   │   ├── semester.py      # 学期
