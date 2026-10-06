@@ -70,6 +70,13 @@ Flask-Migrateは採用済みの技術として扱う。詳細は `docs/architect
 - 複雑な処理や、すぐには分からない判断にはコメントを入れる。コメント・docstringは日本語で書く
 - 凝った書き方より、読んで理解しやすい書き方を優先する（開発者が自分で読んで理解・修正できることが要件）
 - 新しいライブラリを追加する場合は、事前にKomaに確認する（費用がかかるものは追加しない）
+- JavaScript（`app/static/js/`）：
+  - ES modulesで書く。`import` は拡張子つきの相対パス（例：`"./api.js"`）。`export` は名前つきにし、`export default` は使わない
+  - `const`／`let` を使い、`var` は使わない。セミコロンを付ける。インデントは空白2つ。文字列は二重引用符。比較は `===`。非同期は `async`／`await`
+  - 使わない：`innerHTML`・`outerHTML`・`insertAdjacentHTML`・`document.write`・`eval`、HTMLの `onclick` などの属性、`style` 属性の操作
+  - ユーザーの入力やAPIの応答の文字を表示するときは、`textContent` を使う
+  - `fetch` は `api.js` の中だけで呼ぶ。Jinjaの値をJavaScriptに書かない
+  - コメントは、Pythonと同じく、日本語で書く
 
 ## 作業の進め方
 1. 指定された `docs/tasks/` のタスクファイルを読む

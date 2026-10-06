@@ -41,6 +41,8 @@
 | 学期の変更・削除時の扱い | 学期の期間を修正したときのEventの作り直し、学期を削除したときの授業・Event・Taskの扱い、授業の所属学期の付け替え | 授業モードの編集・削除を実装するタスクの前 |
 | 一覧表示の「今日以降」の範囲 | FullCalendarのリスト表示は期間を指定する方式のため、期間の上限（例：今日から3か月）が必要 | カレンダー表示を実装するタスクの前 |
 | FullCalendarの読み込み方法 | CDNから読み込むか、ファイルを `app/static/` に置くか（Bootstrapは、CDN方式で確定済み） | カレンダー表示を実装するタスクの前 |
+| 選択中の学期の共有方法 | 授業など他のモジュールが、授業モードで選択中の学期を知る方法（例：`semesters.js` が `CustomEvent` を発行する、関数を `export` する） | 授業の一覧・登録フォームを実装するタスクの前 |
+| フォーム・エラー表示・日付補助の共通化 | 2つ目のフォームを作るときに、エラー表示や日付の補助処理を、共通のファイル（例：`ui.js`・`dates.js`）へ切り出すか | 2つ目のフォームを実装するタスクの前 |
 | 自動テストの導入 | `pytest` などの導入（ライブラリの追加になるため、開発者の承認が必要）。それまでの確認は、Task MDに書かれた手順（`curl` など）で行う | 授業とEventの自動生成を実装するタスクの前 |
 
 ## データ設計
@@ -303,7 +305,7 @@ NAMING_CONVENTION = {
 | ファイル | 役割 |
 |---|---|
 | `main.js` | 入口。各モードの初期化を呼ぶ |
-| `api.js` | `fetch` の共通処理。JSONの送受信を行い、`204` のときは `null` を返す。エラーは `ApiError`（`status`・`code`・`message`・`fields`）として投げる。画面のコードは、APIを呼ぶときに必ずこれを使い、`fetch` を直接呼ばない |
+| `api.js` | `fetch` の共通処理。JSONの送受信を行い、`204` のときは `null` を返す。エラーは `ApiError`（`status`・`code`・`message`・`fields`）として投げる。画面のコードは、APIを呼ぶときに必ずこれを使い、`fetch` を直接呼ばない。仕様は、下の「`api.js` の仕様」 |
 | `semesters.js` | 授業モードの学期タブ、学期の登録フォーム |
 | `subjects.js` | 授業モードの授業の一覧・登録フォーム |
 | `calendar.js` | FullCalendarの設定、期限型の表示、直近の締切欄 |
@@ -316,6 +318,23 @@ NAMING_CONVENTION = {
 - HTMLの中に、自作のJavaScriptを書かない
 - Jinjaの値をJavaScriptに直接埋め込まない。データはAPIから取得する
 - ユーザーの入力を画面に表示するときは、`textContent` を使い、`innerHTML` に直接入れない
+- 各モードのファイルは、`initXxx()`（例：`initSemesters()`）を `export` し、`main.js` が呼ぶ。`export` は名前つきにし、`export default` は使わない
+- 画面の骨組み（ボタン・モーダル・表示領域）のHTMLは、`index.html`（または、そこから `{% include %}` する部分テンプレート）に書く。JavaScriptが行うのは、表示・非表示の切り替え（Bootstrapの `d-none`）と、文字（`textContent`）の変更。動的に作るのは、件数によって増える部分（一覧のタブや行など）だけで、`createElement` で作り、`replaceChildren()` で差し替える
+- DOMの `id` は、`<リソース名の単数形>-<部分>` の形にする（例：`semester-tabs`、`semester-form`）。入力欄のエラー表示の `id` は、`<項目>-error`（例：`semester-start-date-error`）
+- モーダルはBootstrapのものを使う。決まった操作で開くときは、HTMLの `data-bs-toggle="modal"` を使ってよい。値を設定して開くときなどは、JavaScriptから `window.bootstrap.Modal` で開く。閉じるときも、`window.bootstrap.Modal` を使う。`base.html` のBootstrapの `<script>` は通常のスクリプトで、先に読み込まれ、`type="module"` のスクリプトは、ページの解析後に実行されるため、`window.bootstrap` を使える。モーダルのHTMLは、`<main>` や `.tab-pane` の外（ページの最上位）に置く
+- 日付の補助処理（今日の日付の文字列など）は、必要としたモジュールの中に置く。2つ目のモジュールで必要になったときに、共通のファイルに切り出す。今日の日付は、ブラウザのローカルの日付から作り（`toISOString()` は使わない）、`YYYY-MM-DD` の文字列のまま比較する
+- 画面のエラー表示：`ApiError` の `fields` があるときは、該当する項目の下に表示する。それ以外のエラーは、`message` を、フォームの上部や画面に表示する
+
+### `api.js` の仕様
+- `export class ApiError extends Error`：`status`（HTTPのステータス。応答がないときは `0`）、`code`（文字列）、`message`（画面に出せる日本語）、`fields`（オブジェクトまたは `null`）を持つ
+- `export async function apiRequest(method, url, body)`
+  - `body` が `undefined` でないときだけ、`Content-Type: application/json` を付けて、`JSON.stringify(body)` を送る（`GET`・`DELETE` には付けない。サーバーも、これらには要求しない）
+  - 成功（2xx）：`204` なら `null`、それ以外は、JSONを解析した値を返す
+  - 失敗：応答の `{"error": {"code", "message", "fields"}}` から `ApiError` を作って投げる
+  - サーバーに接続できない場合（`fetch` が例外）：`status: 0`、`code: "network_error"`、`message: "サーバーに接続できませんでした。時間をおいて、もう一度お試しください"` の `ApiError` を投げる
+  - 応答がJSONとして読めない、または `{"error": {...}}` の形でない場合：`code: "invalid_response"`、`message: "サーバーから想定外の応答がありました。時間をおいて、もう一度お試しください"` の `ApiError` を投げる（`status` は、実際の値）
+- `network_error` と `invalid_response` は、サーバーが返すコードではなく、`api.js` が作る（「エラー」の表には含めない）
+- 再試行・キャッシュ・ログは持たない
 
 ## ディレクトリ構成
 以下は目標の構成。`.git/`・`.gitignore`・`.venv/`・`.vscode/`・`README.md` は作成済みで、変更しない。
