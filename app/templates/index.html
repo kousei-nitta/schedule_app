@@ -7,7 +7,36 @@
       <p>カレンダー（準備中）</p>
     </section>
     <section class="tab-pane fade" id="subjects-pane" role="tabpanel" aria-labelledby="subjects-tab" tabindex="0">
-      <p>授業（準備中）</p>
+      <div id="semester-loading" class="text-muted">読み込み中…</div>
+
+      <div id="semester-load-error" class="alert alert-danger d-none" role="alert">
+        <p id="semester-load-error-message" class="mb-2"></p>
+        <button type="button" id="semester-retry-button" class="btn btn-outline-danger btn-sm">再読み込み</button>
+      </div>
+
+      <div id="semester-empty" class="text-center py-5 d-none">
+        <p>学期がまだ登録されていません。最初の学期を登録してください</p>
+        <button type="button" id="semester-empty-open-button" class="btn btn-primary"
+                data-bs-toggle="modal" data-bs-target="#semester-modal">最初の学期を登録する</button>
+      </div>
+
+      <div id="semester-content" class="d-none">
+        <div id="semester-banner" class="alert alert-info d-flex justify-content-between align-items-center d-none" role="alert">
+          <span>新しい学期を登録しますか</span>
+          <button type="button" id="semester-banner-open-button" class="btn btn-primary btn-sm"
+                  data-bs-toggle="modal" data-bs-target="#semester-modal">登録する</button>
+        </div>
+        <div class="d-flex align-items-end gap-2 mb-3">
+          <ul id="semester-tabs" class="nav nav-tabs flex-nowrap overflow-x-auto flex-grow-1" role="tablist"></ul>
+          <button type="button" id="semester-open-button" class="btn btn-outline-primary btn-sm text-nowrap"
+                  data-bs-toggle="modal" data-bs-target="#semester-modal">新しい学期を登録する</button>
+        </div>
+        <div id="semester-detail" role="tabpanel">
+          <h2 id="semester-detail-name" class="h5"></h2>
+          <p id="semester-detail-period" class="text-muted"></p>
+          <p class="text-muted">この学期の授業は、まだ登録できません（準備中）</p>
+        </div>
+      </div>
     </section>
     <section class="tab-pane fade" id="tasks-pane" role="tabpanel" aria-labelledby="tasks-tab" tabindex="0">
       <p>課題・タスク（準備中）</p>
@@ -20,4 +49,54 @@
   <button class="nav-link" id="subjects-tab" data-bs-toggle="pill" data-bs-target="#subjects-pane" type="button" role="tab" aria-controls="subjects-pane" aria-selected="false">授業</button>
   <button class="nav-link" id="tasks-tab" data-bs-toggle="pill" data-bs-target="#tasks-pane" type="button" role="tab" aria-controls="tasks-pane" aria-selected="false">課題・タスク</button>
 </nav>
+
+<div class="modal fade" id="semester-modal" tabindex="-1" aria-labelledby="semester-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="semester-form">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="semester-modal-title">新しい学期を登録する</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <div id="semester-form-error" class="alert alert-danger d-none" role="alert"></div>
+          <div class="mb-3">
+            <div class="row g-2">
+              <div class="col-6">
+                <label for="semester-year" class="form-label">年度</label>
+                <input type="number" id="semester-year" class="form-control" required>
+              </div>
+              <div class="col-6">
+                <label for="semester-term" class="form-label">種別</label>
+                <select id="semester-term" class="form-select" required>
+                  <option value="前期">前期</option>
+                  <option value="後期">後期</option>
+                </select>
+              </div>
+            </div>
+            <div id="semester-name-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="semester-start-date" class="form-label">開始日</label>
+            <input type="date" id="semester-start-date" class="form-control" required>
+            <div id="semester-start-date-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="semester-end-date" class="form-label">終了日</label>
+            <input type="date" id="semester-end-date" class="form-control" required>
+            <div id="semester-end-date-error" class="text-danger small mt-1"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" id="semester-submit-button" class="btn btn-primary">登録する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
 {% endblock %}
