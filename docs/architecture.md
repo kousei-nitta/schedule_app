@@ -15,6 +15,7 @@
 | カレンダー描画 | FullCalendar | MIT・無料範囲の週／月／一覧表示のみ使用。リソース／タイムライン表示などの有料機能は使わない |
 | CSS（UI部品） | Bootstrap 5.3.8 | CDN（jsDelivr）から、バージョンを固定して読み込む（「Bootstrapの読み込み」を参照）。タブ（モード切り替え）、モーダル（詳細パネル）、バッジ（カテゴリ表示）などに利用 |
 | 認証 | なし | ログイン機能は実装しない |
+| 自動テスト | pytest | APIのテストに使う。配置・DB・実行方法は「自動テスト（pytest）」を参照 |
 | 起動 | `run.py` | 開発用サーバーを `127.0.0.1:5001`（`debug=True`）で起動する。5001番を使うのは、macOSではAirPlayレシーバーが5000番を使うことがあるため |
 
 制約：費用をかけない（大学の授業の一環のため）。
@@ -43,7 +44,6 @@
 | FullCalendarの読み込み方法 | CDNから読み込むか、ファイルを `app/static/` に置くか（Bootstrapは、CDN方式で確定済み） | カレンダー表示を実装するタスクの前 |
 | 選択中の学期の共有方法 | 授業など他のモジュールが、授業モードで選択中の学期を知る方法（例：`semesters.js` が `CustomEvent` を発行する、関数を `export` する） | 授業の一覧・登録フォームを実装するタスクの前 |
 | フォーム・エラー表示・日付補助の共通化 | 2つ目のフォームを作るときに、エラー表示や日付の補助処理を、共通のファイル（例：`ui.js`・`dates.js`）へ切り出すか | 2つ目のフォームを実装するタスクの前 |
-| 自動テストの導入 | `pytest` などの導入（ライブラリの追加になるため、開発者の承認が必要）。それまでの確認は、Task MDに書かれた手順（`curl` など）で行う | 授業とEventの自動生成を実装するタスクの前 |
 
 ## データ設計
 テーブルは4つ（Semester・Subject・Event・Task）。関係は **Semester → Subject → Event / Task**。
@@ -141,6 +141,7 @@
 - 自動生成されたmigrationファイルはレビュー対象。内容を確認し、Komaの承認を得てから適用する。
 - `migrations/` はGit管理対象。`instance/app.db` はGit管理対象外。
 - 制約には一貫した命名規則を付ける（下記「制約の命名規則」）。
+- 自動テスト用のDBも、`db.create_all()` ではなく、migration（`upgrade`）で作る（「自動テスト（pytest）」を参照）。
 - SQLiteはカラムの変更・削除などの `ALTER TABLE` に制約があるため、Alembicのbatchモード（`render_as_batch=True`）を明示的に有効にする。
 
 ### 制約の命名規則（naming convention）
@@ -198,6 +199,8 @@ NAMING_CONVENTION = {
 - リソース名は小文字の複数形（`semesters`・`subjects`・`events`・`tasks`）。動詞はURLに入れない（例：課題の完了は `PATCH /api/tasks/<id>` で `{"is_completed": true}` を送る）
 - 末尾に `/` を付けたURLは使わない（`/api/semesters/` は404）
 - 絞り込みはクエリで指定する（例：`/api/subjects?semester_id=1`）
+  - クエリの値が不正な場合（整数であるべき値が整数でない、など）は、400（`validation_error`）。`fields` にクエリ名を入れる
+  - リソースごとに定めていない未知のクエリは、無視する
 - 更新はPATCHだけを使い、PUTは使わない
 - まだ決まっていない操作（例：学期のPATCH・DELETE）は、提供しない（405を返す）
 - 他のオリジンからのアクセスを許可する設定（CORS）は行わない
@@ -218,6 +221,12 @@ NAMING_CONVENTION = {
 - リクエストで受け付けるのは、リソースごとに定めた項目だけ。`id` などの読み取り専用の項目や、未知の項目が含まれていたら、400（`validation_error`）
 - 任意項目の空文字 `""` は、`null` として扱う。必須項目の空文字は、必須のエラー
 - 値の型が違う場合（文字列の項目に数値、など）も、400（`validation_error`）
+- **文字列**
+  - 自由入力の文字列（科目名・教室・メモ・タイトルなど）は、前後の空白（全角を含む）を取り除いてから、検査・保存する。必須項目は、取り除いた結果が空なら、必須のエラー。任意項目は、空なら `null`
+  - 形式を厳密に検査する項目（学期名・日付・時刻）は、取り除かず、そのまま検査する（前後の空白は、形式の誤り）
+  - 長さの上限は、取り除いたあとの文字数で数える。上限は、DBの `String(n)` に合わせる
+- **整数**：JSONの整数だけを受け付ける。真偽値（`true`／`false`）・小数・文字列は、型の誤り
+- **ほかのリソースのIDを参照する項目**（例：`semester_id`）：整数で、1〜`MAX_ID`。範囲外の場合と、該当するデータがない場合は、どちらも、その項目の誤りとして、400（`validation_error`）にする（404にしない。404は、URLの先のデータがない場合）。DBへの問い合わせは、範囲内のときだけ行う
 - 一覧の並びは、リソースごとに定める
 
 ### 日付・時刻・日時
@@ -230,6 +239,8 @@ NAMING_CONVENTION = {
 | 曜日 | 整数。0=月曜〜6=日曜（DBと同じ） | `0` |
 
 - 形式は厳密に検査する（0埋めあり。別の書式は受け付けない）。実在しない日付（`2026-02-30` など）は、400（`validation_error`）。Python 3.11の `fromisoformat` は他の書式も受け付けるため、形式の検査は別に行う
+- 時刻は、`00:00`〜`23:59` の実在する時刻だけを受け付ける。`24:00`・`9:00`・`09:00:00`・`0900`・全角の数字などは、400（`validation_error`）。Pythonの `time.fromisoformat` は他の書式も受け付けるため、日付と同じく、形式の検査を先に別に行う
+- 時刻に、業務上の制限（授業のプルダウンの9〜19時・1時間刻みなど）を、APIでは設けない。そのような制限は、画面（UI）の側で行う
 - 曜日の変換（JavaScriptやFullCalendarは0=日曜）は、画面側のJavaScriptで行う
 
 ### エラー
@@ -273,6 +284,10 @@ NAMING_CONVENTION = {
   - 項目の共通検査（未知の項目や `id` の拒否、必須・型、空文字の `null` 化）
   - 日付・時刻・日時の文字列と、Pythonの値との相互変換（厳密な形式の検査を含む）
   - IDの上限の定数 `MAX_ID` を定義する
+  - 文字列・整数の項目単位の検証（必須／任意、最大長、前後の空白の除去、整数の範囲。真偽値は整数として扱わない）
+  - 時刻の変換と検証（`parse_time`・`format_time`・必須の時刻の項目単位の検証）
+- 項目単位の検証関数は、`(値, エラーメッセージ)` の組を返す（正常なら、エラーメッセージは `None`）。メッセージの文言は、呼び出し側（route）が渡す
+- 共通関数の追加・拡張で、すでにあるAPIの挙動を変えない。挙動が変わる処理（前後の空白の除去など）は、引数で指定したときだけ行う
 - **DBの操作は行わない。** このモジュールが扱うのは、API共通の処理とIDの上限の定数だけ。データの取得・保存は、各route（`routes/<名前>.py`）が担当する
 - リソース固有の検証（例：学期名の形式）と、モデルをJSONにする変換は、各リソースのroute（`routes/<名前>.py`）に置く。モデルにAPI用の処理は持たせない
 
@@ -296,6 +311,41 @@ NAMING_CONVENTION = {
 - `start_date`・`end_date`：文字列。`YYYY-MM-DD` の実在する日付
 - `end_date` は `start_date` より後。違反した場合は `end_date` のエラーにする
 - 名前の年度と期間の整合性、ほかの学期との期間の重なりは、検証しない
+
+### 授業API（`/api/subjects`）
+
+| 操作 | 提供 | 内容 |
+|---|---|---|
+| `GET /api/subjects` | 提供する | 配列。並びは、`weekday`・`start_time`・`id` の昇順。クエリ `semester_id` で絞り込める（任意） |
+| `GET /api/subjects/<id>` | 提供する | 存在しなければ404（「授業が見つかりません」） |
+| `POST /api/subjects` | 提供する | 201。授業の行だけを作る |
+| `PATCH`・`DELETE` | 提供しない（405） | 授業の編集・削除は、Eventの自動生成と合わせて実装する |
+
+- 現時点の `POST` は、授業の行だけを作る。授業の登録時のEventの自動生成は、別途実装する（詳細は、実装の前に決める）
+- 授業は、同じ科目名・同じ時間のものも登録できる（週2回の授業は、同じ科目名で2回登録するため）。重複の検知はしない
+
+レスポンスの例：
+
+```json
+{"id": 1, "semester_id": 1, "subject_name": "プログラミング基礎", "room": "3号館201", "weekday": 0, "start_time": "09:00", "end_time": "10:00", "notes": null}
+```
+
+項目：`id`・`semester_id`・`subject_name`・`room`・`weekday`・`start_time`・`end_time`・`notes`（`room`・`notes` は、値がなければ `null`）。
+
+`POST` の本文は、`semester_id`・`subject_name`・`weekday`・`start_time`・`end_time`（必須）と、`room`・`notes`（任意）。検証（1つでも満たさなければ、400（`validation_error`）。誤りのある項目は、すべて `fields` に項目名で入れる）：
+- `semester_id`：必須。整数（真偽値は不可）。1〜`MAX_ID`。その学期が存在すること。範囲外・存在しない場合は、`semester_id` のエラー（404にしない）
+- `subject_name`：必須。文字列。前後の空白を取り除いて、1〜100字
+- `room`：任意。文字列。前後の空白を取り除いて、100字以内。空なら `null`
+- `weekday`：必須。整数（真偽値・小数は不可）。0〜6（0=月曜〜6=日曜）
+- `start_time`・`end_time`：必須。`HH:MM`（`00:00`〜`23:59`）。9〜19時・1時間刻みは、強制しない
+- `end_time` は `start_time` より後（同じ時刻も不可）。違反した場合は `end_time` のエラー
+- `notes`：任意。文字列。前後の空白を取り除いて、空なら `null`。長さの上限は設けない
+- `id` を含む、定められていない項目は、その項目名で `fields` に入れる
+
+`GET /api/subjects` のクエリ `semester_id`（任意）：
+- 指定がなければ、すべての授業を返す
+- 整数でない値（空文字・符号・小数・全角の数字を含む）は、400（`validation_error`、`fields.semester_id`）。複数回の指定も、400
+- 整数でも、範囲（1〜`MAX_ID`）の外の値や、存在しない学期のIDは、404にせず、空の配列を返す（絞り込みの結果が0件、という扱い）
 
 ## JavaScriptの構成（ES modules）
 - すべて `app/static/js/` に置き、`<script type="module">` で読み込む
@@ -336,13 +386,50 @@ NAMING_CONVENTION = {
 - `network_error` と `invalid_response` は、サーバーが返すコードではなく、`api.js` が作る（「エラー」の表には含めない）
 - 再試行・キャッシュ・ログは持たない
 
+## 自動テスト（pytest）
+**pytest** を採用する。APIの入力検証は項目が多く、`curl` での確認は手間がかかり、見落としも起きやすいため。
+
+### 対象と方針
+- 対象は、PythonのAPI（Flaskの `test_client` で呼ぶ）。JavaScriptの自動テストは、導入しない（画面は、ブラウザでの確認で行う）
+- APIを実装するタスクでは、そのAPIのテストを、同じタスクで作る。完了の条件に、テストの合格を含める
+- `curl` での確認は、補助として、実際に起動したサーバーの読み取りの確認に使う
+- テストの期待値は、設計資料から決める。テストを通すために、期待値を設計資料に反して変えない
+
+### 配置と実行
+- テストは `tests/` に置く。ファイル名は `test_*.py`。共通の準備は `tests/conftest.py`
+- 設定は、リポジトリ直下の `pytest.ini`（テストの場所と、`import app` のための `pythonpath`）
+- 実行：リポジトリのルートで、`.venv` を有効にして、`python -m pytest`。1つのファイルだけ：`python -m pytest tests/test_subjects_api.py`
+- `pytest` は、`requirements.txt` に、バージョンを固定して追加する（依存するライブラリも、ファイルの形式に合わせる）
+
+### アプリの生成（テスト用の設定）
+- `create_app(test_config=None)`。`test_config` がなければ、これまでどおり `Config` を使う
+- `test_config`（辞書）を渡すと、`Config` の読み込みのあと、`db.init_app(app)` の**前**に、その内容で設定を上書きする
+- `test_config` を渡す場合は、`SQLALCHEMY_DATABASE_URI` の指定を必須とする。ない場合は、`ValueError`（開発用DBを、うっかり使わないため）。このとき、`instance/` ディレクトリの作成も行わない
+
+### テスト用DB
+- 場所：pytestが用意する一時ディレクトリ（`tmp_path_factory`・`tmp_path`）の中だけ。リポジトリの中や、`instance/` には作らない
+- 作り方：**本番と同じmigration（`upgrade`）**。セッションの最初に1回だけ、一時ディレクトリに「雛形のDB」を作り、`flask_migrate.upgrade()`（`directory` は、リポジトリの `migrations/` の絶対パス）で、最新の状態にする。これで、migrationの経路も、毎回確認される
+- 各テストの前に、雛形のDBを、テストごとの一時ファイルへコピーして使う（テスト間でデータが混ざらない。リセットは、新しいコピーに替わることで行う）
+- テストの中のデータは、各テストが自分で作る（ORMで直接作るか、APIで作る）
+
+### 開発用DB（`instance/app.db`）を触らない仕組み
+1. テストは、`create_app({...})` に、一時ディレクトリのDBのURIを渡してアプリを作る。`create_app()` を、引数なしで呼ばない
+2. `test_config` に `SQLALCHEMY_DATABASE_URI` がなければ、`create_app` が `ValueError` にする
+3. `conftest.py` のfixtureが、DBのパスが、pytestの一時ディレクトリの中であることを確認する（外なら、テストを失敗させる）
+4. セッション全体で、`instance/app.db` の内容（ハッシュ）が、テストの前後で変わっていないことを確認する（変わっていれば、失敗させる）
+
+### テストの書き方
+- APIは、`app.test_client()` で呼ぶ。JSONの本文は `client.post(url, json=...)`。JSONでない本文や、`Content-Type` の違いは、`data=` と `content_type=` で指定する
+- 500の確認は、テストの中で、テスト専用のルートを `app.add_url_rule` で足し、`PROPAGATE_EXCEPTIONS` を `False` にして行う。テスト専用のコードを、`app/` に入れない
+- 各テストは独立させる（実行順に依存しない）。1つのテストで確認することは、1つにする
+
 ## ディレクトリ構成
 以下は目標の構成。`.git/`・`.gitignore`・`.venv/`・`.vscode/`・`README.md` は作成済みで、変更しない。
 
 ```
 schedule_app/
 ├── app/
-│   ├── __init__.py          # Flaskアプリの作成
+│   ├── __init__.py          # Flaskアプリの作成（`create_app(test_config=None)`）
 │   ├── config.py            # SQLiteのパスなどの設定
 │   ├── extensions.py        # db = SQLAlchemy(命名規則つきのMetaData)、migrate = Migrate() など
 │   ├── api_helpers.py       # API共通処理（エラー応答、エラーハンドラー、JSON本文の受け取り、項目の検査、日付の変換、IDの上限 MAX_ID）。DBの操作は行わない
@@ -376,7 +463,12 @@ schedule_app/
 ├── instance/app.db          # SQLiteファイル。Git管理対象外
 ├── docs/                    # 設計資料（正本）とタスク資料
 ├── .github/copilot-instructions.md
-├── tests/                   # 実装後、必要に応じて追加
+├── tests/                   # pytestのテスト（「自動テスト（pytest）」を参照）
+│   ├── conftest.py          # 共通のfixture（テスト用DB・アプリ・クライアント・開発用DBの保護）
+│   ├── test_setup.py        # テスト基盤そのものの確認
+│   ├── test_api_helpers.py  # api_helpers.py の共通関数の単体テスト
+│   └── test_<リソース名>_api.py  # APIのテスト（リソースごと）
+├── pytest.ini               # pytestの設定
 ├── requirements.txt
 ├── README.md                # 作成済み
 └── run.py                   # 起動スクリプト（127.0.0.1:5001）
