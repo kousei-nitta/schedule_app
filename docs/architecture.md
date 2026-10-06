@@ -11,7 +11,7 @@
 | ORM | Flask-SQLAlchemy | |
 | DBスキーマ変更 | Flask-Migrate（内部でAlembicを使用） | モデルの変更をmigrationファイルとして記録し、既存データを保ったままテーブルを更新する。方式の詳細は「DBスキーマ変更の方式」を参照 |
 | テンプレート | Jinja2（Flask標準） | |
-| フロントエンドJS | バニラJavaScript | fetch APIでFlaskの小さなAPIエンドポイント（JSONを返す）を呼ぶ |
+| フロントエンドJS | バニラJavaScript（ES modules） | `fetch` でFlaskのAPIを呼ぶ。構成と規則は「JavaScriptの構成」、APIの規則は「API共通ルール」を参照 |
 | カレンダー描画 | FullCalendar | MIT・無料範囲の週／月／一覧表示のみ使用。リソース／タイムライン表示などの有料機能は使わない |
 | CSS（UI部品） | Bootstrap 5.3.8 | CDN（jsDelivr）から、バージョンを固定して読み込む（「Bootstrapの読み込み」を参照）。タブ（モード切り替え）、モーダル（詳細パネル）、バッジ（カテゴリ表示）などに利用 |
 | 認証 | なし | ログイン機能は実装しない |
@@ -31,18 +31,17 @@
 ```
 
 ## 未決定事項
-現時点で決まっていない事項の一覧。**実装側（Copilot）は、これらを自分の判断で決めない。** 該当する実装に入る前に、開発者（Koma）が決定し、このファイルを更新する。いずれもTask 001の実装には影響しない。
+現時点で決まっていない事項の一覧。**実装側（Copilot）は、これらを自分の判断で決めない。** 該当する実装に入る前に、開発者（Koma）が決定し、このファイルを更新する。決めるタイミングは、各項目に書いたとおり。
 
 | 項目 | 内容 | 決めるタイミング |
 |---|---|---|
 | categoryの保存値 | `Event.category`・`Task.category` に保存する値（日本語の文字列そのままか、コード値か）。入力値の制限（バリデーション）の方式も含む | 登録・表示を実装するタスクの前 |
 | 日付をまたぐアルバイト | 例：22:00〜翌2:00。Eventは日付1つ＋開始／終了時刻のため、終了が開始より前の入力を許すか、日をまたぐ予定をどう表すか | アルバイトの登録を実装するタスクの前 |
 | 授業削除時のEvent・Task削除方式 | 「授業を削除したら、紐づくEvent・Taskもまとめて削除する」という挙動は決定済み。未決定なのは**実装方式**（ORMの `cascade`、削除処理を明示的に書く、DB側の `ondelete` など）。注意点：SQLiteは既定では外部キー制約を強制しない（`PRAGMA foreign_keys`）。`relationship` に `cascade` を指定せず親を削除すると、子の外部キーがNULLになって残る場合がある | 削除を実装するタスクの前 |
-| 学期期間の初期値の決定方法 | 学期を作るとき、「今日の日付に近い学期」の期間を初期値として出す。その値の出どころ（固定の値か、入力済みの学期から推測するか、など） | 授業モードを実装するタスクの前 |
-| 学期名の決め方 | `Semester.name` を開発者が入力するのか、「前期／後期」から選ぶのか、期間から自動で付けるのか | 授業モードを実装するタスクの前 |
 | 学期の変更・削除時の扱い | 学期の期間を修正したときのEventの作り直し、学期を削除したときの授業・Event・Taskの扱い、授業の所属学期の付け替え | 授業モードの編集・削除を実装するタスクの前 |
 | 一覧表示の「今日以降」の範囲 | FullCalendarのリスト表示は期間を指定する方式のため、期間の上限（例：今日から3か月）が必要 | カレンダー表示を実装するタスクの前 |
 | FullCalendarの読み込み方法 | CDNから読み込むか、ファイルを `app/static/` に置くか（Bootstrapは、CDN方式で確定済み） | カレンダー表示を実装するタスクの前 |
+| 自動テストの導入 | `pytest` などの導入（ライブラリの追加になるため、開発者の承認が必要）。それまでの確認は、Task MDに書かれた手順（`curl` など）で行う | 授業とEventの自動生成を実装するタスクの前 |
 
 ## データ設計
 テーブルは4つ（Semester・Subject・Event・Task）。関係は **Semester → Subject → Event / Task**。
@@ -61,7 +60,7 @@
 | フィールド | 型 | NULL | 内容 |
 |---|---|---|---|
 | id | Integer（主キー） | 不可 | |
-| name | String(50) | 不可 | 学期名（例：前期） |
+| name | String(50) | 不可 | 学期名。形式は「2026年度 前期」（「学期API」を参照）。DBには文字列だけを保存し、年度・種別の別カラムは持たない |
 | start_date | Date | 不可 | 学期の開始日 |
 | end_date | Date | 不可 | 学期の終了日 |
 
@@ -181,6 +180,132 @@ NAMING_CONVENTION = {
 
 流れは「モデルを変更 → `migrate`（ファイル生成） → 内容を確認 → `upgrade`（DBに適用）」。
 
+## API共通ルール
+画面のJavaScriptからFlaskを呼ぶAPIの共通ルール。今後のすべてのリソース（学期・授業・Event・Task）に適用する。
+
+### URLとメソッド
+
+| 操作 | メソッド | URL | 成功時 |
+|---|---|---|---|
+| 一覧 | GET | `/api/<複数形>` | 200（配列） |
+| 1件取得 | GET | `/api/<複数形>/<int:id>` | 200（オブジェクト） |
+| 作成 | POST | `/api/<複数形>` | 201（作成したオブジェクト） |
+| 一部の項目を更新 | PATCH | `/api/<複数形>/<int:id>` | 200（更新後のオブジェクト） |
+| 削除 | DELETE | `/api/<複数形>/<int:id>` | 204（本文なし） |
+
+- リソース名は小文字の複数形（`semesters`・`subjects`・`events`・`tasks`）。動詞はURLに入れない（例：課題の完了は `PATCH /api/tasks/<id>` で `{"is_completed": true}` を送る）
+- 末尾に `/` を付けたURLは使わない（`/api/semesters/` は404）
+- 絞り込みはクエリで指定する（例：`/api/subjects?semester_id=1`）
+- 更新はPATCHだけを使い、PUTは使わない
+- まだ決まっていない操作（例：学期のPATCH・DELETE）は、提供しない（405を返す）
+- 他のオリジンからのアクセスを許可する設定（CORS）は行わない
+
+### リクエストとレスポンス（JSON）
+- **Content-Type**：JSON本文を持つ `POST` と `PATCH` だけが、`Content-Type: application/json`（`charset` 付きも可）を必須とする。違う場合は400（`invalid_json`）。`GET` と `DELETE` には要求せず、本文も読まない
+- `POST`・`PATCH` の本文は、JSONの**オブジェクト**でなければならない
+  - JSONとして読めない場合は、400（`invalid_json`）
+  - JSONとして読めても、オブジェクトでない場合（配列・文字列・数値・`true`/`false`・`null`）は、400（`validation_error`）
+  - `PATCH` で項目が1つもない場合（`{}`）も、400（`validation_error`）
+- 項目名は `snake_case` で、DBのカラム名と同じ
+- 包み（`{"data": ...}` など）は使わず、リソースをそのまま返す。一覧は配列
+- レスポンスには、そのリソースの全項目を常に含める（値がなければ `null`）
+- リクエストで受け付けるのは、リソースごとに定めた項目だけ。`id` などの読み取り専用の項目や、未知の項目が含まれていたら、400（`validation_error`）
+- 任意項目の空文字 `""` は、`null` として扱う。必須項目の空文字は、必須のエラー
+- 値の型が違う場合（文字列の項目に数値、など）も、400（`validation_error`）
+- 一覧の並びは、リソースごとに定める
+
+### 日付・時刻・日時
+
+| 種類 | 形式 | 例 |
+|---|---|---|
+| 日付 | `YYYY-MM-DD` | `2026-09-21` |
+| 時刻 | `HH:MM`（24時間、秒なし） | `09:00` |
+| 日時 | `YYYY-MM-DDTHH:MM`（タイムゾーンなし） | `2026-10-12T23:59` |
+| 曜日 | 整数。0=月曜〜6=日曜（DBと同じ） | `0` |
+
+- 形式は厳密に検査する（0埋めあり。別の書式は受け付けない）。実在しない日付（`2026-02-30` など）は、400（`validation_error`）。Python 3.11の `fromisoformat` は他の書式も受け付けるため、形式の検査は別に行う
+- 曜日の変換（JavaScriptやFullCalendarは0=日曜）は、画面側のJavaScriptで行う
+
+### エラー
+形式：
+
+```json
+{"error": {"code": "validation_error",
+           "message": "入力内容に誤りがあります",
+           "fields": {"end_date": "終了日は開始日より後にしてください"}}}
+```
+
+`code` は英語の固定値、`message` は画面に出せる日本語。`fields` は `validation_error` のときに、項目ごとの誤りがあれば付き、項目名とメッセージの組になる。本文がオブジェクトでない場合のように、特定の項目に結びつかない誤りでは付けない。
+
+| 状況 | ステータス | code |
+|---|---|---|
+| JSONが読めない、`Content-Type` が違う | 400 | `invalid_json` |
+| 入力の誤り（本文がオブジェクトでない・必須漏れ・形式・型・範囲・重複・未知の項目） | 400 | `validation_error` |
+| 存在しないIDやURL | 404 | `not_found` |
+| 許可されていないメソッド | 405 | `method_not_allowed` |
+| 他のデータとの関係で実行できない操作 | 409 | `conflict`（予約。必要になったとき使う） |
+| サーバー内部のエラー | 500 | `server_error` |
+
+### エラーをJSONにする範囲
+- JSONで返すのは、**URLのパスが `/api` または `/api/` で始まるリクエストのエラーだけ**（404・405・400・409・500を含む）。判定はパスだけで行う
+- **通常のHTMLページのエラーは、変更しない。** `/` や、`/api` 以外の存在しないURLなどは、Flaskの標準のHTMLのままにする
+- **想定内のエラー**（400・404・405・409）は、`debug=True` でも、常にJSONで返す
+- **予期しない例外**（コードの不具合など）は、`debug=False`（通常の動作）では、500のJSONで返す
+- **開発中の注意**：`run.py` は `debug=True` で起動するため、予期しない例外が起きると、500のJSONではなく、Flaskのデバッガ画面（HTML）が表示されることがある。これは開発用の動作で、APIのエラー仕様（JSON）を変えるものではない。500のJSON化は仕様として定めるが、開発中の確認の必須項目にはしない
+
+### API共通処理の補助モジュール：`app/api_helpers.py`
+- 配置：`app/` 直下（`extensions.py`・`config.py` と同じ階層）。各routeから使う共通部品で、routeではない
+- 責務：
+  - エラーのJSONレスポンス（上記の形式とステータス）を作る
+  - `/api` 以下のエラーをJSONにするエラーハンドラーの登録（`create_app()` から呼ぶ）
+  - JSON本文の受け取り（`Content-Type` の検査、オブジェクトであることの検査）
+  - 項目の共通検査（未知の項目や `id` の拒否、必須・型、空文字の `null` 化）
+  - 日付・時刻・日時の文字列と、Pythonの値との相互変換（厳密な形式の検査を含む）
+- リソース固有の検証（例：学期名の形式）と、モデルをJSONにする変換は、各リソースのroute（`routes/<名前>.py`）に置く。モデルにAPI用の処理は持たせない
+
+### 学期API（`/api/semesters`）
+
+| 操作 | 提供 | 内容 |
+|---|---|---|
+| `GET /api/semesters` | 提供する | 開始日の新しい順（開始日が同じなら、idの新しい順）の配列 |
+| `GET /api/semesters/<id>` | 提供する | 存在しなければ404 |
+| `POST /api/semesters` | 提供する | 201。本文は `name`・`start_date`・`end_date`（すべて必須） |
+| `PATCH`・`DELETE` | 提供しない（405） | 「学期の変更・削除時の扱い」が決まるまで |
+
+レスポンスの例：
+
+```json
+{"id": 1, "name": "2026年度 後期", "start_date": "2026-09-21", "end_date": "2026-12-27"}
+```
+
+`POST` の検証（1つでも満たさなければ、400（`validation_error`）。`fields` は項目名で返す）：
+- `name`：文字列。空でない。50字以内。**`[0-9]{4}年度 (前期|後期)` に全体一致**する（半角数字4桁、「年度」、半角スペース1つ、「前期」か「後期」。前後に余分な文字・空白・改行を許さない）。同じ `name` がすでにある場合は不可（完全一致で比較）
+- `start_date`・`end_date`：文字列。`YYYY-MM-DD` の実在する日付
+- `end_date` は `start_date` より後。違反した場合は `end_date` のエラーにする
+- 名前の年度と期間の整合性、ほかの学期との期間の重なりは、検証しない
+
+## JavaScriptの構成（ES modules）
+- すべて `app/static/js/` に置き、`<script type="module">` で読み込む
+- 入口は `main.js` の1つだけ。`base.html` に `{% block scripts %}` を用意し、`index.html` で、その中に次の1行を書く。他のファイルは `main.js` から `import` するので、ファイルを足してもHTMLの変更は不要
+  `<script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>`
+
+| ファイル | 役割 |
+|---|---|
+| `main.js` | 入口。各モードの初期化を呼ぶ |
+| `api.js` | `fetch` の共通処理。JSONの送受信を行い、`204` のときは `null` を返す。エラーは `ApiError`（`status`・`code`・`message`・`fields`）として投げる。画面のコードは、APIを呼ぶときに必ずこれを使い、`fetch` を直接呼ばない |
+| `semesters.js` | 授業モードの学期タブ、学期の登録フォーム |
+| `subjects.js` | 授業モードの授業の一覧・登録フォーム |
+| `calendar.js` | FullCalendarの設定、期限型の表示、直近の締切欄 |
+| `tasks.js` | 課題モードの一覧・完了切替 |
+
+必要になったタスクで、1つずつ作る。
+
+規則：
+- 1リソース＝ `routes/<名前>.py` と `static/js/<名前>.js` を対応させる
+- HTMLの中に、自作のJavaScriptを書かない
+- Jinjaの値をJavaScriptに直接埋め込まない。データはAPIから取得する
+- ユーザーの入力を画面に表示するときは、`textContent` を使い、`innerHTML` に直接入れない
+
 ## ディレクトリ構成
 以下は目標の構成。`.git/`・`.gitignore`・`.venv/`・`.vscode/`・`README.md` は作成済みで、変更しない。
 
@@ -190,6 +315,7 @@ schedule_app/
 │   ├── __init__.py          # Flaskアプリの作成
 │   ├── config.py            # SQLiteのパスなどの設定
 │   ├── extensions.py        # db = SQLAlchemy(命名規則つきのMetaData)、migrate = Migrate() など
+│   ├── api_helpers.py       # API共通処理（エラー応答、エラーハンドラー、JSON本文の受け取り、項目の検査、日付の変換）
 │   ├── models/
 │   │   ├── __init__.py      # 各モデルの読み込み
 │   │   ├── semester.py      # 学期
@@ -199,15 +325,19 @@ schedule_app/
 │   ├── routes/
 │   │   ├── __init__.py      # routesをパッケージにする（空のファイル）
 │   │   ├── main.py          # トップページ（カレンダー・授業・課題の3モードを含む1画面）
+│   │   ├── semesters.py     # 学期のAPI（一覧・取得・登録）
 │   │   ├── subjects.py      # 授業モードのAPI（登録・編集・削除・一覧）
 │   │   ├── events.py        # カレンダーからの予定のAPI（登録・編集・削除）
 │   │   └── tasks.py         # 課題・タスクのAPI（登録・編集・削除・完了切替）
 │   ├── templates/
-│   │   ├── base.html
+│   │   ├── base.html        # 共通の骨組み。Bootstrapの読み込みと、JavaScript用の scripts ブロック
 │   │   └── index.html
 │   └── static/
 │       ├── css/style.css    # カテゴリの色・独自スタイル
 │       └── js/
+│           ├── main.js      # 入口（各モードの初期化）
+│           ├── api.js       # fetchの共通処理
+│           ├── semesters.js # 授業モードの学期タブ・登録フォーム
 │           ├── calendar.js  # FullCalendarの設定、期限型の表示、直近の締切欄
 │           ├── subjects.js  # 授業モードの一覧・登録フォーム
 │           └── tasks.js     # 課題モードの一覧・完了切替
@@ -224,7 +354,7 @@ schedule_app/
 
 注意：
 - 授業のモデル名は、Pythonの予約語 `class` と紛らわしいため `Subject` とする。
-- 画面はカレンダー／授業／課題・タスクの3モードを1ページ（`index.html`）に持たせ、Bootstrapのタブ機能（Bootstrap JavaScript）で表示を切り替える。
+- 画面はカレンダー／授業／課題・タスクの3モードを1ページ（`index.html`）に持たせ、Bootstrapのタブ機能と、必要なJavaScriptで表示を切り替える。
 - ログインがないため、認証関連のファイルは作らない。
 
 ## 開発の役割分担とGit運用
