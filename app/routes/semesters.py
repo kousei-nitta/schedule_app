@@ -2,9 +2,10 @@ import re
 from datetime import date
 from typing import Any
 
-from flask import Blueprint, abort, jsonify
+from flask import Blueprint, jsonify
 
 from app.api_helpers import (
+    MAX_ID,
     api_error_response,
     format_date,
     parse_date,
@@ -42,11 +43,11 @@ def get_semesters():
     return jsonify([semester_to_dict(semester) for semester in semesters])
 
 
-@semesters_bp.get("/<int:semester_id>")
+@semesters_bp.get(f"/<int(max={MAX_ID}):semester_id>")
 def get_semester(semester_id: int):
     semester = db.session.get(Semester, semester_id)
     if semester is None:
-        abort(404)
+        return api_error_response("not_found", "学期が見つかりません")
     return jsonify(semester_to_dict(semester))
 
 

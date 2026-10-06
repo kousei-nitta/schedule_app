@@ -6,6 +6,9 @@ from flask import Flask, Response, jsonify, request
 from werkzeug.exceptions import BadRequest, HTTPException, InternalServerError
 
 
+# IDの上限（SQLiteのINTEGERの最大値）。これを超える数をDBに渡すとエラーになるため、IDを受け取るURLでは、この値までに制限する
+MAX_ID = 2**63 - 1
+
 ERROR_STATUS_CODES = {
     "invalid_json": 400,
     "validation_error": 400,
@@ -46,11 +49,8 @@ def register_api_error_handlers(app: Flask) -> None:
         if not is_api_path(request.path):
             return error
 
-        if request.endpoint == "semesters.get_semester":
-            message = "学期が見つかりません"
-        else:
-            message = "URLが見つかりません"
-        return api_error_response("not_found", message)
+        # URLそのものが存在しない場合のメッセージ。データが存在しない場合は、各routeが返す。
+        return api_error_response("not_found", "URLが見つかりません")
 
     @app.errorhandler(405)
     def handle_method_not_allowed(error: HTTPException):
