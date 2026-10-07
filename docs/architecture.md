@@ -42,8 +42,7 @@
 | 学期の変更・削除時の扱い | 学期の期間を修正したときのEventの作り直し、学期を削除したときの授業・Event・Taskの扱い、授業の所属学期の付け替え | 授業モードの編集・削除を実装するタスクの前 |
 | 一覧表示の「今日以降」の範囲 | FullCalendarのリスト表示は期間を指定する方式のため、期間の上限（例：今日から3か月）が必要 | カレンダー表示を実装するタスクの前 |
 | FullCalendarの読み込み方法 | CDNから読み込むか、ファイルを `app/static/` に置くか（Bootstrapは、CDN方式で確定済み） | カレンダー表示を実装するタスクの前 |
-| 選択中の学期の共有方法 | 授業など他のモジュールが、授業モードで選択中の学期を知る方法（例：`semesters.js` が `CustomEvent` を発行する、関数を `export` する） | 授業の一覧・登録フォームを実装するタスクの前 |
-| フォーム・エラー表示・日付補助の共通化 | 2つ目のフォームを作るときに、エラー表示や日付の補助処理を、共通のファイル（例：`ui.js`・`dates.js`）へ切り出すか | 2つ目のフォームを実装するタスクの前 |
+| 日付補助の共通化 | 2つ目のモジュールが、日付の補助処理（今日の日付の文字列、日付の表示形式など）を必要としたときに、共通のファイル（例：`dates.js`）へ切り出すか | 日付の補助処理を、2つ目のモジュールが必要とするタスクの前 |
 
 ## データ設計
 テーブルは4つ（Semester・Subject・Event・Task）。関係は **Semester → Subject → Event / Task**。
@@ -356,8 +355,9 @@ NAMING_CONVENTION = {
 |---|---|
 | `main.js` | 入口。各モードの初期化を呼ぶ |
 | `api.js` | `fetch` の共通処理。JSONの送受信を行い、`204` のときは `null` を返す。エラーは `ApiError`（`status`・`code`・`message`・`fields`）として投げる。画面のコードは、APIを呼ぶときに必ずこれを使い、`fetch` を直接呼ばない。仕様は、下の「`api.js` の仕様」 |
-| `semesters.js` | 授業モードの学期タブ、学期の登録フォーム |
-| `subjects.js` | 授業モードの授業の一覧・登録フォーム |
+| `ui.js` | 複数のモードで使う、表示とフォームの共通処理（DOM要素の取得、表示・非表示の切り替え、フォームのエラーの表示と消去、送信中の表示、エラーメッセージの取得）。公開する関数は、`getElement`・`setVisible`・`errorMessageOf`・`clearFormErrors`・`showApiError`・`setSubmitting` の6つ。日付の補助や、リソース固有の処理は持たない |
+| `semesters.js` | 授業モードの学期タブ、学期の登録フォーム。選択中の学期が変わったことを、`semester-selected` で知らせる |
+| `subjects.js` | 授業モードの授業の一覧・登録フォーム。`semester-selected` を購読する |
 | `calendar.js` | FullCalendarの設定、期限型の表示、直近の締切欄 |
 | `tasks.js` | 課題モードの一覧・完了切替 |
 
@@ -371,9 +371,21 @@ NAMING_CONVENTION = {
 - 各モードのファイルは、`initXxx()`（例：`initSemesters()`）を `export` し、`main.js` が呼ぶ。`export` は名前つきにし、`export default` は使わない
 - 画面の骨組み（ボタン・モーダル・表示領域）のHTMLは、`index.html`（または、そこから `{% include %}` する部分テンプレート）に書く。JavaScriptが行うのは、表示・非表示の切り替え（Bootstrapの `d-none`）と、文字（`textContent`）の変更。動的に作るのは、件数によって増える部分（一覧のタブや行など）だけで、`createElement` で作り、`replaceChildren()` で差し替える
 - DOMの `id` は、`<リソース名の単数形>-<部分>` の形にする（例：`semester-tabs`、`semester-form`）。入力欄のエラー表示の `id` は、`<項目>-error`（例：`semester-start-date-error`）
-- モーダルはBootstrapのものを使う。決まった操作で開くときは、HTMLの `data-bs-toggle="modal"` を使ってよい。値を設定して開くときなどは、JavaScriptから `window.bootstrap.Modal` で開く。閉じるときも、`window.bootstrap.Modal` を使う。`base.html` のBootstrapの `<script>` は通常のスクリプトで、先に読み込まれ、`type="module"` のスクリプトは、ページの解析後に実行されるため、`window.bootstrap` を使える。モーダルのHTMLは、`<main>` や `.tab-pane` の外（ページの最上位）に置く
+- モーダルはBootstrapのものを使う。決まった操作で開くときは、HTMLの `data-bs-toggle="modal"` を使ってよい。値を設定して開くときなどは、JavaScriptから `window.bootstrap.Modal` で開く。閉じるときも、`window.bootstrap.Modal` を使う（インスタンスは、`getOrCreateInstance` で取得する）。`base.html` のBootstrapの `<script>` は通常のスクリプトで、先に読み込まれ、`type="module"` のスクリプトは、ページの解析後に実行されるため、`window.bootstrap` を使える。モーダルのHTMLは、`<main>` や `.tab-pane` の外（ページの最上位）に置く
+- タブ（`role="tablist"`）の直下の `li` には、`role="presentation"` を付ける。選択が変わったときは、タブを作り直さず、既存のボタンの `active` と `aria-selected` を付け替える（キーボードのフォーカスを保つため）
 - 日付の補助処理（今日の日付の文字列など）は、必要としたモジュールの中に置く。2つ目のモジュールで必要になったときに、共通のファイルに切り出す。今日の日付は、ブラウザのローカルの日付から作り（`toISOString()` は使わない）、`YYYY-MM-DD` の文字列のまま比較する
-- 画面のエラー表示：`ApiError` の `fields` があるときは、該当する項目の下に表示する。それ以外のエラーは、`message` を、フォームの上部や画面に表示する
+- 画面のエラー表示：`ApiError` の `fields` があるときは、該当する項目の下に表示する。それ以外のエラーは、`message` を、フォームの上部や画面に表示する。`ApiError` でない例外（プログラムの誤りなど）は、技術的なメッセージを画面に出さず、固定の日本語のメッセージを表示し、詳細は `console.error` に出す
+- 選択に依存する取得（例：学期ごとの授業）は、要求のたびに通し番号を増やし、応答が届いたときに、通し番号が違えば（その間に、新しい要求や、選択の解除があれば）、その結果を捨てる
+
+### モード間の連携（`CustomEvent`）
+- モード（機能）のファイル同士は、互いを `import` しない。連携は、`document` に対する `CustomEvent` で行う
+- イベント名は、`<リソース名>-<出来事>`（例：`semester-selected`）。`detail` には、必要な値の**コピー**を入れる（オブジェクトの参照を渡さない）
+- 購読は、`initXxx()` の中（同期処理）で行う。`main.js` は、購読する側の `initXxx()` を、発行する側より先に呼ぶ（発行は、APIの応答を待ったあとなので、順序がずれても動くが、規則として固定する）
+- 共有する状態の変更と、イベントの発行は、1つの関数にまとめる（`semesters.js` では `selectSemester(id)`）
+
+| イベント | 発行元 | `detail` | 発行する場面 |
+|---|---|---|---|
+| `semester-selected` | `semesters.js` | `{ semester: { id, name, start_date, end_date } \| null }`（学期がないときは `null`） | 選択中の学期が変わったとき（最初の選択を含む）。学期が0件になったとき（`null`）。同じ学期を選び直したときは、発行しない |
 
 ### `api.js` の仕様
 - `export class ApiError extends Error`：`status`（HTTPのステータス。応答がないときは `0`）、`code`（文字列）、`message`（画面に出せる日本語）、`fields`（オブジェクトまたは `null`）を持つ
@@ -454,6 +466,7 @@ schedule_app/
 │       └── js/
 │           ├── main.js      # 入口（各モードの初期化）
 │           ├── api.js       # fetchの共通処理
+│           ├── ui.js        # 表示の切り替え・フォームのエラー表示などの共通処理
 │           ├── semesters.js # 授業モードの学期タブ・登録フォーム
 │           ├── calendar.js  # FullCalendarの設定、期限型の表示、直近の締切欄
 │           ├── subjects.js  # 授業モードの一覧・登録フォーム
