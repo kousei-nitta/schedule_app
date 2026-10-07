@@ -34,7 +34,32 @@
         <div id="semester-detail" role="tabpanel">
           <h2 id="semester-detail-name" class="h5"></h2>
           <p id="semester-detail-period" class="text-muted"></p>
-          <p class="text-muted">この学期の授業は、まだ登録できません（準備中）</p>
+          <div id="subject-section" class="mt-4">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h3 class="h6 mb-0">授業</h3>
+              <button type="button" id="subject-add-button" class="btn btn-primary btn-sm"
+                      data-bs-toggle="modal" data-bs-target="#subject-modal">授業を追加</button>
+            </div>
+            <div id="subject-loading" class="text-muted d-none">読み込み中…</div>
+            <div id="subject-load-error" class="alert alert-danger d-none" role="alert">
+              <p id="subject-load-error-message" class="mb-2"></p>
+              <button type="button" id="subject-retry-button" class="btn btn-outline-danger btn-sm">再読み込み</button>
+            </div>
+            <p id="subject-empty" class="text-muted d-none">この学期には、まだ授業が登録されていません</p>
+            <div id="subject-list" class="table-responsive d-none">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th scope="col">曜日</th>
+                    <th scope="col">時間</th>
+                    <th scope="col">科目名</th>
+                    <th scope="col">教室</th>
+                  </tr>
+                </thead>
+                <tbody id="subject-table-body"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -90,6 +115,91 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
           <button type="submit" id="semester-submit-button" class="btn btn-primary">登録する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="subject-modal" tabindex="-1" aria-labelledby="subject-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="subject-form">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="subject-modal-title">授業を追加</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-1">登録先の学期：<strong id="subject-modal-semester"></strong></p>
+          <div id="subject-semester-error" class="text-danger small mb-2"></div>
+          <div id="subject-form-success" class="alert alert-success d-none" role="status"></div>
+          <div id="subject-form-error" class="alert alert-danger d-none" role="alert"></div>
+          <div class="mb-3">
+            <label for="subject-name" class="form-label">科目名</label>
+            <input type="text" id="subject-name" class="form-control" required>
+            <div id="subject-name-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="subject-room" class="form-label">教室（任意）</label>
+            <input type="text" id="subject-room" class="form-control">
+            <div id="subject-room-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="subject-weekday" class="form-label">曜日</label>
+            <select id="subject-weekday" class="form-select" required>
+              <option value="0">月曜日</option>
+              <option value="1">火曜日</option>
+              <option value="2">水曜日</option>
+              <option value="3">木曜日</option>
+              <option value="4">金曜日</option>
+              <option value="5">土曜日</option>
+              <option value="6">日曜日</option>
+            </select>
+            <div id="subject-weekday-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label for="subject-start-time" class="form-label">開始時刻</label>
+              <select id="subject-start-time" class="form-select" required>
+                <option value="09:00">09:00</option>
+                <option value="10:00">10:00</option>
+                <option value="11:00">11:00</option>
+                <option value="12:00">12:00</option>
+                <option value="13:00">13:00</option>
+                <option value="14:00">14:00</option>
+                <option value="15:00">15:00</option>
+                <option value="16:00">16:00</option>
+                <option value="17:00">17:00</option>
+                <option value="18:00">18:00</option>
+              </select>
+              <div id="subject-start-time-error" class="text-danger small mt-1"></div>
+            </div>
+            <div class="col-6">
+              <label for="subject-end-time" class="form-label">終了時刻</label>
+              <select id="subject-end-time" class="form-select" required>
+                <option value="10:00">10:00</option>
+                <option value="11:00">11:00</option>
+                <option value="12:00">12:00</option>
+                <option value="13:00">13:00</option>
+                <option value="14:00">14:00</option>
+                <option value="15:00">15:00</option>
+                <option value="16:00">16:00</option>
+                <option value="17:00">17:00</option>
+                <option value="18:00">18:00</option>
+                <option value="19:00">19:00</option>
+              </select>
+              <div id="subject-end-time-error" class="text-danger small mt-1"></div>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="subject-notes" class="form-label">詳細・メモ（任意）</label>
+            <textarea id="subject-notes" class="form-control" rows="3"></textarea>
+            <div id="subject-notes-error" class="text-danger small mt-1"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+          <button type="submit" id="subject-submit-button" class="btn btn-primary">登録する</button>
         </div>
       </form>
     </div>

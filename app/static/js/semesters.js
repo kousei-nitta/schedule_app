@@ -1,15 +1,36 @@
-import { ApiError, apiRequest } from "./api.js";
+import { apiRequest } from "./api.js";
+import {
+  clearFormErrors,
+  errorMessageOf,
+  getElement,
+  setSubmitting,
+  setVisible,
+  showApiError,
+} from "./ui.js";
 
 let semesters = [];
 let selectedId = null;
 
-function getElement(id) {
-  return document.getElementById(id);
-}
+const SEMESTER_FIELDS = {
+  name: {
+    inputIds: ["semester-year", "semester-term"],
+    messageId: "semester-name-error",
+  },
+  start_date: {
+    inputIds: ["semester-start-date"],
+    messageId: "semester-start-date-error",
+  },
+  end_date: {
+    inputIds: ["semester-end-date"],
+    messageId: "semester-end-date-error",
+  },
+};
 
-function setVisible(element, visible) {
-  element.classList.toggle("d-none", !visible);
-}
+const SEMESTER_FORM_ERROR_ID = "semester-form-error";
+const SEMESTER_SUBMIT_LABELS = {
+  idle: "登録する",
+  busy: "登録中…",
+};
 
 function localDateString(date = new Date()) {
   // toISOString()はUTC日付に変換するため、ローカル日付が前日になることがある。
@@ -58,31 +79,13 @@ function formatJapaneseDate(dateString) {
   return `${year}年${month}月${day}日`;
 }
 
-function clearFormErrors() {
-  const formError = getElement("semester-form-error");
-  formError.replaceChildren();
-  setVisible(formError, false);
-
-  for (const id of [
-    "semester-name-error",
-    "semester-start-date-error",
-    "semester-end-date-error",
-  ]) {
-    getElement(id).replaceChildren();
-  }
-
-  for (const id of [
-    "semester-year",
-    "semester-term",
-    "semester-start-date",
-    "semester-end-date",
-  ]) {
-    getElement(id).classList.remove("is-invalid");
-  }
+function clearSemesterFormErrors() {
+  clearFormErrors(SEMESTER_FIELDS, SEMESTER_FORM_ERROR_ID);
 }
 
 function resetForm() {
   const now = new Date();
+  // getMonth()は0始まり（3は4月、7は8月）。
   const year = now.getFullYear() - (now.getMonth() < 3 ? 1 : 0);
   const term = now.getMonth() >= 3 && now.getMonth() <= 7 ? "前期" : "後期";
   const form = getElement("semester-form");
@@ -94,36 +97,28 @@ function resetForm() {
   getElement("semester-term").value = term;
   getElement("semester-start-date").value = "";
   getElement("semester-end-date").value = "";
-  submitButton.disabled = false;
-  submitButton.textContent = "登録する";
-  clearFormErrors();
+  setSubmitting(submitButton, false, SEMESTER_SUBMIT_LABELS);
+  clearSemesterFormErrors();
 }
 
 function renderTabs() {
   const tabs = getElement("semester-tabs");
-  const detail = getElement("semester-detail");
   const fragment = document.createDocumentFragment();
 
   for (const semester of semesters) {
     const item = document.createElement("li");
     item.className = "nav-item";
+    item.setAttribute("role", "presentation");
 
     const button = document.createElement("button");
     button.type = "button";
     button.id = `semester-tab-${semester.id}`;
     button.className = "nav-link";
-    button.classList.toggle("active", semester.id === selectedId);
     button.setAttribute("role", "tab");
     button.setAttribute("aria-controls", "semester-detail");
-    button.setAttribute(
-      "aria-selected",
-      semester.id === selectedId ? "true" : "false",
-    );
     button.textContent = semester.name;
     button.addEventListener("click", () => {
-      selectedId = semester.id;
-      renderTabs();
-      renderDetail();
+      selectSemester(semester.id);
     });
 
     item.append(button);
@@ -131,9 +126,23 @@ function renderTabs() {
   }
 
   tabs.replaceChildren(fragment);
+  updateTabSelection();
+}
+
+function updateTabSelection() {
+  for (const item of getElement("semester-tabs").children) {
+    const button = item.querySelector('[role="tab"]');
+    const selected = button.id === `semester-tab-${selectedId}`;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+  }
+
   const selected = semesters.find((semester) => semester.id === selectedId);
   if (selected !== undefined) {
-    detail.setAttribute("aria-labelledby", `semester-tab-${selected.id}`);
+    getElement("semester-detail").setAttribute(
+      "aria-labelledby",
+      `semester-tab-${selected.id}`,
+    );
   }
 }
 
@@ -157,6 +166,33 @@ function renderDetail() {
     `${formatJapaneseDate(selected.end_date)}`;
 }
 
+function selectSemester(id) {
+  const previousId = selectedId;
+  selectedId = id;
+
+  updateTabSelection();
+  renderDetail();
+
+  if (previousId !== id) {
+    const selected = semesters.find((semester) => semester.id === id);
+    const semester =
+      selected === undefined
+        ? null
+        : {
+            id: selected.id,
+            name: selected.name,
+            start_date: selected.start_date,
+            end_date: selected.end_date,
+          };
+    // 状態変更と通知をここに集約し、購読側が更新済みの画面を扱えるよう描画後に発行する。
+    document.dispatchEvent(
+      new CustomEvent("semester-selected", {
+        detail: { semester },
+      }),
+    );
+  }
+}
+
 function showLoading() {
   setVisible(getElement("semester-loading"), true);
   setVisible(getElement("semester-load-error"), false);
@@ -165,7 +201,8 @@ function showLoading() {
 }
 
 function showLoadError(error) {
-  getElement("semester-load-error-message").textContent = error.message;
+  getElement("semester-load-error-message").textContent =
+    errorMessageOf(error);
   setVisible(getElement("semester-loading"), false);
   setVisible(getElement("semester-load-error"), true);
   setVisible(getElement("semester-empty"), false);
@@ -184,9 +221,7 @@ function showContent() {
   setVisible(getElement("semester-load-error"), false);
   setVisible(getElement("semester-empty"), false);
   setVisible(getElement("semester-content"), true);
-  renderTabs();
   renderBanner();
-  renderDetail();
 }
 
 async function loadSemesters(preferredId = null) {
@@ -194,8 +229,8 @@ async function loadSemesters(preferredId = null) {
   try {
     semesters = await apiRequest("GET", "/api/semesters");
     if (semesters.length === 0) {
-      selectedId = null;
       showEmpty();
+      selectSemester(null);
       return;
     }
 
@@ -204,78 +239,20 @@ async function loadSemesters(preferredId = null) {
     );
     const initial =
       preferred ?? chooseInitialSemester(semesters, localDateString());
-    selectedId = initial.id;
     showContent();
+    renderTabs();
+    selectSemester(initial.id);
   } catch (error) {
     showLoadError(error);
   }
 }
 
-function setFieldError(messageId, inputIds, message) {
-  getElement(messageId).textContent = message;
-  for (const id of inputIds) {
-    getElement(id).classList.add("is-invalid");
-  }
-}
-
-function showSubmitError(error) {
-  clearFormErrors();
-
-  if (
-    error instanceof ApiError &&
-    error.code === "validation_error" &&
-    error.fields !== null
-  ) {
-    const knownFields = new Set(["name", "start_date", "end_date"]);
-    const unexpectedField = Object.keys(error.fields).some(
-      (field) => !knownFields.has(field),
-    );
-
-    if (Object.hasOwn(error.fields, "name")) {
-      setFieldError(
-        "semester-name-error",
-        ["semester-year", "semester-term"],
-        error.fields.name,
-      );
-    }
-    if (Object.hasOwn(error.fields, "start_date")) {
-      setFieldError(
-        "semester-start-date-error",
-        ["semester-start-date"],
-        error.fields.start_date,
-      );
-    }
-    if (Object.hasOwn(error.fields, "end_date")) {
-      setFieldError(
-        "semester-end-date-error",
-        ["semester-end-date"],
-        error.fields.end_date,
-      );
-    }
-
-    if (!unexpectedField && Object.keys(error.fields).length > 0) {
-      return;
-    }
-    showFormMessage("入力内容に誤りがあります");
-    return;
-  }
-
-  showFormMessage(error.message);
-}
-
-function showFormMessage(message) {
-  const formError = getElement("semester-form-error");
-  formError.textContent = message;
-  setVisible(formError, true);
-}
-
 async function submitSemester(event) {
   event.preventDefault();
-  clearFormErrors();
+  clearSemesterFormErrors();
 
   const submitButton = getElement("semester-submit-button");
-  submitButton.disabled = true;
-  submitButton.textContent = "登録中…";
+  setSubmitting(submitButton, true, SEMESTER_SUBMIT_LABELS);
 
   const name =
     `${getElement("semester-year").value}年度 ` +
@@ -290,13 +267,11 @@ async function submitSemester(event) {
       end_date: endDate,
     });
     const modal = getElement("semester-modal");
-    window.bootstrap.Modal.getInstance(modal).hide();
+    window.bootstrap.Modal.getOrCreateInstance(modal).hide();
     await loadSemesters(created.id);
   } catch (error) {
-    showSubmitError(error);
-  } finally {
-    submitButton.disabled = false;
-    submitButton.textContent = "登録する";
+    showApiError(error, SEMESTER_FIELDS, SEMESTER_FORM_ERROR_ID);
+    setSubmitting(submitButton, false, SEMESTER_SUBMIT_LABELS);
   }
 }
 
