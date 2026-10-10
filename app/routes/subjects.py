@@ -1,5 +1,4 @@
 import re
-from datetime import time
 from typing import Any
 
 from flask import Blueprint, jsonify, request
@@ -65,6 +64,8 @@ def get_subjects():
         if not normalized_id:
             return jsonify([])
 
+        # 非常に長い数字をint()に渡すとValueErrorになり、MAX_IDを超える
+        # 数をDBに渡すとOverflowErrorになるため、変換前に桁数と値を確認する。
         maximum_id = str(MAX_ID)
         if len(normalized_id) > len(maximum_id) or (
             len(normalized_id) == len(maximum_id)
@@ -72,8 +73,6 @@ def get_subjects():
         ):
             return jsonify([])
         semester_id = int(normalized_id)
-        if semester_id < 1:
-            return jsonify([])
         statement = statement.where(Subject.semester_id == semester_id)
 
     statement = statement.order_by(
@@ -98,11 +97,6 @@ def create_subject():
     payload, error_response = read_json_object()
     if error_response is not None:
         return error_response
-    if payload is None:
-        return api_error_response(
-            "validation_error",
-            "リクエストの本文は、JSONのオブジェクトにしてください",
-        )
 
     fields: dict[str, str] = {}
     allowed_fields = {
@@ -124,10 +118,10 @@ def create_subject():
     if semester_id_error is not None:
         fields["semester_id"] = semester_id_error
     elif semester_id is not None:
+        # 範囲外のIDをDBに渡すと、SQLiteでOverflowErrorになるため先に確認する。
         if not 1 <= semester_id <= MAX_ID:
             fields["semester_id"] = "指定された学期が存在しません"
         else:
-            # 範囲外のIDをDBに渡すと、SQLiteでOverflowErrorになるため先に確認する。
             if db.session.get(Semester, semester_id) is None:
                 fields["semester_id"] = "指定された学期が存在しません"
 
@@ -182,7 +176,11 @@ def create_subject():
     )
     if end_time_error is not None:
         fields["end_time"] = end_time_error
-    elif start_time is not None and end_time is not None and end_time <= start_time:
+    elif (
+        start_time is not None
+        and end_time is not None
+        and end_time <= start_time
+    ):
         fields["end_time"] = "終了時刻は開始時刻より後にしてください"
 
     notes, notes_error = validate_optional_string(

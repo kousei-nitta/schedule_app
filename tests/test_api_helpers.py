@@ -3,6 +3,8 @@ from datetime import time
 import pytest
 
 from app.api_helpers import (
+    UNUSABLE_CHARACTER_MESSAGE,
+    contains_unusable_character,
     format_time,
     parse_time,
     validate_optional_string,
@@ -10,6 +12,84 @@ from app.api_helpers import (
     validate_required_string,
     validate_required_time,
 )
+
+
+def test_unusable_character_message_constant():
+    assert UNUSABLE_CHARACTER_MESSAGE == "使用できない文字が含まれています"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["\ud800", "\udbff", "\udc00", "\udfff", "a\ud800b"],
+)
+def test_contains_unusable_character_detects_lone_surrogates(value):
+    assert contains_unusable_character(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "abc", "日本語", "😀", "\ud7ff", "\ue000"],
+)
+def test_contains_unusable_character_accepts_other_text(value):
+    assert contains_unusable_character(value) is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["\ud800", "科目\udc00", " \ud800 "],
+)
+def test_validate_required_string_rejects_unusable_characters(value):
+    assert validate_required_string(
+        {"value": value},
+        "value",
+        "必須",
+        "型",
+        strip=True,
+        max_length=100,
+        length_message="長さ",
+    ) == (None, UNUSABLE_CHARACTER_MESSAGE)
+
+
+def test_validate_required_string_rejects_unusable_characters_by_default():
+    assert validate_required_string(
+        {"value": "\ud800"},
+        "value",
+        "必須",
+        "型",
+    ) == (None, UNUSABLE_CHARACTER_MESSAGE)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["\ud800", "  \udfff  ", "メモ\ud800"],
+)
+def test_validate_optional_string_rejects_unusable_characters(value):
+    assert validate_optional_string(
+        {"value": value},
+        "value",
+        "型",
+    ) == (None, UNUSABLE_CHARACTER_MESSAGE)
+
+
+@pytest.mark.parametrize("value", ["\ud800", "09:00\udc00"])
+def test_validate_required_time_rejects_unusable_characters(value):
+    assert validate_required_time(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (None, UNUSABLE_CHARACTER_MESSAGE)
+
+
+def test_surrogate_pairs_count_as_one_character():
+    assert validate_required_string(
+        {"value": "😀😀"},
+        "value",
+        "必須",
+        "型",
+        max_length=2,
+        length_message="長さ",
+    ) == ("😀😀", None)
 
 
 @pytest.mark.parametrize(
@@ -79,6 +159,16 @@ def test_validate_required_time_reports_format_and_converts_value():
     ) == (time(9, 0), None)
 
 
+@pytest.mark.parametrize("value", [900, True])
+def test_validate_required_time_reports_non_string_as_format_error(value):
+    assert validate_required_time(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (None, "形式")
+
+
 def test_validate_required_string_keeps_legacy_behavior_by_default():
     assert validate_required_string(
         {"value": "  "},
@@ -94,20 +184,27 @@ def test_validate_required_string_keeps_legacy_behavior_by_default():
     ) == (" x ", None)
 
 
-@pytest.mark.parametrize("value", ["", None])
-def test_validate_required_string_checks_required(value):
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"value": None}, {"value": ""}],
+)
+def test_validate_required_string_checks_required(payload):
+    assert validate_required_string(
+        payload,
+        "value",
+        "必須",
+        "型",
+    ) == (None, "必須")
+
+
+@pytest.mark.parametrize("value", [123, True, []])
+def test_validate_required_string_reports_type_error(value):
     assert validate_required_string(
         {"value": value},
         "value",
         "必須",
         "型",
-    ) == (None, "必須")
-    assert validate_required_string(
-        {},
-        "value",
-        "必須",
-        "型",
-    ) == (None, "必須")
+    ) == (None, "型")
 
 
 def test_validate_required_string_strip_and_length():
@@ -157,14 +254,16 @@ def test_validate_required_string_requires_length_message():
         )
 
 
-@pytest.mark.parametrize("value", [None, "", "  ", "　"])
-def test_validate_optional_string_normalizes_empty_values(value):
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"value": None}, {"value": ""}, {"value": "  "}, {"value": "　"}],
+)
+def test_validate_optional_string_normalizes_empty_values(payload):
     assert validate_optional_string(
-        {"value": value},
+        payload,
         "value",
         "型",
     ) == (None, None)
-    assert validate_optional_string({}, "value", "型") == (None, None)
 
 
 def test_validate_optional_string_checks_type_and_length():

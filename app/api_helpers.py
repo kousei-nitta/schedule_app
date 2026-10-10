@@ -21,6 +21,15 @@ INVALID_JSON_MESSAGE = (
     "リクエストの本文がJSONとして読めません。"
     "Content-Typeを application/json にして、JSONで送ってください"
 )
+UNUSABLE_CHARACTER_MESSAGE = "使用できない文字が含まれています"
+
+
+def contains_unusable_character(value: str) -> bool:
+    """UTF-8に変換できない孤立サロゲートが含まれるか確認する。"""
+    return any(
+        0xD800 <= ord(character) <= 0xDFFF
+        for character in value
+    )
 
 
 def api_error_response(
@@ -71,7 +80,10 @@ def register_api_error_handlers(app: Flask) -> None:
         )
 
 
-def read_json_object() -> tuple[dict[str, Any] | None, tuple[Response, int] | None]:
+def read_json_object() -> tuple[
+    dict[str, Any] | None,
+    tuple[Response, int] | None,
+]:
     """application/jsonの本文を読み、JSONオブジェクトだけを受け付ける。"""
     if request.mimetype != "application/json":
         return None, api_error_response("invalid_json", INVALID_JSON_MESSAGE)
@@ -112,7 +124,7 @@ def validate_required_string(
     length_message: str | None = None,
     strip: bool = False,
 ) -> tuple[str | None, str | None]:
-    """必須文字列の欠落と型を検査し、値またはエラーメッセージを返す。"""
+    """必須文字列を検査し、値またはエラーメッセージを返す。"""
     if max_length is not None and length_message is None:
         raise ValueError("max_lengthを指定する場合はlength_messageが必要です")
 
@@ -121,6 +133,8 @@ def validate_required_string(
         return None, required_message
     if not isinstance(value, str):
         return None, type_message
+    if contains_unusable_character(value):
+        return None, UNUSABLE_CHARACTER_MESSAGE
     if strip:
         value = value.strip()
         if value == "":
@@ -138,7 +152,7 @@ def validate_optional_string(
     max_length: int | None = None,
     length_message: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """任意文字列を正規化し、型と長さを検査する。"""
+    """任意文字列を検査して正規化し、値またはエラーを返す。"""
     if max_length is not None and length_message is None:
         raise ValueError("max_lengthを指定する場合はlength_messageが必要です")
 
@@ -147,6 +161,8 @@ def validate_optional_string(
         return None, None
     if not isinstance(value, str):
         return None, type_message
+    if contains_unusable_character(value):
+        return None, UNUSABLE_CHARACTER_MESSAGE
 
     value = value.strip()
     if value == "":
@@ -205,10 +221,14 @@ def validate_required_time(
     required_message: str,
     format_message: str,
 ) -> tuple[time | None, str | None]:
-    """必須時刻を検査し、Pythonのtimeに変換する。"""
+    """必須時刻を検査し、Pythonのtimeかエラーメッセージを返す。"""
     value = payload.get(field)
     if field not in payload or value is None or value == "":
         return None, required_message
+    if not isinstance(value, str):
+        return None, format_message
+    if contains_unusable_character(value):
+        return None, UNUSABLE_CHARACTER_MESSAGE
 
     parsed_value = parse_time(value)
     if parsed_value is None:
