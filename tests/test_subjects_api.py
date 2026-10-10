@@ -3,12 +3,32 @@ from datetime import date, time
 import pytest
 from sqlalchemy import func, select
 
-from app.api_helpers import MAX_ID
+from app.api_helpers import (
+    INVALID_JSON_MESSAGE,
+    MAX_ID,
+    UNUSABLE_CHARACTER_MESSAGE,
+)
 from app.extensions import db
 from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
 from app.models.task import Task
+
+
+TIME_MESSAGES = {
+    "start_time": {
+        "required": "開始時刻は必須です",
+        "format": (
+            "開始時刻は「HH:MM」の形式（00:00〜23:59）で指定してください"
+        ),
+    },
+    "end_time": {
+        "required": "終了時刻は必須です",
+        "format": (
+            "終了時刻は「HH:MM」の形式（00:00〜23:59）で指定してください"
+        ),
+    },
+}
 
 
 def make_semester(app, name="2026年度 前期"):
@@ -247,12 +267,11 @@ def test_required_subject_fields_validate_missing_and_types(
     [
         ("room", 123, "教室は文字列で指定してください"),
         ("room", True, "教室は文字列で指定してください"),
-        ("room", "教" * 101, "教室は100文字以内にしてください"),
         ("notes", 123, "詳細・メモは文字列で指定してください"),
         ("notes", True, "詳細・メモは文字列で指定してください"),
     ],
 )
-def test_optional_subject_fields_validate_types_and_length(
+def test_optional_subject_fields_validate_types(
     client, app, field, value, message
 ):
     semester_id = make_semester(app)
@@ -312,11 +331,24 @@ def test_subject_name_and_room_over_length_are_rejected(
     assert_validation_error(response, {field: message})
 
 
+@pytest.mark.parametrize("field", ["start_time", "end_time"])
+@pytest.mark.parametrize("value", [None, ""])
+def test_missing_subject_times_are_required(client, app, field, value):
+    semester_id = make_semester(app)
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id, **{field: value}),
+    )
+    assert_validation_error(
+        response,
+        {field: TIME_MESSAGES[field]["required"]},
+    )
+
+
+@pytest.mark.parametrize("field", ["start_time", "end_time"])
 @pytest.mark.parametrize(
     "value",
     [
-        None,
-        "",
         900,
         True,
         "9:00",
@@ -332,28 +364,16 @@ def test_subject_name_and_room_over_length_are_rejected(
         "０９：００",
     ],
 )
-def test_invalid_subject_times_are_rejected_for_both_fields(client, app, value):
+def test_malformed_subject_times_are_rejected(client, app, field, value):
     semester_id = make_semester(app)
-    for field in ("start_time", "end_time"):
-        response = client.post(
-            "/api/subjects",
-            json=subject_payload(semester_id, **{field: value}),
-        )
-        if value is None or value == "":
-            message = (
-                "開始時刻は必須です"
-                if field == "start_time"
-                else "終了時刻は必須です"
-            )
-        elif field == "start_time":
-            message = (
-                "開始時刻は「HH:MM」の形式（00:00〜23:59）で指定してください"
-            )
-        else:
-            message = (
-                "終了時刻は「HH:MM」の形式（00:00〜23:59）で指定してください"
-            )
-        assert_validation_error(response, {field: message})
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id, **{field: value}),
+    )
+    assert_validation_error(
+        response,
+        {field: TIME_MESSAGES[field]["format"]},
+    )
 
 
 @pytest.mark.parametrize(
@@ -495,7 +515,7 @@ def test_failed_subject_post_does_not_change_row_count(client, app):
     assert subject_count(app) == before_count
 
 
-def test_empty_subject_list_and_all_semester_listing(client):
+def test_empty_subject_list_returns_empty_array(client):
     response = client.get("/api/subjects")
     assert response.status_code == 200
     assert response.json == []
@@ -621,7 +641,7 @@ def test_leading_zero_semester_query_and_unknown_query(client, app):
     assert len(client.get("/api/subjects?foo=bar").json) == 1
 
 
-def test_subject_get_success_and_not_found(client, app):
+def test_subject_get_returns_created_subject(client, app):
     semester_id = make_semester(app)
     created = client.post(
         "/api/subjects",
@@ -657,19 +677,162 @@ def test_subject_get_not_found_and_invalid_urls(client, url, message):
 @pytest.mark.parametrize(
     ("method", "url"),
     [
-        ("patch", "/api/subjects/1"),
-        ("delete", "/api/subjects/1"),
+        ("patch", "/api/subjects/{subject_id}"),
+        ("delete", "/api/subjects/{subject_id}"),
         ("put", "/api/subjects"),
         ("patch", "/api/subjects"),
         ("delete", "/api/subjects"),
-        ("post", "/api/subjects/1"),
+        ("post", "/api/subjects/{subject_id}"),
     ],
 )
 def test_unsupported_subject_methods_do_not_change_rows(
     client, app, method, url
 ):
+    semester_id = make_semester(app)
+    with app.app_context():
+        subject = Subject(
+            semester_id=semester_id,
+            subject_name="登録済み授業",
+            weekday=0,
+            start_time=time(9, 0),
+            end_time=time(10, 0),
+        )
+        db.session.add(subject)
+        db.session.commit()
+        subject_id = subject.id
+
+    url = url.format(subject_id=subject_id)
+    before_subject = client.get(f"/api/subjects/{subject_id}")
     before_count = subject_count(app)
     response = getattr(client, method)(url)
     assert response.status_code == 405
     assert response.json["error"]["code"] == "method_not_allowed"
+    after_subject = client.get(f"/api/subjects/{subject_id}")
+    assert after_subject.json == before_subject.json
     assert subject_count(app) == before_count
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("subject_name", "\ud800"),
+        ("subject_name", "  \ud800  "),
+        ("room", "\udfff"),
+        ("notes", "メモ\ud800"),
+        ("start_time", "\ud800"),
+        ("end_time", "09:00\udc00"),
+    ],
+)
+def test_unusable_characters_in_subject_fields_are_rejected(
+    client, app, field, value
+):
+    semester_id = make_semester(app)
+    before_count = subject_count(app)
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id, **{field: value}),
+    )
+    assert_validation_error(
+        response,
+        {field: UNUSABLE_CHARACTER_MESSAGE},
+    )
+    assert subject_count(app) == before_count
+
+
+def test_invalid_utf8_subject_body_is_invalid_json(client, app):
+    semester_id = make_semester(app)
+    before_count = subject_count(app)
+    body = (
+        f'{{"semester_id": {semester_id}, "subject_name": "'.encode()
+        + b"\xff"
+        + b'", "weekday": 0, "start_time": "09:00", "end_time": "10:00"}'
+    )
+    response = client.post(
+        "/api/subjects",
+        data=body,
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert response.json["error"] == {
+        "code": "invalid_json",
+        "message": INVALID_JSON_MESSAGE,
+    }
+    assert subject_count(app) == before_count == 0
+
+
+def test_surrogate_pairs_in_subject_strings_are_accepted(client, app):
+    semester_id = make_semester(app)
+    payload = subject_payload(
+        semester_id,
+        subject_name="😀" * 100,
+        room="教室😀",
+        notes="メモ😀",
+    )
+    response = client.post("/api/subjects", json=payload)
+    assert response.status_code == 201
+    assert response.json["subject_name"] == payload["subject_name"]
+    assert response.json["room"] == payload["room"]
+    assert response.json["notes"] == payload["notes"]
+
+
+def test_surrogate_pairs_count_as_one_character_for_subject_name(
+    client, app
+):
+    semester_id = make_semester(app)
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id, subject_name="😀" * 101),
+    )
+    assert_validation_error(
+        response,
+        {"subject_name": "科目名は100文字以内にしてください"},
+    )
+
+
+def test_unusable_character_and_other_errors_are_reported_together(
+    client, app
+):
+    semester_id = make_semester(app)
+    before_count = subject_count(app)
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(
+            semester_id,
+            subject_name="\ud800",
+            weekday=7,
+        ),
+    )
+    assert_validation_error(
+        response,
+        {
+            "subject_name": UNUSABLE_CHARACTER_MESSAGE,
+            "weekday": "曜日は0（月曜）〜6（日曜）の整数で指定してください",
+        },
+    )
+    assert subject_count(app) == before_count
+
+
+def test_lone_surrogate_field_name_is_unknown_field(client, app):
+    semester_id = make_semester(app)
+    body = (
+        f'{{"semester_id": {semester_id}, "subject_name": "科目", '
+        '"weekday": 0, "start_time": "09:00", "end_time": "10:00", '
+        '"\\ud800": 1}'
+    )
+    response = client.post(
+        "/api/subjects",
+        data=body,
+        content_type="application/json",
+    )
+    assert_validation_error(
+        response,
+        {"\ud800": "この項目は指定できません"},
+    )
+
+
+def test_invalid_bytes_in_semester_id_query_are_validation_error(client):
+    response = client.get("/api/subjects?semester_id=%ED%A0%80")
+    assert_validation_error(
+        response,
+        {"semester_id": "学期IDは整数で指定してください"},
+    )

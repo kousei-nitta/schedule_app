@@ -30,7 +30,8 @@ def protect_dev_db():
 
 @pytest.fixture(scope="session")
 def template_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    template_path = tmp_path_factory.mktemp("schedule-template") / "template.db"
+    template_directory = tmp_path_factory.mktemp("schedule-template")
+    template_path = template_directory / "template.db"
     app = create_app(
         {
             "TESTING": True,

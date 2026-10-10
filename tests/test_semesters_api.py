@@ -2,7 +2,11 @@ from datetime import date
 
 import pytest
 
-from app.api_helpers import MAX_ID
+from app.api_helpers import (
+    INVALID_JSON_MESSAGE,
+    MAX_ID,
+    UNUSABLE_CHARACTER_MESSAGE,
+)
 from app.extensions import db
 from app.models.semester import Semester
 
@@ -285,6 +289,73 @@ def test_non_object_semester_payload_has_no_fields(client, payload):
         "validation_error",
         "リクエストの本文は、JSONのオブジェクトにしてください",
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("name", "2026年度 前期\ud800"),
+        ("name", "\ud800"),
+        ("start_date", "2026-04-01\ud800"),
+        ("end_date", "\udfff"),
+    ],
+)
+def test_unusable_characters_in_semester_fields_are_rejected(
+    client, app, field, value
+):
+    payload = {
+        "name": "2026年度 前期",
+        "start_date": "2026-04-01",
+        "end_date": "2026-07-31",
+    }
+    payload[field] = value
+
+    response = client.post("/api/semesters", json=payload)
+    assert_api_error(
+        response,
+        400,
+        "validation_error",
+        "入力内容に誤りがあります",
+        {field: UNUSABLE_CHARACTER_MESSAGE},
+    )
+    assert semester_count(app) == 0
+
+
+def test_invalid_utf8_semester_body_is_invalid_json(client, app):
+    before_count = semester_count(app)
+    response = client.post(
+        "/api/semesters",
+        data=(
+            b'{"name": "\xff", "start_date": "2026-04-01", '
+            b'"end_date": "2026-07-31"}'
+        ),
+        content_type="application/json",
+    )
+    assert_api_error(
+        response,
+        400,
+        "invalid_json",
+        INVALID_JSON_MESSAGE,
+    )
+    assert semester_count(app) == before_count
+
+
+def test_surrogate_pair_in_semester_name_is_format_error(client, app):
+    before_count = semester_count(app)
+    response = create_semester(
+        client,
+        "2026年度 前期😀",
+        "2026-04-01",
+        "2026-07-31",
+    )
+    assert_api_error(
+        response,
+        400,
+        "validation_error",
+        "入力内容に誤りがあります",
+        {"name": "学期名は「2026年度 前期」の形式で指定してください"},
+    )
+    assert semester_count(app) == before_count
 
 
 @pytest.mark.parametrize(
