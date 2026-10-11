@@ -277,8 +277,8 @@
 ルール：
 - テーブルの作成・変更は、必ずmigrationを通して行う。`db.create_all()` は使わない（migrationの履歴とDBの実際の状態が食い違い、migrationが失敗しやすくなるため）。
 - カラムの追加・変更などのスキーマ変更は、このファイルの「データ設計」の承認なしに行わない。
-- 自動生成されたmigrationファイルはレビュー対象。内容を確認し、Komaの承認を得てから適用する。
-- `migrations/` はGit管理対象。`instance/app.db` はGit管理対象外。
+- 自動生成されたmigrationファイルはレビュー対象。内容を確認し、Komaの承認を得てから使う（承認の前は、どのDBにも適用しない）。生成・承認・開発用DBへの適用の進め方は、下の「migrationの作成と適用」。
+- `migrations/` はGit管理対象。`instance/app.db` と、そのバックアップ（`instance/backups/`）はGit管理対象外（`.gitignore` の `instance/`）。
 - 制約には一貫した命名規則を付ける（下記「制約の命名規則」）。
 - 自動テスト用のDBも、`db.create_all()` ではなく、migration（`upgrade`）で作る（「自動テスト（pytest）」を参照）。
 - SQLiteはカラムの変更・削除などの `ALTER TABLE` に制約があるため、Alembicのbatchモード（`render_as_batch=True`）を明示的に有効にする。
@@ -321,7 +321,30 @@ NAMING_CONVENTION = {
 | `flask db downgrade` | 直近のmigrationの適用を1つ取り消す | 戻したいとき（通常は使わない） |
 | `flask db current` | DBに今どのmigrationまで適用されているかを表示する | 状態の確認 |
 
-流れは「モデルを変更 → `migrate`（ファイル生成） → 内容を確認 → `upgrade`（DBに適用）」。
+流れは「モデルを変更 → `migrate`（ファイル生成） → 内容を確認 → `upgrade`（DBに適用）」。このプロジェクトでの進め方（生成に使うDB、承認ゲート、開発用DBへの適用の担当）は、次の「migrationの作成と適用」。
+
+### migrationの作成と適用
+開発用DB（`instance/app.db`）のデータを守り、migrationの内容を人が確かめてから使うための進め方。DBの構造を変えるタスクでは、Task MDに、この進め方を具体的なコマンドで書く。
+
+| 段階 | 担当 | 内容 |
+|---|---|---|
+| 1. モデルの変更 | Copilot | 「データ設計」で承認された内容どおりに、モデルを変更する |
+| 2. migrationの生成 | Copilot | 既存のmigrationをすべて適用した**一時的なDB**（一時ディレクトリに作る、空のDB）と、モデルを比べて、自動生成する。開発用DBと比べて生成しない |
+| 3. 承認ゲート | Copilot → Koma | 生成したmigrationを、**どのDBにも適用する前に**、内容を報告して止まる。自動テストも、一時的なDBにmigrationを適用するため、この時点では実行しない。Komaが内容を確認し、承認してから、作業を続ける |
+| 4. 自動テスト | Copilot | 承認のあと、自動テスト（テスト用DBは、migrationで作る）で、migrationの経路と、追加・変更したテーブル・列・制約を確かめる（「自動テスト（pytest）」の「テストの書き方」） |
+| 5. 開発用DBへの適用 | Koma | レビューの承認のあと、マージの前に、バックアップを取ってから適用する（下の手順） |
+
+- Copilotは、開発用DBに対して、`flask db` のコマンド（`migrate`・`upgrade`・`downgrade`・`stamp` など）を実行しない。生成に一時的なDBを使うのは、生成の作業で開発用DBに触れないためと、生成の結果が、開発用DBの状態（最新の版まで適用されているか、など）に左右されないため
+- 承認ゲートで報告する内容：生成したファイル名・`revision`・`down_revision`、`upgrade()`・`downgrade()` の全文、作成・変更するテーブルと列（名前・型・NULL可否）、主キー・外部キーなどの制約の名前、既存のテーブルへの変更の有無、「データ設計」との差異の有無
+- 承認したmigrationファイルは、変更しない。変更が必要になった場合は、停止して、もう一度承認を得る
+- 開発用DBへの適用の手順（Koma）
+  1. サーバー（`run.py`）を止める
+  2. バックアップ：開発用DBのファイルを、`instance/backups/` に、日付とタスクを入れた名前（例：`app-20261011-before-009.db`）でコピーし、元のファイルとハッシュが同じことを確かめる。`instance/` は `.gitignore` の対象なので、Gitには入らない
+  3. 適用の前の記録：`flask --app app db current` の版、スキーマ（`sqlite3` の `.schema`）、各テーブルの件数
+  4. 適用：`flask --app app db upgrade`
+  5. 適用の後の確認：`flask --app app db current` が最新の版（`(head)`）であること。適用の前とのスキーマの差が、そのmigrationの内容だけであること。各テーブルの件数が変わっていないこと（データを変えるmigrationでは、期待する変化をTask MDに書く）
+  6. 戻し方：サーバーを止めて、バックアップのコピーを、元の名前（`instance/app.db`）に戻す（`flask db downgrade` は、通常は使わない）。適用のあとで、migrationを作り直すことになった場合も、この方法で戻してから、作り直したmigrationを適用する
+- 開発用DBへの適用より前は、追加したテーブルを使うAPIを、開発用DBに対して呼ばない（テーブルがないため、エラーになる）
 
 ## API共通ルール
 画面のJavaScriptからFlaskを呼ぶAPIの共通ルール。今後のすべてのリソース（学期・授業・Event・Task・休講日）に適用する。
@@ -438,15 +461,22 @@ NAMING_CONVENTION = {
   - エラーのJSONレスポンス（上記の形式とステータス）を作る
   - `/api` 以下のエラーをJSONにするエラーハンドラーの登録（`create_app()` から呼ぶ）
   - JSON本文の受け取り（`Content-Type` の検査、オブジェクトであることの検査）
+  - 一覧の絞り込みのクエリで指定されたIDの読み取り（`read_id_query`。下の「一覧の絞り込みのIDの読み取り」）
   - 項目の共通検査（未知の項目や `id` の拒否、必須・型、空文字の `null` 化）
   - 日付・時刻・日時の文字列と、Pythonの値との相互変換（厳密な形式の検査を含む）
   - IDの上限の定数 `MAX_ID` を定義する
   - 文字列・整数の項目単位の検証（必須／任意、最大長、前後の空白の除去、整数の範囲。真偽値は整数として扱わない）
   - 時刻の変換と検証（`parse_time`・`format_time`・必須の時刻の項目単位の検証）
-  - 使用できない文字（孤立サロゲート）の検査。文字列の項目単位の検証関数（必須・任意の文字列、必須の時刻）の中で、「文字列の項目の検査の順序」のとおりに行う。学期名・日付のように、文字列として受け取ってから形式を検査する項目も、この検証関数を通るため、漏れなく対象になる
+  - 日付の変換と検証（`parse_date`・`format_date`・必須の日付の項目単位の検証 `validate_required_date`）。必須の時刻と同じく、文字列でない値も、形式の誤りのメッセージにする。学期の `start_date`・`end_date` と、休講日の `date` が使う
+  - 使用できない文字（孤立サロゲート）の検査。文字列の項目単位の検証関数（必須・任意の文字列、必須の時刻、必須の日付）の中で、「文字列の項目の検査の順序」のとおりに行う。学期名・日付のように、文字列として受け取ってから形式を検査する項目も、この検証関数を通るため、漏れなく対象になる
   - 使用できない文字のメッセージの定数 `UNUSABLE_CHARACTER_MESSAGE`（値は「使用できない文字が含まれています」）を定義する
 - 項目単位の検証関数は、`(値, エラーメッセージ)` の組を返す（正常なら、エラーメッセージは `None`）。メッセージの文言は、呼び出し側（route）が渡す。例外：使用できない文字のメッセージは、すべての項目で同じ文言のため、定数 `UNUSABLE_CHARACTER_MESSAGE` として、このモジュールが持ち、検証関数が返す（`validate_allowed_fields` の「この項目は指定できません」と同じ扱い）
 - 共通関数の追加・拡張で、すでにあるAPIの挙動を変えない。挙動が変わる処理（前後の空白の除去など）は、引数で指定したときだけ行う。例外：使用できない文字の検査は、引数を指定しなくても常に行う（それまで500、または形式の誤りの400になっていた入力を、同じメッセージの400にそろえるための変更。ほかの入力の結果は変えない）
+- 一覧の絞り込みのIDの読み取り（`read_id_query`）：クエリ名と、2つのメッセージ（複数回の指定、整数でない値）を受け取り、「指定の有無、ID、エラーメッセージ」の組を返す。規則は、「URLとメソッド」の絞り込みと、授業の一覧の `semester_id` のとおり。授業の一覧（`GET /api/subjects`）と、休講日の一覧（`GET /api/closures`）が使う
+  - 指定がない：絞り込まない
+  - 複数回の指定と、整数でない値（空文字・符号・小数・全角の数字・前後の空白を含む）：エラーのメッセージを返す。呼び出し側は、400（`validation_error`）にし、`fields` にクエリ名を入れる
+  - 整数でも、範囲（1〜`MAX_ID`）の外：該当なし。呼び出し側は、DBに問い合わせずに、空の配列を返す。`MAX_ID` より大きい数は、`int()` に変換する前に、桁数と値で判定する（非常に長い数字の文字列は `int()` で `ValueError` になり、`MAX_ID` を超える数はDBに渡すとエラーになるため）
+  - 学期などのデータが存在するかは、確かめない（DBを読まない）。範囲内のIDは、そのまま絞り込みに使い、該当するデータがなければ、空の配列になる
 - **DBの操作は行わない。** このモジュールが扱うのは、API共通の処理と、IDの上限・共通のメッセージの定数だけ。データの取得・保存は、各route（`routes/<名前>.py`）が担当する
 - リソース固有の検証（例：学期名の形式）と、モデルをJSONにする変換は、各リソースのroute（`routes/<名前>.py`）に置く。モデルにAPI用の処理は持たせない
 
@@ -643,6 +673,7 @@ NAMING_CONVENTION = {
   - 授業の登録：`generated_event_count` と、その授業の自動生成のEventの行数が一致する。休講日の日付には、行がない
   - 休講日の追加・削除（「休講日の変更と予定の同期」の規則）：その日付の、その学期の授業の自動生成のEventの行数（追加後は0、削除後は、その曜日の授業の数）。単発のEvent（`is_generated=False`）と、ほかの学期の授業のEventは変わらない。休講日の削除では、その日の曜日の授業に、同じ日付の単発のEventがあっても、自動生成のEventが1件作られる。曜日が違う授業は、同じ日付に単発のEventがあっても、Eventは作られない。同期を入れる前の段階では、休講日の追加・削除で、Eventの行数が変わらないことを確かめる（「休講日の変更と予定の同期」の最終的な仕様と実装の途中の段階）
   - 同じ授業・同じ日付の自動生成のEventが、2件以上ない（「休講日の変更と予定の同期」の規則）
+- migrationでテーブルを追加・変更したタスクでは、`tests/test_setup.py` で、そのテーブルの列（名前・型・NULL可否）と制約の名前が、「データ設計」と「制約の命名規則」のとおりであることを確かめる（テスト用DBはmigrationで作るため、migrationの内容の確認になる）
 - 各テストは独立させる（実行順に依存しない）。1つのテストで確認することは、1つにする
 
 ## ディレクトリ構成
@@ -654,7 +685,7 @@ schedule_app/
 │   ├── __init__.py          # Flaskアプリの作成（`create_app(test_config=None)`）
 │   ├── config.py            # SQLiteのパスなどの設定
 │   ├── extensions.py        # db = SQLAlchemy(命名規則つきのMetaData)、migrate = Migrate() など
-│   ├── api_helpers.py       # API共通処理（エラー応答、エラーハンドラー、JSON本文の受け取り、項目の検査（使用できない文字の検査を含む）、日付の変換、IDの上限 MAX_ID、メッセージの定数 UNUSABLE_CHARACTER_MESSAGE）。DBの操作は行わない
+│   ├── api_helpers.py       # API共通処理（エラー応答、エラーハンドラー、JSON本文の受け取り、一覧のクエリのIDの読み取り read_id_query、項目の検査（使用できない文字の検査を含む）、日付・時刻の変換と検証、IDの上限 MAX_ID、メッセージの定数 UNUSABLE_CHARACTER_MESSAGE）。DBの操作は行わない
 │   ├── class_events.py      # 授業のEventの生成（日付の計算 class_event_dates、1日分のEventの作成 build_class_event、学期全体のEventの作成 build_class_events、カテゴリの定数 EVENT_CATEGORY_CLASS）。セッションの操作・commitは行わない
 │   ├── models/
 │   │   ├── __init__.py      # 各モデルの読み込み
@@ -687,12 +718,14 @@ schedule_app/
 │           └── tasks.js     # 課題モードの一覧・完了切替
 ├── migrations/              # Flask-Migrateのmigration環境（`flask db init` で生成）。Git管理対象
 │   └── versions/            # migrationファイル（自動生成後にレビューする）。Git管理対象
-├── instance/app.db          # SQLiteファイル。Git管理対象外
+├── instance/                # Git管理対象外（.gitignore）
+│   ├── app.db               # SQLiteファイル（開発用DB）
+│   └── backups/             # 開発用DBのバックアップ（migrationの適用の前など。「migrationの作成と適用」）
 ├── docs/                    # 設計資料（正本）とタスク資料
 ├── .github/copilot-instructions.md
 ├── tests/                   # pytestのテスト（「自動テスト（pytest）」を参照）
 │   ├── conftest.py          # 共通のfixture（テスト用DB・アプリ・クライアント・開発用DBの保護）
-│   ├── test_setup.py        # テスト基盤そのものの確認
+│   ├── test_setup.py        # テスト基盤そのものの確認（migrationで作られるテーブル・列・制約の確認を含む）
 │   ├── test_api_helpers.py  # api_helpers.py の共通関数の単体テスト
 │   ├── test_class_events.py # class_events.py の単体テスト（日付の計算、Eventの値）
 │   └── test_<リソース名>_api.py  # APIのテスト（リソースごと）

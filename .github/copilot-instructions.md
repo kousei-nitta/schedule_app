@@ -42,15 +42,21 @@ Python 3.11 + Flask + SQLite + Flask-SQLAlchemy + Flask-Migrate（採用済み�
 既存設計 → 問題点 → 変更案 → Komaの承認 → 設計資料の更新 → 実装
 
 ## DBスキーマとmigration
-Flask-Migrateは採用済みの技術として扱う。詳細は `docs/architecture.md` の「DBスキーマ変更の方式」を参照。
+Flask-Migrateは採用済みの技術として扱う。詳細は `docs/architecture.md` の「DBスキーマ変更の方式」（特に「migrationの作成と適用」）を参照。
 
 - DBスキーマ（テーブル・カラムの追加や変更など）は、設計資料（`docs/architecture.md` のデータ設計）の承認なしに変更しない
 - テーブルの作成・変更はmigrationを通して行う。`db.create_all()` は使わない
-- migrationファイル（`migrations/versions/` 配下）もレビュー対象。**自動生成されたmigrationを、確認なしに採用（適用）しない**
-- `flask db migrate` でmigrationを生成したら、`flask db upgrade` を実行する前に、次をチャットで報告してKomaの承認を待つ
-  - 作成・変更されるテーブルとカラム（名前・型・NULL可否）、外部キー
+- **開発用DB（`instance/app.db`）に対して、`flask db` のコマンド（`migrate`・`upgrade`・`downgrade`・`stamp` など）を実行しない。** 開発用DBへのmigrationの適用は、Komaが、バックアップを取ってから行う
+- migrationの生成は、既存のmigrationをすべて適用した一時的なDB（一時ディレクトリに作る）と、モデルを比べて行う。コマンドは、タスクのMDに書かれたとおりに実行する
+- migrationファイル（`migrations/versions/` 配下）もレビュー対象。**生成したmigrationを、承認なしに使わない**
+- migrationを生成したら、そのmigrationを**どのDBにも適用する前に**、次をチャットで報告して止まり、Komaの承認を待つ（承認ゲート）。`python -m pytest` も、一時的なDBにmigrationを適用するため、承認までは実行しない
+  - 生成したファイル名、`revision`、`down_revision`
+  - `upgrade()` と `downgrade()` の全文
+  - 作成・変更されるテーブルとカラム（名前・型・NULL可否）、主キー・外部キーなどの制約の名前
+  - 既存のテーブルへの変更の有無
   - `docs/architecture.md` のデータ設計との差異の有無
   - `upgrade()` の中に、削除（drop）や変更（alter）を含む操作がないか（`downgrade()` の巻き戻し用の処理は対象外）
+- 承認されたmigrationファイルは、変更しない（変更が必要になったら、停止して報告し、もう一度承認を得る）
 - 設計資料にない変更や、`upgrade()` の中に削除・変更を含む操作がmigrationに含まれていた場合は、適用せず「設計上の問題を見つけたとき」の手順に従う
 - `instance/app.db` や `migrations/` の削除・作り直しは、Komaの確認なしに行わない
 
@@ -90,7 +96,7 @@ Flask-Migrateは採用済みの技術として扱う。詳細は `docs/architect
 ## 作業の進め方
 1. 指定された `docs/tasks/` のタスクファイルを読む
 2. 関係する設計資料を読む
-3. タスクの「やること」の範囲だけを実装する
+3. タスクの「やること」の範囲だけを実装する。タスクのMDに、途中で報告して止まる箇所（承認ゲート）がある場合は、そこで止まり、Komaの回答を待つ
 4. タスクの「完了の確認方法」に沿って動作を確認する（テストがあるタスクでは、`python -m pytest` の結果を含む）
 5. 実装内容をチャットで簡潔に報告する（変更したファイルと、確認結果）
 
