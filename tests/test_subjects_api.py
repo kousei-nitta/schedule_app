@@ -703,6 +703,7 @@ def test_unsupported_subject_methods_do_not_change_rows(
 
     url = url.format(subject_id=subject_id)
     before_subject = client.get(f"/api/subjects/{subject_id}")
+    assert before_subject.status_code == 200
     before_count = subject_count(app)
     response = getattr(client, method)(url)
     assert response.status_code == 405

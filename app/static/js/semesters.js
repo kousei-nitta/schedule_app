@@ -10,6 +10,7 @@ import {
 
 let semesters = [];
 let selectedId = null;
+let semesterModalShowing = false;
 
 const SEMESTER_FIELDS = {
   name: {
@@ -224,6 +225,23 @@ function showContent() {
   renderBanner();
 }
 
+function closeSemesterModal() {
+  const modal = getElement("semester-modal");
+  const instance = window.bootstrap.Modal.getOrCreateInstance(modal);
+
+  if (semesterModalShowing) {
+    modal.addEventListener(
+      "shown.bs.modal",
+      () => {
+        instance.hide();
+      },
+      { once: true },
+    );
+    return;
+  }
+  instance.hide();
+}
+
 async function loadSemesters(preferredId = null) {
   showLoading();
   try {
@@ -266,8 +284,7 @@ async function submitSemester(event) {
       start_date: startDate,
       end_date: endDate,
     });
-    const modal = getElement("semester-modal");
-    window.bootstrap.Modal.getOrCreateInstance(modal).hide();
+    closeSemesterModal();
     await loadSemesters(created.id);
   } catch (error) {
     showApiError(error, SEMESTER_FIELDS, SEMESTER_FORM_ERROR_ID);
@@ -279,7 +296,14 @@ export function initSemesters() {
   getElement("semester-retry-button").addEventListener("click", () => {
     loadSemesters();
   });
-  getElement("semester-modal").addEventListener("show.bs.modal", resetForm);
+  const modal = getElement("semester-modal");
+  modal.addEventListener("show.bs.modal", () => {
+    semesterModalShowing = true;
+  });
+  modal.addEventListener("shown.bs.modal", () => {
+    semesterModalShowing = false;
+  });
+  modal.addEventListener("show.bs.modal", resetForm);
   getElement("semester-form").addEventListener("submit", submitSemester);
   loadSemesters();
 }
