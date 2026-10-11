@@ -45,4 +45,8 @@ def create_app(test_config: dict[str, Any] | None = None):
     from app.routes.subjects import subjects_bp
 
     app.register_blueprint(subjects_bp)
+
+    from app.routes.closures import closures_bp
+
+    app.register_blueprint(closures_bp)
     return app

@@ -31,8 +31,47 @@ def test_migrations_create_all_expected_tables(app):
         "subjects",
         "events",
         "tasks",
+        "closures",
         "alembic_version",
     } <= tables
+
+
+def test_closures_table_matches_design(app):
+    with app.app_context():
+        inspector = inspect(db.engine)
+        columns = {
+            column["name"]: (str(column["type"]), column["nullable"])
+            for column in inspector.get_columns("closures")
+        }
+        primary_key = inspector.get_pk_constraint("closures")
+        foreign_keys = [
+            (
+                foreign_key["name"],
+                foreign_key["constrained_columns"],
+                foreign_key["referred_table"],
+                foreign_key["referred_columns"],
+            )
+            for foreign_key in inspector.get_foreign_keys("closures")
+        ]
+
+    assert columns == {
+        "id": ("INTEGER", False),
+        "semester_id": ("INTEGER", False),
+        "date": ("DATE", False),
+        "name": ("VARCHAR(100)", True),
+    }
+    assert primary_key == {
+        "constrained_columns": ["id"],
+        "name": "pk_closures",
+    }
+    assert foreign_keys == [
+        (
+            "fk_closures_semester_id_semesters",
+            ["semester_id"],
+            "semesters",
+            ["id"],
+        )
+    ]
 
 
 def test_test_database_is_a_private_copy(app, template_db, tmp_path):

@@ -102,6 +102,49 @@ def read_json_object() -> tuple[
     return payload, None
 
 
+def read_id_query(
+    name: str,
+    multiple_message: str,
+    format_message: str,
+) -> tuple[bool, int | None, str | None]:
+    """一覧の絞り込みのクエリで指定されたIDを読み取る。
+
+    戻り値は、（指定の有無、ID、エラーメッセージ）の組。
+    - 指定がない：(False, None, None)
+    - 2回以上の指定：(True, None, multiple_message)
+    - 数字だけでない（空文字・符号・小数・全角数字・空白など）：
+      (True, None, format_message)
+    - 数字だけだが、1〜MAX_IDの外（0、MAX_IDより大きい数）：
+      (True, None, None)。該当するデータがないため、呼び出し側は、
+      DBに問い合わせずに、空の一覧を返す
+    - それ以外：(True, ID, None)
+    DBは読まない（IDのデータが存在するかは、確かめない）。
+    """
+    values = request.args.getlist(name)
+    if not values:
+        return False, None, None
+    if len(values) > 1:
+        return True, None, multiple_message
+
+    text = values[0]
+    if re.fullmatch(r"[0-9]+", text) is None:
+        return True, None, format_message
+
+    # MAX_IDより大きい数をDBに渡すとOverflowErrorになり、非常に長い
+    # 数字の文字列をint()に渡すとValueErrorになるため、int()の前に、
+    # 先頭の0を取り除いた桁数と値で、MAX_IDと比べる。
+    normalized_text = text.lstrip("0")
+    maximum_text = str(MAX_ID)
+    if normalized_text == "" or len(normalized_text) > len(maximum_text):
+        return True, None, None
+    if (
+        len(normalized_text) == len(maximum_text)
+        and normalized_text > maximum_text
+    ):
+        return True, None, None
+    return True, int(normalized_text), None
+
+
 def validate_allowed_fields(
     payload: dict[str, Any],
     allowed_fields: set[str],
@@ -268,3 +311,30 @@ def parse_date(value: Any) -> date | None:
 def format_date(value: date) -> str:
     """日付をAPIのYYYY-MM-DD形式にする。"""
     return value.isoformat()
+
+
+def validate_required_date(
+    payload: dict[str, Any],
+    field: str,
+    required_message: str,
+    format_message: str,
+) -> tuple[date | None, str | None]:
+    """必須の日付を検査し、Pythonのdateかエラーメッセージを返す。
+
+    文字列でない値は、時刻と同じく、format_messageを返す。
+    使用できない文字（孤立サロゲート）を含む場合は、
+    UNUSABLE_CHARACTER_MESSAGEを返す。この検査は、型の検査のあと、
+    形式の検査より前に、常に行う。
+    """
+    value = payload.get(field)
+    if field not in payload or value is None or value == "":
+        return None, required_message
+    if not isinstance(value, str):
+        return None, format_message
+    if contains_unusable_character(value):
+        return None, UNUSABLE_CHARACTER_MESSAGE
+
+    parsed_value = parse_date(value)
+    if parsed_value is None:
+        return None, format_message
+    return parsed_value, None
