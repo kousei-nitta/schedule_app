@@ -124,7 +124,12 @@ def validate_required_string(
     length_message: str | None = None,
     strip: bool = False,
 ) -> tuple[str | None, str | None]:
-    """必須文字列を検査し、値またはエラーメッセージを返す。"""
+    """必須文字列を検査し、値またはエラーメッセージを返す。
+
+    使用できない文字（孤立サロゲート）を含む場合は、
+    UNUSABLE_CHARACTER_MESSAGEを返す。この検査は、引数の指定に関係なく、
+    型の検査のあと、前後の空白の除去と長さの検査より前に、常に行う。
+    """
     if max_length is not None and length_message is None:
         raise ValueError("max_lengthを指定する場合はlength_messageが必要です")
 
@@ -152,7 +157,12 @@ def validate_optional_string(
     max_length: int | None = None,
     length_message: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """任意文字列を検査して正規化し、値またはエラーを返す。"""
+    """任意文字列を検査して正規化し、値またはエラーを返す。
+
+    使用できない文字（孤立サロゲート）を含む場合は、
+    UNUSABLE_CHARACTER_MESSAGEを返す。この検査は、引数の指定に関係なく、
+    型の検査のあと、前後の空白の除去と長さの検査より前に、常に行う。
+    """
     if max_length is not None and length_message is None:
         raise ValueError("max_lengthを指定する場合はlength_messageが必要です")
 
@@ -221,7 +231,12 @@ def validate_required_time(
     required_message: str,
     format_message: str,
 ) -> tuple[time | None, str | None]:
-    """必須時刻を検査し、Pythonのtimeかエラーメッセージを返す。"""
+    """必須時刻を検査し、Pythonのtimeかエラーメッセージを返す。
+
+    使用できない文字（孤立サロゲート）を含む場合は、
+    UNUSABLE_CHARACTER_MESSAGEを返す。この検査は、型の検査のあと、
+    形式の検査より前に、常に行う。
+    """
     value = payload.get(field)
     if field not in payload or value is None or value == "":
         return None, required_message
