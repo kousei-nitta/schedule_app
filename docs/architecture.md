@@ -48,6 +48,7 @@
 | 一覧表示の「今日以降」の範囲 | FullCalendarのリスト表示は期間を指定する方式のため、期間の上限（例：今日から3か月）が必要 | カレンダー表示を実装するタスクの前 |
 | FullCalendarの読み込み方法 | CDNから読み込むか、ファイルを `app/static/` に置くか（Bootstrapは、CDN方式で確定済み） | カレンダー表示を実装するタスクの前 |
 | 日付補助の共通化 | 2つ目のモジュールが、日付の補助処理（今日の日付の文字列、日付の表示形式など）を必要としたときに、共通のファイル（例：`dates.js`）へ切り出すか | 日付の補助処理を、2つ目のモジュールが必要とするタスクの前 |
+| モーダルを閉じる処理の共通化 | 2つ目のモジュールが、JavaScriptからモーダルを閉じる処理（表示のアニメーションの途中なら、表示が終わってから閉じる。「JavaScriptの構成」の規則）を必要としたときに、`ui.js` の共通の関数にするか。共通にする場合は、`ui.js` の公開する関数の一覧と、モーダルごとに「表示の途中か」を記録する方法も決める | JavaScriptからモーダルを閉じる処理を、2つ目のモジュールが必要とするタスクの前 |
 
 ## データ設計
 テーブルは5つ（Semester・Subject・Event・Task・Closure）。関係は **Semester → Subject → Event / Task** と、**Semester → Closure**。Closure（休講日）は、初期migrationには含まれない（休講日を実装するときに、新しいmigrationで追加する）。
@@ -574,6 +575,7 @@ NAMING_CONVENTION = {
 - 画面の骨組み（ボタン・モーダル・表示領域）のHTMLは、`index.html`（または、そこから `{% include %}` する部分テンプレート）に書く。JavaScriptが行うのは、表示・非表示の切り替え（Bootstrapの `d-none`）と、文字（`textContent`）の変更。動的に作るのは、件数によって増える部分（一覧のタブや行など）だけで、`createElement` で作り、`replaceChildren()` で差し替える
 - DOMの `id` は、`<リソース名の単数形>-<部分>` の形にする（例：`semester-tabs`、`semester-form`）。入力欄のエラー表示の `id` は、`<項目>-error`（例：`semester-start-date-error`）
 - モーダルはBootstrapのものを使う。決まった操作で開くときは、HTMLの `data-bs-toggle="modal"` を使ってよい。値を設定して開くときなどは、JavaScriptから `window.bootstrap.Modal` で開く。閉じるときも、`window.bootstrap.Modal` を使う（インスタンスは、`getOrCreateInstance` で取得する）。`base.html` のBootstrapの `<script>` は通常のスクリプトで、先に読み込まれ、`type="module"` のスクリプトは、ページの解析後に実行されるため、`window.bootstrap` を使える。モーダルのHTMLは、`<main>` や `.tab-pane` の外（ページの最上位）に置く
+- JavaScriptからモーダルを閉じるとき（例：登録に成功したとき）は、表示のアニメーションの途中でも閉じられるようにする。Bootstrapは、モーダルを開き始めてから表示が終わるまで（`show.bs.modal` から `shown.bs.modal` まで）の `hide()` を、何もせずに無視するため、そのまま呼ぶと、開いた直後の操作でモーダルが閉じずに残る。表示の途中かどうかは、そのモジュールが `show.bs.modal` と `shown.bs.modal` のイベントで自分で記録し（Bootstrapの内部の値は使わない）、途中なら、`shown.bs.modal` を待ってから閉じる。この処理は、使うモジュールの中に置く（今は `semesters.js` だけ）。2つ目のモジュールで必要になったときに、`ui.js` へ共通化するかを決める（未決定事項「モーダルを閉じる処理の共通化」）
 - タブ（`role="tablist"`）の直下の `li` には、`role="presentation"` を付ける。選択が変わったときは、タブを作り直さず、既存のボタンの `active` と `aria-selected` を付け替える（キーボードのフォーカスを保つため）
 - 日付の補助処理（今日の日付の文字列など）は、必要としたモジュールの中に置く。2つ目のモジュールで必要になったときに、共通のファイルに切り出すかを決める（未決定事項「日付補助の共通化」）。今日の日付は、ブラウザのローカルの日付から作り（`toISOString()` は使わない）、`YYYY-MM-DD` の文字列のまま比較する
 - 画面のエラー表示：`ApiError` の `fields` があるときは、該当する項目の下に表示する。それ以外のエラーは、`message` を、フォームの上部や画面に表示する。`ApiError` でない例外（プログラムの誤りなど）は、技術的なメッセージを画面に出さず、固定の日本語のメッセージを表示し、詳細は `console.error` に出す
