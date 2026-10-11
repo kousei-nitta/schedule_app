@@ -1,12 +1,12 @@
-import re
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify
 
 from app.api_helpers import (
     MAX_ID,
     api_error_response,
     format_time,
+    read_id_query,
     read_json_object,
     validate_allowed_fields,
     validate_optional_string,
@@ -42,37 +42,23 @@ def subject_to_dict(subject: Subject) -> dict[str, Any]:
 
 @subjects_bp.get("")
 def get_subjects():
-    semester_values = request.args.getlist("semester_id")
-    if len(semester_values) > 1:
+    specified, semester_id, query_error = read_id_query(
+        "semester_id",
+        "学期IDは1つだけ指定してください",
+        "学期IDは整数で指定してください",
+    )
+    if query_error is not None:
         return api_error_response(
             "validation_error",
             "入力内容に誤りがあります",
-            {"semester_id": "学期IDは1つだけ指定してください"},
+            {"semester_id": query_error},
         )
 
     statement = db.select(Subject)
-    if semester_values:
-        semester_text = semester_values[0]
-        if re.fullmatch(r"[0-9]+", semester_text) is None:
-            return api_error_response(
-                "validation_error",
-                "入力内容に誤りがあります",
-                {"semester_id": "学期IDは整数で指定してください"},
-            )
-
-        normalized_id = semester_text.lstrip("0")
-        if not normalized_id:
+    if specified:
+        if semester_id is None:
+            # 範囲外のIDに当たる学期はないため、空の一覧を返す。
             return jsonify([])
-
-        # 非常に長い数字をint()に渡すとValueErrorになり、MAX_IDを超える
-        # 数をDBに渡すとOverflowErrorになるため、変換前に桁数と値を確認する。
-        maximum_id = str(MAX_ID)
-        if len(normalized_id) > len(maximum_id) or (
-            len(normalized_id) == len(maximum_id)
-            and normalized_id > maximum_id
-        ):
-            return jsonify([])
-        semester_id = int(normalized_id)
         statement = statement.where(Subject.semester_id == semester_id)
 
     statement = statement.order_by(

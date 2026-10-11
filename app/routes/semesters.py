@@ -1,5 +1,4 @@
 import re
-from datetime import date
 from typing import Any
 
 from flask import Blueprint, jsonify
@@ -8,9 +7,9 @@ from app.api_helpers import (
     MAX_ID,
     api_error_response,
     format_date,
-    parse_date,
     read_json_object,
     validate_allowed_fields,
+    validate_required_date,
     validate_required_string,
 )
 from app.extensions import db
@@ -78,39 +77,23 @@ def create_semester():
         elif Semester.query.filter_by(name=name).first() is not None:
             fields["name"] = "同じ名前の学期がすでに登録されています"
 
-    start_date_text, start_date_error = validate_required_string(
+    start_date_value, start_date_error = validate_required_date(
         payload,
         "start_date",
         "開始日は必須です",
         "開始日は実在する日付を「YYYY-MM-DD」の形式で指定してください",
     )
-    start_date_value: date | None = None
     if start_date_error is not None:
         fields["start_date"] = start_date_error
-    else:
-        assert start_date_text is not None
-        start_date_value = parse_date(start_date_text)
-        if start_date_value is None:
-            fields["start_date"] = (
-                "開始日は実在する日付を「YYYY-MM-DD」の形式で指定してください"
-            )
 
-    end_date_text, end_date_error = validate_required_string(
+    end_date_value, end_date_error = validate_required_date(
         payload,
         "end_date",
         "終了日は必須です",
         "終了日は実在する日付を「YYYY-MM-DD」の形式で指定してください",
     )
-    end_date_value: date | None = None
     if end_date_error is not None:
         fields["end_date"] = end_date_error
-    else:
-        assert end_date_text is not None
-        end_date_value = parse_date(end_date_text)
-        if end_date_value is None:
-            fields["end_date"] = (
-                "終了日は実在する日付を「YYYY-MM-DD」の形式で指定してください"
-            )
 
     if (
         start_date_value is not None

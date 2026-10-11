@@ -1,14 +1,18 @@
-from datetime import time
+from datetime import date, time
 
 import pytest
+from flask import Flask
 
 from app.api_helpers import (
+    MAX_ID,
     UNUSABLE_CHARACTER_MESSAGE,
     contains_unusable_character,
     format_time,
     parse_time,
+    read_id_query,
     validate_optional_string,
     validate_required_integer,
+    validate_required_date,
     validate_required_string,
     validate_required_time,
 )
@@ -340,3 +344,122 @@ def test_validate_required_integer_accepts_integers_without_range(value):
         "必須",
         "型",
     ) == (value, None)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2026-04-01", date(2026, 4, 1)),
+        ("2028-02-29", date(2028, 2, 29)),
+    ],
+)
+def test_validate_required_date_converts_value(value, expected):
+    assert validate_required_date(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (expected, None)
+
+
+@pytest.mark.parametrize("payload", [{}, {"value": None}, {"value": ""}])
+def test_validate_required_date_reports_required(payload):
+    assert validate_required_date(
+        payload,
+        "value",
+        "必須",
+        "形式",
+    ) == (None, "必須")
+
+
+@pytest.mark.parametrize("value", [20260401, True])
+def test_validate_required_date_reports_non_string_as_format_error(value):
+    assert validate_required_date(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (None, "形式")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-4-1",
+        "2026/04/01",
+        "20260401",
+        "2026-02-30",
+        " 2026-04-01",
+        "2026-04-01 ",
+        "２０２６-04-01",
+    ],
+)
+def test_validate_required_date_reports_format_error(value):
+    assert validate_required_date(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (None, "形式")
+
+
+@pytest.mark.parametrize("value", ["\ud800", "2026-04-01\udc00"])
+def test_validate_required_date_rejects_unusable_characters(value):
+    assert validate_required_date(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (None, UNUSABLE_CHARACTER_MESSAGE)
+
+
+def read_semester_id_query(query_string):
+    # read_id_queryは、要求のクエリを読むため、DBを使わない最小の
+    # Flaskアプリで、要求の中の状態を作って呼ぶ。
+    request_app = Flask(__name__)
+    with request_app.test_request_context(query_string=query_string):
+        return read_id_query("semester_id", "複数", "形式")
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [{}, {"foo": "bar"}],
+)
+def test_read_id_query_without_value_is_not_specified(query_string):
+    assert read_semester_id_query(query_string) == (False, None, None)
+
+
+def test_read_id_query_rejects_repeated_values():
+    assert read_semester_id_query(
+        {"semester_id": ["1", "2"]}
+    ) == (True, None, "複数")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "abc", "-1", "1.5", "１", " 1", "1 "],
+)
+def test_read_id_query_rejects_non_digit_text(value):
+    assert read_semester_id_query(
+        {"semester_id": value}
+    ) == (True, None, "形式")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["0", "000", str(MAX_ID + 1), "9" * 5000],
+)
+def test_read_id_query_out_of_range_matches_nothing(value):
+    assert read_semester_id_query(
+        {"semester_id": value}
+    ) == (True, None, None)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_id"),
+    [("1", 1), ("001", 1), (str(MAX_ID), MAX_ID)],
+)
+def test_read_id_query_returns_id(value, expected_id):
+    assert read_semester_id_query(
+        {"semester_id": value}
+    ) == (True, expected_id, None)

@@ -10,3 +10,4 @@ class Semester(db.Model):
     end_date = db.Column(db.Date, nullable=False)
 
     subjects = db.relationship("Subject", back_populates="semester")
+    closures = db.relationship("Closure", back_populates="semester")
