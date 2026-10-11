@@ -10,6 +10,8 @@ import {
 
 let semesters = [];
 let selectedId = null;
+// 学期の登録モーダルが、表示のアニメーションの途中か。Bootstrapは、
+// 表示の途中のhide()を無視するため、閉じるときに確かめる。
 let semesterModalShowing = false;
 
 const SEMESTER_FIELDS = {
@@ -230,6 +232,7 @@ function closeSemesterModal() {
   const instance = window.bootstrap.Modal.getOrCreateInstance(modal);
 
   if (semesterModalShowing) {
+    // 表示の途中なら、表示が終わったとき（shown.bs.modal）に閉じる。
     modal.addEventListener(
       "shown.bs.modal",
       () => {
