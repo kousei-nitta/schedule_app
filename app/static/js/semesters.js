@@ -115,7 +115,7 @@ function renderTabs() {
     item.append(button);
     fragment.append(item);
   }
-  tabs.replaceChildren(fragment);
+
   tabs.replaceChildren(fragment);
 }
 
