@@ -1,4 +1,5 @@
 import { apiRequest } from "./api.js";
+import { formatJapaneseDate, localDateString } from "./dates.js";
 import {
   clearFormErrors,
   errorMessageOf,
@@ -35,14 +36,6 @@ const SEMESTER_SUBMIT_LABELS = {
   busy: "登録中…",
 };
 
-function localDateString(date = new Date()) {
-  // toISOString()はUTC日付に変換するため、ローカル日付が前日になることがある。
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function chooseInitialSemester(items, today) {
   // YYYY-MM-DDは桁が固定されているため、文字列の大小が日付の前後と一致する。
   const current = items.find(
@@ -75,11 +68,6 @@ function chooseInitialSemester(items, today) {
     }
   }
   return mostRecent;
-}
-
-function formatJapaneseDate(dateString) {
-  const [year, month, day] = dateString.split("-").map(Number);
-  return `${year}年${month}月${day}日`;
 }
 
 function clearSemesterFormErrors() {

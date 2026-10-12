@@ -591,6 +591,7 @@ def test_unsupported_closure_methods_do_not_change_rows(
     closure_id = make_closure(app, semester_id, date(2026, 5, 15))
     url = url.format(closure_id=closure_id)
     before = client.get("/api/closures")
+    assert before.status_code == 200
 
     response = getattr(client, method)(url)
 
