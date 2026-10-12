@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Any
 
 from flask import Blueprint, jsonify
@@ -13,9 +14,12 @@ from app.api_helpers import (
     validate_required_date,
     validate_required_integer,
 )
+from app.class_events import build_class_event
 from app.extensions import db
 from app.models.closure import Closure
+from app.models.event import Event
 from app.models.semester import Semester
+from app.models.subject import Subject
 
 
 closures_bp = Blueprint(
@@ -33,6 +37,57 @@ def closure_to_dict(closure: Closure) -> dict[str, Any]:
         "date": format_date(closure.date),
         "name": closure.name,
     }
+
+
+def delete_generated_class_events(semester_id: int, event_date: date) -> None:
+    """学期の授業の、その日付の自動生成の予定を削除する（commitしない）。
+
+    休講日の追加で使う。単発の予定（is_generated=False）は削除しない。
+    """
+    semester_subject_ids = db.select(Subject.id).where(
+        Subject.semester_id == semester_id
+    )
+    db.session.execute(
+        db.delete(Event).where(
+            Event.subject_id.in_(semester_subject_ids),
+            Event.date == event_date,
+            Event.is_generated.is_(True),
+        )
+    )
+
+
+def build_missing_class_events(
+    semester_id: int,
+    event_date: date,
+) -> list[Event]:
+    """その日付の自動生成の予定がない授業の分だけ、予定を作る（追加しない）。
+
+    休講日の削除で使う。対象は、学期の授業のうち、曜日がその日付の曜日と
+    同じ授業。同じ授業・同じ日付の自動生成の予定を2件にしないため、
+    すでにある授業は除く。単発の予定（is_generated=False）の有無は見ない。
+    """
+    subjects = db.session.scalars(
+        db.select(Subject)
+        .where(
+            Subject.semester_id == semester_id,
+            Subject.weekday == event_date.weekday(),
+        )
+        .order_by(Subject.id.asc())
+    ).all()
+    subject_ids_with_event = set(
+        db.session.scalars(
+            db.select(Event.subject_id).where(
+                Event.subject_id.in_([subject.id for subject in subjects]),
+                Event.date == event_date,
+                Event.is_generated.is_(True),
+            )
+        )
+    )
+    return [
+        build_class_event(subject, event_date)
+        for subject in subjects
+        if subject.id not in subject_ids_with_event
+    ]
 
 
 @closures_bp.get("")
@@ -135,6 +190,9 @@ def create_closure():
         name=name,
     )
     db.session.add(closure)
+    # 休講日には授業の予定を作らないため、その日の自動生成の予定を消す。
+    delete_generated_class_events(semester_id, closure_date)
+    # 休講日の追加と予定の削除を、1回のcommitで保存する。
     db.session.commit()
     return jsonify(closure_to_dict(closure)), 201
 
@@ -145,6 +203,13 @@ def delete_closure(closure_id: int):
     if closure is None:
         return api_error_response("not_found", "休講日が見つかりません")
 
+    semester_id = closure.semester_id
+    closure_date = closure.date
     db.session.delete(closure)
+    # 休講日でなくなった日に、その曜日の授業の自動生成の予定を作る。
+    events = build_missing_class_events(semester_id, closure_date)
+    # 予定は、明示的に追加する（授業との関係だけでは、セッションに入らない）。
+    db.session.add_all(events)
+    # 休講日の削除と予定の作成を、1回のcommitで保存する。
     db.session.commit()
     return "", 204

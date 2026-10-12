@@ -14,7 +14,9 @@ from app.api_helpers import (
     validate_required_string,
     validate_required_time,
 )
+from app.class_events import build_class_events
 from app.extensions import db
+from app.models.closure import Closure
 from app.models.semester import Semester
 from app.models.subject import Subject
 
@@ -85,6 +87,7 @@ def create_subject():
         return error_response
 
     fields: dict[str, str] = {}
+    semester: Semester | None = None
     allowed_fields = {
         "semester_id",
         "subject_name",
@@ -108,7 +111,8 @@ def create_subject():
         if not 1 <= semester_id <= MAX_ID:
             fields["semester_id"] = "指定された学期が存在しません"
         else:
-            if db.session.get(Semester, semester_id) is None:
+            semester = db.session.get(Semester, semester_id)
+            if semester is None:
                 fields["semester_id"] = "指定された学期が存在しません"
 
     subject_name, subject_name_error = validate_required_string(
@@ -186,6 +190,15 @@ def create_subject():
             fields,
         )
 
+    # 予定を作らない日（学期の休講日）を、先に取得する。
+    excluded_dates = set(
+        db.session.scalars(
+            db.select(Closure.date).where(
+                Closure.semester_id == semester.id
+            )
+        )
+    )
+
     subject = Subject(
         semester_id=semester_id,
         subject_name=subject_name,
@@ -196,5 +209,16 @@ def create_subject():
         notes=notes,
     )
     db.session.add(subject)
+    events = build_class_events(subject, semester, excluded_dates)
+    # 予定も、明示的に追加する。授業を先に追加したあとで作った予定は、
+    # 授業との関係だけではセッションに入らず、エラーにならないまま
+    # 保存されないため。
+    db.session.add_all(events)
+    # 授業と予定を1回のcommitで保存する。commitの前に例外が起きた場合は、
+    # どちらも保存されない。
     db.session.commit()
-    return jsonify(subject_to_dict(subject)), 201
+
+    response = subject_to_dict(subject)
+    # 作成のレスポンスにだけ付ける付加情報（DBには保存しない）。
+    response["generated_event_count"] = len(events)
+    return jsonify(response), 201
