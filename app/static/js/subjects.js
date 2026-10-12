@@ -47,7 +47,7 @@ const SUBJECT_SUBMIT_LABELS = {
   busy: "登録中…",
 };
 
-function resetSubjectForm(clearSuccess = true) {
+function resetSubjectForm({ clearSuccess = true } = {}) {
   getElement("subject-form").reset();
   getElement("subject-name").value = "";
   getElement("subject-room").value = "";
@@ -159,7 +159,7 @@ function renderSubjects(subjects) {
   setVisible(getElement("subject-list"), subjects.length > 0);
 }
 
-async function loadSubjects(showLoading = true) {
+async function loadSubjects({ showLoading = true } = {}) {
   if (currentSemester === null) {
     clearSubjectList();
     return;
@@ -189,6 +189,18 @@ async function loadSubjects(showLoading = true) {
   }
 }
 
+// 登録済みのメッセージ。作成された予定の件数によって、文言を変える。
+function subjectCreatedMessage(created) {
+  const registered = `「${created.subject_name}」を登録しました`;
+  if (created.generated_event_count === 0) {
+    return (
+      `${registered}（学期の期間内に、この曜日の授業日がないため、` +
+      "予定は作成されませんでした）"
+    );
+  }
+  return `${registered}（予定${created.generated_event_count}件を作成）`;
+}
+
 async function submitSubject(event) {
   event.preventDefault();
   clearFormErrors(SUBJECT_FIELDS, "subject-form-error");
@@ -199,8 +211,11 @@ async function submitSubject(event) {
   const submitButton = getElement("subject-submit-button");
   setSubmitting(submitButton, true, SUBJECT_SUBMIT_LABELS);
 
+  // try で囲むのは、登録の要求だけにする。登録の成功後の処理で例外が
+  // 起きた場合に、「登録の失敗」として表示しないため。
+  let created;
   try {
-    const created = await apiRequest("POST", "/api/subjects", {
+    created = await apiRequest("POST", "/api/subjects", {
       semester_id: currentSemester.id,
       subject_name: getElement("subject-name").value,
       room: getElement("subject-room").value,
@@ -209,16 +224,17 @@ async function submitSubject(event) {
       end_time: getElement("subject-end-time").value,
       notes: getElement("subject-notes").value,
     });
-
-    success.textContent = `「${created.subject_name}」を登録しました`;
-    setVisible(success, true);
-    resetSubjectForm(false);
-    getElement("subject-name").focus();
-    await loadSubjects(false);
   } catch (error) {
     showApiError(error, SUBJECT_FIELDS, "subject-form-error");
     setSubmitting(submitButton, false, SUBJECT_SUBMIT_LABELS);
+    return;
   }
+
+  success.textContent = subjectCreatedMessage(created);
+  setVisible(success, true);
+  resetSubjectForm({ clearSuccess: false });
+  getElement("subject-name").focus();
+  await loadSubjects({ showLoading: false });
 }
 
 export function initSubjects() {

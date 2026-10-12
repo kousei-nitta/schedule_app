@@ -3,6 +3,7 @@ from datetime import date, time
 import pytest
 from sqlalchemy import func, select
 
+from app.routes import closures as closures_routes
 from app.api_helpers import (
     INVALID_JSON_MESSAGE,
     MAX_ID,
@@ -12,7 +13,6 @@ from app.extensions import db
 from app.models.closure import Closure
 from app.models.event import Event
 from app.models.semester import Semester
-from app.models.subject import Subject
 
 
 DATE_FORMAT_MESSAGE = (
@@ -42,20 +42,6 @@ def make_closure(app, semester_id, closure_date, name=None):
         db.session.add(closure)
         db.session.commit()
         return closure.id
-
-
-def make_friday_subject(app, semester_id):
-    with app.app_context():
-        subject = Subject(
-            semester_id=semester_id,
-            subject_name="金曜の授業",
-            weekday=4,
-            start_time=time(9, 0),
-            end_time=time(10, 0),
-        )
-        db.session.add(subject)
-        db.session.commit()
-        return subject.id
 
 
 def closure_payload(default_semester_id, **overrides):
@@ -600,51 +586,303 @@ def test_unsupported_closure_methods_do_not_change_rows(
     assert client.get("/api/closures").json == before.json
 
 
-def test_closure_creation_does_not_change_events_before_sync(client, app):
-    semester_id = make_semester(app)
-    subject_id = make_friday_subject(app, semester_id)
+# --- 休講日の追加・削除と、予定（Event）の同期（Task 011） ---
+# 学期は 2026-04-01（水）〜2026-07-31（金）。休講日は、金曜日の 2026-05-15。
+
+CLOSURE_DATE = date(2026, 5, 15)
+
+
+def post_subject(client, semester_id, weekday, subject_name="授業"):
+    """APIで授業を登録する（学期の期間の予定が、自動で作られる）。"""
+    response = client.post(
+        "/api/subjects",
+        json={
+            "semester_id": semester_id,
+            "subject_name": subject_name,
+            "weekday": weekday,
+            "start_time": "09:00",
+            "end_time": "10:00",
+        },
+    )
+    assert response.status_code == 201
+    return response.json["id"]
+
+
+def post_closure(client, semester_id, closure_date="2026-05-15"):
+    response = client.post(
+        "/api/closures",
+        json=closure_payload(semester_id, date=closure_date),
+    )
+    assert response.status_code == 201
+    return response.json["id"]
+
+
+def add_single_event(app, subject_id, event_date):
+    """カレンダーから追加した単発の予定（is_generated=False）の代わり。"""
     with app.app_context():
-        db.session.add_all(
-            [
-                Event(
-                    subject_id=subject_id,
-                    category="class",
-                    date=date(2026, 5, 15),
-                    start_time=time(9, 0),
-                    end_time=time(10, 0),
-                    title="金曜の授業",
-                    is_generated=True,
-                ),
-                Event(
-                    subject_id=subject_id,
-                    category="class",
-                    date=date(2026, 5, 15),
-                    start_time=time(10, 0),
-                    end_time=time(11, 0),
-                    title="単発の授業",
-                    is_generated=False,
-                ),
-            ]
+        db.session.add(
+            Event(
+                subject_id=subject_id,
+                category="class",
+                date=event_date,
+                start_time=time(13, 0),
+                end_time=time(14, 0),
+                title="補講",
+                is_generated=False,
+            )
         )
         db.session.commit()
 
-    # Eventの同期を入れる前の段階では、休講日の登録で予定を変えない。
+
+def events_on(app, subject_id, event_date, is_generated):
+    with app.app_context():
+        return db.session.scalar(
+            select(func.count())
+            .select_from(Event)
+            .where(
+                Event.subject_id == subject_id,
+                Event.date == event_date,
+                Event.is_generated.is_(is_generated),
+            )
+        )
+
+
+def generated_event_count(app, subject_id):
+    with app.app_context():
+        return db.session.scalar(
+            select(func.count())
+            .select_from(Event)
+            .where(
+                Event.subject_id == subject_id,
+                Event.is_generated.is_(True),
+            )
+        )
+
+
+def event_snapshot(app):
+    """予定の行を、idを除いて、並べた一覧にする（作り直しの比較用）。"""
+    with app.app_context():
+        events = db.session.scalars(select(Event)).all()
+        return sorted(
+            (
+                event.subject_id,
+                event.date,
+                event.start_time,
+                event.end_time,
+                event.title,
+                event.is_generated,
+            )
+            for event in events
+        )
+
+
+def test_closure_creation_deletes_generated_events_on_that_date(
+    client, app
+):
+    semester_id = make_semester(app)
+    friday_ids = [
+        post_subject(client, semester_id, 4, "金曜1限"),
+        post_subject(client, semester_id, 4, "金曜2限"),
+    ]
+    monday_id = post_subject(client, semester_id, 0, "月曜1限")
+
+    post_closure(client, semester_id)
+
+    for subject_id in friday_ids:
+        assert events_on(app, subject_id, CLOSURE_DATE, True) == 0
+        assert generated_event_count(app, subject_id) == 17
+    assert generated_event_count(app, monday_id) == 17
+
+
+def test_closure_creation_keeps_single_events(client, app):
+    semester_id = make_semester(app)
+    subject_id = post_subject(client, semester_id, 4)
+    add_single_event(app, subject_id, CLOSURE_DATE)
+
+    post_closure(client, semester_id)
+
+    assert events_on(app, subject_id, CLOSURE_DATE, True) == 0
+    assert events_on(app, subject_id, CLOSURE_DATE, False) == 1
+
+
+def test_closure_creation_keeps_events_of_other_semesters(client, app):
+    semester_id = make_semester(app)
+    other_semester_id = make_semester(app, name="2026年度 後期")
+    other_subject_id = post_subject(client, other_semester_id, 4)
+
+    post_closure(client, semester_id)
+
+    assert events_on(app, other_subject_id, CLOSURE_DATE, True) == 1
+    assert generated_event_count(app, other_subject_id) == 18
+
+
+def test_closure_deletion_creates_events_for_subjects_of_that_weekday(
+    client, app
+):
+    semester_id = make_semester(app)
+    closure_id = post_closure(client, semester_id)
+    friday_ids = [
+        post_subject(client, semester_id, 4, "金曜1限"),
+        post_subject(client, semester_id, 4, "金曜2限"),
+    ]
+    monday_id = post_subject(client, semester_id, 0, "月曜1限")
+
+    response = client.delete(f"/api/closures/{closure_id}")
+
+    assert response.status_code == 204
+    for subject_id in friday_ids:
+        assert events_on(app, subject_id, CLOSURE_DATE, True) == 1
+        assert generated_event_count(app, subject_id) == 18
+    assert generated_event_count(app, monday_id) == 17
+
+
+def test_event_created_by_closure_deletion_has_subject_values(client, app):
+    semester_id = make_semester(app)
+    closure_id = post_closure(client, semester_id)
+    response = client.post(
+        "/api/subjects",
+        json={
+            "semester_id": semester_id,
+            "subject_name": "金曜1限",
+            "room": "3号館201",
+            "weekday": 4,
+            "start_time": "09:15",
+            "end_time": "10:45",
+            "notes": "メモ",
+        },
+    )
+    subject_id = response.json["id"]
+
+    client.delete(f"/api/closures/{closure_id}")
+
+    with app.app_context():
+        event = db.session.scalars(
+            select(Event).where(
+                Event.subject_id == subject_id,
+                Event.date == CLOSURE_DATE,
+            )
+        ).one()
+        assert event.category == "class"
+        assert event.start_time == time(9, 15)
+        assert event.end_time == time(10, 45)
+        assert event.title == "金曜1限"
+        assert event.room == "3号館201"
+        assert event.employer is None
+        assert event.notes == "メモ"
+        assert event.is_generated is True
+
+
+def test_closure_deletion_creates_event_even_with_single_event(client, app):
+    semester_id = make_semester(app)
+    closure_id = post_closure(client, semester_id)
+    subject_id = post_subject(client, semester_id, 4)
+    add_single_event(app, subject_id, CLOSURE_DATE)
+
+    client.delete(f"/api/closures/{closure_id}")
+
+    # 単発の予定の有無は見ないため、自動生成の予定が作られ、両方が並ぶ。
+    assert events_on(app, subject_id, CLOSURE_DATE, True) == 1
+    assert events_on(app, subject_id, CLOSURE_DATE, False) == 1
+
+
+def test_closure_deletion_does_not_duplicate_generated_events(client, app):
+    semester_id = make_semester(app)
+    subject_id = post_subject(client, semester_id, 4)
+    # APIを通さずに休講日を作り、その日の自動生成の予定が残った状態にする。
+    closure_id = make_closure(app, semester_id, CLOSURE_DATE)
+
+    client.delete(f"/api/closures/{closure_id}")
+
+    assert events_on(app, subject_id, CLOSURE_DATE, True) == 1
+    assert generated_event_count(app, subject_id) == 18
+
+
+def test_closure_deletion_skips_other_weekdays_and_other_semesters(
+    client, app
+):
+    semester_id = make_semester(app)
+    other_semester_id = make_semester(app, name="2026年度 後期")
+    closure_id = post_closure(client, semester_id)
+    monday_id = post_subject(client, semester_id, 0)
+    # 曜日が違う授業は、同じ日付に単発の予定があっても、予定を作らない。
+    add_single_event(app, monday_id, CLOSURE_DATE)
+    other_subject_id = post_subject(client, other_semester_id, 4)
+
+    client.delete(f"/api/closures/{closure_id}")
+
+    assert events_on(app, monday_id, CLOSURE_DATE, True) == 0
+    assert events_on(app, other_subject_id, CLOSURE_DATE, True) == 1
+
+
+def test_closure_creation_then_deletion_restores_events(client, app):
+    semester_id = make_semester(app)
+    friday_id = post_subject(client, semester_id, 4)
+    add_single_event(app, friday_id, CLOSURE_DATE)
+    post_subject(client, semester_id, 0)
+    before = event_snapshot(app)
+
+    closure_id = post_closure(client, semester_id)
+    assert event_snapshot(app) != before
+    client.delete(f"/api/closures/{closure_id}")
+
+    assert event_snapshot(app) == before
+
+
+def test_closure_on_day_without_subjects_changes_no_events(client, app):
+    semester_id = make_semester(app)
+    post_subject(client, semester_id, 4)
+    post_subject(client, semester_id, 0)
+    before = event_snapshot(app)
+
+    # 2026-05-16 は土曜日で、その曜日の授業はない。
+    closure_id = post_closure(client, semester_id, "2026-05-16")
+    assert event_snapshot(app) == before
+    client.delete(f"/api/closures/{closure_id}")
+
+    assert event_snapshot(app) == before
+
+
+def test_closure_creation_failure_saves_nothing(client, app, monkeypatch):
+    semester_id = make_semester(app)
+    subject_id = post_subject(client, semester_id, 4)
+    real_delete = closures_routes.delete_generated_class_events
+
+    def delete_then_fail(*args, **kwargs):
+        # 予定を消したあとで、commitの前に例外を起こす。
+        real_delete(*args, **kwargs)
+        raise RuntimeError("intentional test failure")
+
+    monkeypatch.setattr(
+        closures_routes, "delete_generated_class_events", delete_then_fail
+    )
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+
     response = client.post(
         "/api/closures",
         json=closure_payload(semester_id),
     )
 
-    assert response.status_code == 201
-    assert event_count(app) == 2
+    assert response.status_code == 500
+    assert response.json["error"]["code"] == "server_error"
+    assert closure_count(app) == 0
+    assert events_on(app, subject_id, CLOSURE_DATE, True) == 1
 
 
-def test_closure_deletion_does_not_create_events_before_sync(client, app):
+def test_closure_deletion_failure_saves_nothing(client, app, monkeypatch):
     semester_id = make_semester(app)
-    make_friday_subject(app, semester_id)
-    closure_id = make_closure(app, semester_id, date(2026, 5, 15))
+    closure_id = post_closure(client, semester_id)
+    subject_id = post_subject(client, semester_id, 4)
 
-    # Eventの同期を入れる前の段階では、休講日の削除で予定を作らない。
+    def fail(*args, **kwargs):
+        raise RuntimeError("intentional test failure")
+
+    # routeのモジュールが取り込んだ名前を置き換える。
+    monkeypatch.setattr(closures_routes, "build_class_event", fail)
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+
     response = client.delete(f"/api/closures/{closure_id}")
 
-    assert response.status_code == 204
-    assert event_count(app) == 0
+    assert response.status_code == 500
+    assert response.json["error"]["code"] == "server_error"
+    assert closure_count(app) == 1
+    assert events_on(app, subject_id, CLOSURE_DATE, True) == 0

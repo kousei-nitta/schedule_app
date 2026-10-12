@@ -9,6 +9,7 @@ from app.api_helpers import (
     UNUSABLE_CHARACTER_MESSAGE,
 )
 from app.extensions import db
+from app.models.closure import Closure
 from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
@@ -71,6 +72,32 @@ def subject_count(app):
         return db.session.scalar(select(func.count()).select_from(Subject))
 
 
+def event_count(app):
+    with app.app_context():
+        return db.session.scalar(select(func.count()).select_from(Event))
+
+
+def generated_event_dates(app, subject_id):
+    """授業の自動生成の予定の日付を、昇順で返す（同じ日付が2件あれば2回）。"""
+    with app.app_context():
+        return list(
+            db.session.scalars(
+                select(Event.date)
+                .where(
+                    Event.subject_id == subject_id,
+                    Event.is_generated.is_(True),
+                )
+                .order_by(Event.date)
+            )
+        )
+
+
+def make_closure(app, semester_id, closure_date):
+    with app.app_context():
+        db.session.add(Closure(semester_id=semester_id, date=closure_date))
+        db.session.commit()
+
+
 def test_subject_creation_returns_all_fields_and_matches_database(
     client, app
 ):
@@ -96,6 +123,7 @@ def test_subject_creation_returns_all_fields_and_matches_database(
         "start_time": "09:15",
         "end_time": "10:45",
         "notes": "前期の授業",
+        "generated_event_count": 18,
     }
 
     with app.app_context():
@@ -128,6 +156,7 @@ def test_subject_creation_with_required_fields_uses_null_optional_values(
         "start_time",
         "end_time",
         "notes",
+        "generated_event_count",
     }
     assert response.json["room"] is None
     assert response.json["notes"] is None
@@ -191,7 +220,7 @@ def test_subject_accepts_weekday_and_time_boundaries(
     assert response.json["end_time"] == end_time
 
 
-def test_duplicate_subject_rows_are_allowed_and_do_not_create_events_or_tasks(
+def test_duplicate_subject_rows_are_allowed_and_each_get_events(
     client, app
 ):
     semester_id = make_semester(app)
@@ -202,10 +231,16 @@ def test_duplicate_subject_rows_are_allowed_and_do_not_create_events_or_tasks(
     assert first.status_code == 201
     assert second.status_code == 201
     assert first.json["id"] != second.json["id"]
+    # 同じ内容の授業を2回登録すると、それぞれに予定が1組ずつ作られる。
+    assert first.json["generated_event_count"] == 17
+    assert second.json["generated_event_count"] == 17
+    assert generated_event_dates(app, first.json["id"]) == (
+        generated_event_dates(app, second.json["id"])
+    )
     with app.app_context():
         assert db.session.scalar(
             select(func.count()).select_from(Event)
-        ) == 0
+        ) == 34
         assert db.session.scalar(
             select(func.count()).select_from(Task)
         ) == 0
@@ -647,8 +682,11 @@ def test_subject_get_returns_created_subject(client, app):
         "/api/subjects",
         json=subject_payload(semester_id),
     )
+    expected = dict(created.json)
+    # 作成のレスポンスにだけ付ける付加情報は、1件取得には含めない。
+    del expected["generated_event_count"]
     assert client.get(f"/api/subjects/{created.json['id']}").json == (
-        created.json
+        expected
     )
 
 
@@ -837,3 +875,174 @@ def test_invalid_bytes_in_semester_id_query_are_validation_error(client):
         response,
         {"semester_id": "学期IDは整数で指定してください"},
     )
+
+
+# --- 授業の登録による予定（Event）の自動生成（Task 011） ---
+
+
+def test_subject_creation_generates_events_with_subject_values(client, app):
+    semester_id = make_semester(app)
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(
+            semester_id,
+            subject_name="  プログラミング基礎　",
+            room="3号館201",
+            notes="前期の授業",
+        ),
+    )
+
+    assert response.status_code == 201
+    assert response.json["generated_event_count"] == 17
+    subject_id = response.json["id"]
+    with app.app_context():
+        events = db.session.scalars(
+            select(Event)
+            .where(Event.subject_id == subject_id)
+            .order_by(Event.date)
+        ).all()
+        assert len(events) == 17
+        assert events[0].date == date(2026, 4, 6)
+        assert events[-1].date == date(2026, 7, 27)
+        for event in events:
+            assert event.date.weekday() == 0
+            assert event.category == "class"
+            assert event.start_time == time(9, 0)
+            assert event.end_time == time(10, 0)
+            assert event.title == "プログラミング基礎"
+            assert event.room == "3号館201"
+            assert event.employer is None
+            assert event.notes == "前期の授業"
+            assert event.is_generated is True
+
+
+def test_subject_creation_skips_closures_of_its_semester_only(client, app):
+    semester_id = make_semester(app)
+    other_semester_id = make_semester(app, name="2026年度 後期")
+    make_closure(app, semester_id, date(2026, 5, 4))
+    make_closure(app, semester_id, date(2026, 7, 20))
+    # ほかの学期の休講日は、この学期の授業の予定に影響しない。
+    make_closure(app, other_semester_id, date(2026, 4, 13))
+
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id),
+    )
+
+    assert response.status_code == 201
+    assert response.json["generated_event_count"] == 15
+    dates = generated_event_dates(app, response.json["id"])
+    assert len(dates) == 15
+    assert date(2026, 5, 4) not in dates
+    assert date(2026, 7, 20) not in dates
+    assert date(2026, 4, 13) in dates
+
+
+def test_subject_creation_without_matching_days_returns_zero(client, app):
+    with app.app_context():
+        # 2026-04-01（水）〜2026-04-02（木）の学期に、月曜日はない。
+        semester = Semester(
+            name="2026年度 前期",
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 4, 2),
+        )
+        db.session.add(semester)
+        db.session.commit()
+        semester_id = semester.id
+
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id, weekday=0),
+    )
+
+    assert response.status_code == 201
+    assert response.json["generated_event_count"] == 0
+    assert subject_count(app) == 1
+    assert event_count(app) == 0
+
+
+def test_subject_creation_when_all_days_are_closures_returns_zero(
+    client, app
+):
+    with app.app_context():
+        # 2026-04-06（月）〜2026-04-12（日）の月曜日は、4/6の1日だけ。
+        semester = Semester(
+            name="2026年度 前期",
+            start_date=date(2026, 4, 6),
+            end_date=date(2026, 4, 12),
+        )
+        db.session.add(semester)
+        db.session.commit()
+        semester_id = semester.id
+    make_closure(app, semester_id, date(2026, 4, 6))
+
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id, weekday=0),
+    )
+
+    assert response.status_code == 201
+    assert response.json["generated_event_count"] == 0
+    assert event_count(app) == 0
+
+
+def test_generated_event_count_is_not_in_subject_list(client, app):
+    semester_id = make_semester(app)
+    client.post("/api/subjects", json=subject_payload(semester_id))
+
+    response = client.get("/api/subjects")
+
+    assert response.status_code == 200
+    assert len(response.json) == 1
+    assert "generated_event_count" not in response.json[0]
+
+
+def test_generated_event_count_in_request_is_rejected(client, app):
+    semester_id = make_semester(app)
+
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id, generated_event_count=17),
+    )
+
+    assert_validation_error(
+        response,
+        {"generated_event_count": "この項目は指定できません"},
+    )
+    assert subject_count(app) == 0
+    assert event_count(app) == 0
+
+
+def test_failed_subject_post_creates_no_events(client, app):
+    semester_id = make_semester(app)
+
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id, weekday=9),
+    )
+
+    assert response.status_code == 400
+    assert event_count(app) == 0
+
+
+def test_event_generation_failure_saves_neither_subject_nor_events(
+    client, app, monkeypatch
+):
+    semester_id = make_semester(app)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("intentional test failure")
+
+    # routeのモジュールが取り込んだ名前を置き換える。
+    monkeypatch.setattr("app.routes.subjects.build_class_events", fail)
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+
+    response = client.post(
+        "/api/subjects",
+        json=subject_payload(semester_id),
+    )
+
+    assert response.status_code == 500
+    assert response.json["error"]["code"] == "server_error"
+    assert subject_count(app) == 0
+    assert event_count(app) == 0

@@ -1,13 +1,26 @@
 import { ApiError } from "./api.js";
 
+// 複数のモードで使う、表示とフォームの共通処理。
+// fieldMap は { 項目名: { inputIds: [入力欄のid], messageId: エラー表示のid } }
+// の形（項目名は、APIの fields の項目名と同じ）。
+
+// idの要素を返す。見つからない場合は、idの書き間違いに気づけるように、
+// idを含むエラーを投げる（null を返すと、あとで分かりにくい例外になるため）。
 export function getElement(id) {
-  return document.getElementById(id);
+  const element = document.getElementById(id);
+  if (element === null) {
+    throw new Error(`要素が見つかりません：${id}`);
+  }
+  return element;
 }
 
+// visible が true なら表示し、false なら隠す（Bootstrapの d-none）。
 export function setVisible(element, visible) {
   element.classList.toggle("d-none", !visible);
 }
 
+// 画面に出すエラーメッセージを返す。ApiError でない例外は、
+// 固定のメッセージにし、詳細を console.error に出す。
 export function errorMessageOf(error) {
   if (error instanceof ApiError) {
     return error.message;
@@ -30,6 +43,7 @@ function showFormMessage(formErrorId, message) {
   setVisible(formError, true);
 }
 
+// fieldMap の項目のエラー表示と、フォームの上部のエラー（formErrorId）を消す。
 export function clearFormErrors(fieldMap, formErrorId) {
   for (const field of Object.values(fieldMap)) {
     getElement(field.messageId).replaceChildren();
@@ -43,6 +57,8 @@ export function clearFormErrors(fieldMap, formErrorId) {
   setVisible(formError, false);
 }
 
+// API のエラーを表示する。fields の項目は、fieldMap の項目の下に出し、
+// それ以外は、フォームの上部（formErrorId）に出す。
 export function showApiError(error, fieldMap, formErrorId) {
   clearFormErrors(fieldMap, formErrorId);
 
@@ -72,6 +88,7 @@ export function showApiError(error, fieldMap, formErrorId) {
   showFormMessage(formErrorId, errorMessageOf(error));
 }
 
+// 送信中の表示。labels は { idle: 通常の文字, busy: 送信中の文字 } の形。
 export function setSubmitting(button, submitting, labels) {
   button.disabled = submitting;
   button.textContent = submitting ? labels.busy : labels.idle;

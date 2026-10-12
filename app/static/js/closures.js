@@ -122,7 +122,7 @@ function renderClosures(closures) {
   setVisible(list, closures.length > 0);
 }
 
-async function loadClosures(showLoading = true) {
+async function loadClosures({ showLoading = true } = {}) {
   if (currentSemester === null) {
     clearClosureList();
     return;
@@ -161,25 +161,29 @@ async function submitClosure(event) {
   const submitButton = getElement("closure-submit-button");
   setSubmitting(submitButton, true, CLOSURE_SUBMIT_LABELS);
 
+  // try で囲むのは、追加の要求だけにする（成功後の処理の例外を、
+  // 「追加の失敗」として表示しないため）。
   try {
     await apiRequest("POST", "/api/closures", {
       semester_id: currentSemester.id,
       date: getElement("closure-date").value,
       name: getElement("closure-name").value,
     });
-    if (startedSelection !== selectionSerial) {
-      return;
-    }
-    resetClosureForm();
-    getElement("closure-date").focus();
-    await loadClosures(false);
   } catch (error) {
     if (startedSelection !== selectionSerial) {
       return;
     }
     showApiError(error, CLOSURE_FIELDS, CLOSURE_FORM_ERROR_ID);
     setSubmitting(submitButton, false, CLOSURE_SUBMIT_LABELS);
+    return;
   }
+
+  if (startedSelection !== selectionSerial) {
+    return;
+  }
+  resetClosureForm();
+  getElement("closure-date").focus();
+  await loadClosures({ showLoading: false });
 }
 
 async function deleteClosure(closureId, button) {
@@ -188,19 +192,22 @@ async function deleteClosure(closureId, button) {
   clearClosureErrors();
   setSubmitting(button, true, CLOSURE_DELETE_LABELS);
 
+  // try で囲むのは、削除の要求だけにする（追加と同じ理由）。
   try {
     await apiRequest("DELETE", `/api/closures/${closureId}`);
-    if (startedSelection !== selectionSerial) {
-      return;
-    }
-    await loadClosures(false);
   } catch (error) {
     if (startedSelection !== selectionSerial) {
       return;
     }
     showApiError(error, CLOSURE_FIELDS, CLOSURE_FORM_ERROR_ID);
     setSubmitting(button, false, CLOSURE_DELETE_LABELS);
+    return;
   }
+
+  if (startedSelection !== selectionSerial) {
+    return;
+  }
+  await loadClosures({ showLoading: false });
 }
 
 export function initClosures() {

@@ -115,9 +115,8 @@ function renderTabs() {
     item.append(button);
     fragment.append(item);
   }
-
   tabs.replaceChildren(fragment);
-  updateTabSelection();
+  tabs.replaceChildren(fragment);
 }
 
 function updateTabSelection() {
@@ -269,18 +268,23 @@ async function submitSemester(event) {
   const startDate = getElement("semester-start-date").value;
   const endDate = getElement("semester-end-date").value;
 
+  // try で囲むのは、登録の要求だけにする（成功後の処理の例外を、
+  // 「登録の失敗」として表示しないため）。
+  let created;
   try {
-    const created = await apiRequest("POST", "/api/semesters", {
+    created = await apiRequest("POST", "/api/semesters", {
       name,
       start_date: startDate,
       end_date: endDate,
     });
-    closeSemesterModal();
-    await loadSemesters(created.id);
   } catch (error) {
     showApiError(error, SEMESTER_FIELDS, SEMESTER_FORM_ERROR_ID);
     setSubmitting(submitButton, false, SEMESTER_SUBMIT_LABELS);
+    return;
   }
+
+  closeSemesterModal();
+  await loadSemesters(created.id);
 }
 
 export function initSemesters() {
