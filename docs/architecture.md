@@ -12,7 +12,7 @@
 | DBスキーマ変更 | Flask-Migrate（内部でAlembicを使用） | モデルの変更をmigrationファイルとして記録し、既存データを保ったままテーブルを更新する。方式の詳細は「DBスキーマ変更の方式」を参照 |
 | テンプレート | Jinja2（Flask標準） | |
 | フロントエンドJS | バニラJavaScript（ES modules） | `fetch` でFlaskのAPIを呼ぶ。構成と規則は「JavaScriptの構成」、APIの規則は「API共通ルール」を参照 |
-| カレンダー描画 | FullCalendar | MIT・無料範囲の週／月／一覧表示のみ使用。リソース／タイムライン表示などの有料機能は使わない |
+| カレンダー描画 | FullCalendar 6.1.21 | MIT・無料の標準のバンドル（週／月／一覧表示）だけを使う。リソース／タイムライン表示などの有料機能は使わない。CDN（jsDelivr）から、バージョンを固定して読み込む（「FullCalendarの読み込み」を参照） |
 | CSS（UI部品） | Bootstrap 5.3.8 | CDN（jsDelivr）から、バージョンを固定して読み込む（「Bootstrapの読み込み」を参照）。タブ（モード切り替え）、モーダル（詳細パネル）、バッジ（カテゴリ表示）などに利用 |
 | 認証 | なし | ログイン機能は実装しない |
 | 自動テスト | pytest | APIのテストに使う。配置・DB・実行方法は「自動テスト（pytest）」を参照 |
@@ -31,6 +31,21 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
 ```
 
+### FullCalendarの読み込み（確定）
+- **CDN（jsDelivr）から読み込み、バージョンを固定する。** 固定するバージョンは **6.1.21**（v6系の最終版。2026年6月）。`latest` など、バージョンを固定しないURLは使わない。
+- v7（2026年6月に公開）は使わない。CSSが本体に含まれず、テーマのファイルを別に読み込む必要があること、npmの公開パッケージに圧縮した版がないこと、ボタンの文言（`buttonText`）など多くの設定の名前が変わったことから、v6のほうが、このアプリの用途（読み込むファイルが少なく、設定の書き方が広く知られている）に合うため。v7へ移るときは、別のタスクとして設計する。
+- 読み込むのは、標準のバンドル `index.global.min.js` の1つだけ（週・月・一覧などの表示と、操作の部品を含む。有料の機能は含まない）。CSSも、このファイルに含まれる（FullCalendarが、ページに自動で入れる）。`base.html` の `</body>` の直前、Bootstrapの `<script>` のあと、`{% block scripts %}` の前に置く（通常のスクリプトのため、`type="module"` の `main.js` より先に実行され、`window.FullCalendar` として使える）。
+- 日本語の文言のファイル（`locales/ja`）は読み込まない。日付の表示は `locale: "ja"` で日本語になり、ボタンなどの文言は、`calendar.js` の設定で指定する（「＋N件」など、このアプリの文言に合わせるため。読み込むファイルを1つにするため）。
+- 改ざんの検出用に `integrity`（ハッシュ値）と `crossorigin="anonymous"` を付ける。FullCalendarの公式サイトには `integrity` の値が掲載されていないため、npmの公開パッケージ（`fullcalendar@6.1.21`）の `index.global.min.js` から計算したSHA-384を使う。その値が、jsDelivrの掲載値（`data.jsdelivr.com` のファイル一覧のハッシュ）と一致することを確かめた（2026-10-13）。
+- バージョンを変えるときは、この資料、Task MD、タグの `integrity` を、そろえて更新する（開発者の承認を得る）。`integrity` の値は、上と同じ方法で求め、jsDelivrの掲載値と照らす。
+- Bootstrapは、`<a>` の文字を、青い下線つきにする。FullCalendarは、日付の見出しなどに `<a>` を使うため、`style.css` で、FullCalendarの中の `<a>` を、FullCalendarの本来の見た目（通常の文字）に戻す。
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.21/index.global.min.js" integrity="sha384-WDvnzcla8X1CQM97EnYyl4OoTCvmMFp5lBiVNO3IjVdvLMOUjwt+iuYb/Mru5A9v" crossorigin="anonymous"></script>
+```
+
+- 独自のスタイル（`app/static/css/style.css`）は、`base.html` の `<head>` で、BootstrapのCSSのあとに読み込む（Bootstrapの指定を、上書きできるようにするため）。
+
 ## 未決定事項
 現時点で決まっていない事項の一覧。**実装側（Copilot）は、これらを自分の判断で決めない。** 該当する実装に入る前に、開発者（Koma）が決定し、このファイルを更新する。決めるタイミングは、各項目に書いたとおり。
 
@@ -44,9 +59,6 @@
 | 授業削除時のEvent・Task削除方式 | 「授業を削除したら、紐づくEvent・Taskもまとめて削除する」という挙動は決定済み。未決定なのは**実装方式**（ORMの `cascade`、削除処理を明示的に書く、DB側の `ondelete` など）。注意点：SQLiteは既定では外部キー制約を強制しない（`PRAGMA foreign_keys`）。`relationship` に `cascade` を指定せず親を削除すると、子の外部キーがNULLになって残る場合がある | 削除を実装するタスクの前 |
 | 学期の変更・削除時の扱い | 学期の期間を修正したときのEventの作り直し、学期を削除したときの授業・Event・Task・休講日の扱い、授業の所属学期の付け替え、期間を修正して期間の外になる休講日の扱い | 授業モードの編集・削除を実装するタスクの前 |
 | categoryの入力の検証と、許可値の管理 | Event・TaskのAPIで `category` を受け付けるときに、定めた保存値（「データ設計」の表）以外を400で拒否する規則と、許可値の一覧を一元管理する仕組み（置き場所）。授業のEventの自動生成では、外から `category` を受け取らず、`app/class_events.py` の定数 `EVENT_CATEGORY_CLASS` だけを使う。予定の一覧・1件取得（「予定API」）は、`category` を受け付けない | Event・TaskのAPIで、`category` を受け付ける操作（登録・編集）を設計するとき |
-| カテゴリの対応表の置き場所 | 保存値と、画面に出す表示名・色・アイコンの対応表（画面側のJavaScriptで持つことは決定済み）を、どのファイルに置くか。色の具体的な値は、`ui_ux.md` の未決定に含まれる | カテゴリを画面に表示するタスク（カレンダー表示など）の前 |
-| 一覧表示の「今日以降」の範囲 | FullCalendarのリスト表示は期間を指定する方式のため、期間の上限（例：今日から3か月）が必要。予定の一覧API（`GET /api/events`）は、期間を必ず指定する形のため、どの上限にしても、APIは変わらない（「予定API」） | カレンダー表示を実装するタスクの前 |
-| FullCalendarの読み込み方法 | CDNから読み込むか、ファイルを `app/static/` に置くか（Bootstrapは、CDN方式で確定済み） | カレンダー表示を実装するタスクの前 |
 | モーダルを閉じる処理の共通化 | 2つ目のモジュールが、JavaScriptからモーダルを閉じる処理（表示のアニメーションの途中なら、表示が終わってから閉じる。「JavaScriptの構成」の規則）を必要としたときに、`ui.js` の共通の関数にするか。共通にする場合は、`ui.js` の公開する関数の一覧と、モーダルごとに「表示の途中か」を記録する方法も決める | JavaScriptからモーダルを閉じる処理を、2つ目のモジュールが必要とするタスクの前 |
 
 ## データ設計
@@ -59,7 +71,7 @@
 - 初期値（`default`）は SQLAlchemy 側（Python側）で指定する。DB側の `server_default` は、現時点のモデルでは使わない（データが入ったテーブルにNOT NULLのカラムを後から追加する場合は、そのときのmigrationで別途検討する）。
 - 現時点のモデルには、インデックス・unique制約・check制約を定義しない（制約の命名規則だけは先に定める。「制約の命名規則」を参照）。
 - 削除時の連動（`cascade`・`ondelete`）は、未決定事項のため指定しない。
-- `category` には、コード値（英小文字と `_` だけの固定の文字列）を保存する。値は、Event・Taskの表のとおり。画面に出す表示名・色・アイコンは、画面側（JavaScript）の対応表で持ち、DBには持たない。APIで `category` を受け付けるときの検証（定めた値以外を400にする規則）と、許可値の一元管理の仕組み、対応表の置き場所は、未決定事項（「categoryの入力の検証と、許可値の管理」「カテゴリの対応表の置き場所」）。
+- `category` には、コード値（英小文字と `_` だけの固定の文字列）を保存する。値は、Event・Taskの表のとおり。画面に出す表示名・色・アイコンは、画面側の対応表（`app/static/js/categories.js`。色の値は `app/static/css/style.css`。「JavaScriptの構成」）で持ち、DBには持たない。APIで `category` を受け付けるときの検証（定めた値以外を400にする規則）と、許可値の一元管理の仕組みは、未決定事項（「categoryの入力の検証と、許可値の管理」）。
 
 ### Semester（学期）　テーブル名：`semesters`
 学期を表す。UIの学期タブ、「新しい学期の登録」、学期ごとの期間管理に対応する。
@@ -608,7 +620,7 @@ NAMING_CONVENTION = {
 - 期間の長さに、上限は設けない（学期APIの期間と同じ。自分専用のローカルのアプリで、予定の件数も、多くて数千件のため）
 - 絞り込みは、期間だけ。学期・カテゴリ・`is_generated` によらず、期間内のすべての予定を返す。カテゴリによる絞り込み（`ui_ux.md` のカレンダーモードの「共通」）は、画面側で、取得した予定に対して行う。`category` などのほかのクエリは、未知のクエリとして無視する
 - 日付のクエリの読み取りは、`routes/events.py` の関数（`read_date_query`）で行う。使うのが予定の一覧だけのため、`api_helpers.py` には置かない。2つ目の利用者（課題・タスクのAPIなど）が出たときに、`api_helpers.py` へ移すかを決める（`read_id_query` と同じく、2つ目の利用者が出た時点で共通化する）
-- FullCalendarは、表示する期間の終わりを、含まない日付で渡す。カレンダー表示では、画面側（`calendar.js`）で、その前の日を `end_date` にする（カレンダー表示を実装するタスクで扱う）
+- FullCalendarは、表示する期間の終わりを、含まない日付で渡す。カレンダー表示では、画面側（`calendar.js`）で、その前の日を `end_date` にする（「FullCalendarの使い方（`calendar.js`）」）
 
 ## JavaScriptの構成（ES modules）
 - すべて `app/static/js/` に置き、`<script type="module">` で読み込む
@@ -621,10 +633,11 @@ NAMING_CONVENTION = {
 | `api.js` | `fetch` の共通処理。JSONの送受信を行い、`204` のときは `null` を返す。エラーは `ApiError`（`status`・`code`・`message`・`fields`）として投げる。画面のコードは、APIを呼ぶときに必ずこれを使い、`fetch` を直接呼ばない。仕様は、下の「`api.js` の仕様」 |
 | `ui.js` | 複数のモードで使う、表示とフォームの共通処理（DOM要素の取得、表示・非表示の切り替え、フォームのエラーの表示と消去、送信中の表示、エラーメッセージの取得）。公開する関数は、`getElement`・`setVisible`・`errorMessageOf`・`clearFormErrors`・`showApiError`・`setSubmitting` の6つ（各関数の直前に、引数の形を日本語のコメントで書く）。`getElement` は、要素が見つからない場合、`null` を返さず、「要素が見つかりません：<id>」のエラーを投げる（idの書き間違いに、すぐ気づけるようにするため）。日付の補助（`dates.js`）や、リソース固有の処理は持たない |
 | `dates.js` | 複数のモードで使う、日付の補助処理。今日の日付の文字列（`localDateString`）と、日付の表示（`formatJapaneseDate`：「2026年9月21日」、`formatJapaneseDateWithWeekday`：「2026年5月15日（金）」）。公開する関数は、この3つ。DOMとAPIは扱わない |
+| `categories.js` | 複数のモードで使う、カテゴリの対応表。DBの保存値（`category`）から、表示名・アイコン・色のclassを引く。公開するのは、予定（Event）のカテゴリの対応表 `EVENT_CATEGORIES`（並びは、カレンダーの絞り込みの選択肢の並び）と、`eventCategoryOf`（保存値に対応する項目を返す。対応表にない値は、DBに入らない想定だが、画面が止まらないように、保存値をそのまま表示名にし、アイコンと色のclassを付けない）。課題・タスク（Task）のカテゴリは、課題・タスクの画面を作るタスクで足す。色の値は持たない（`style.css` の、同じ名前のclassに書く）。DOMとAPIは扱わない |
 | `semesters.js` | 授業モードの学期タブ、学期の登録フォーム。選択中の学期が変わったことを、`semester-selected` で知らせる |
 | `subjects.js` | 授業モードの授業の一覧・登録フォーム。`semester-selected` を購読する |
 | `closures.js` | 授業モードの、選択中の学期の休講日の一覧・追加・削除。`semester-selected` を購読する |
-| `calendar.js` | FullCalendarの設定、期限型の表示、直近の締切欄 |
+| `calendar.js` | カレンダーモード。FullCalendarの設定、予定の取得（予定API）、カテゴリの絞り込み、予定の詳細パネル（読み取りだけ）。使い方の規則は、下の「FullCalendarの使い方（`calendar.js`）」。期限型（締切）の表示と「直近の締切」欄は、課題・タスクを実装するタスクで足す |
 | `tasks.js` | 課題モードの一覧・完了切替 |
 
 必要になったタスクで、1つずつ作る。
@@ -635,7 +648,7 @@ NAMING_CONVENTION = {
 - Jinjaの値をJavaScriptに直接埋め込まない。データはAPIから取得する
 - ユーザーの入力を画面に表示するときは、`textContent` を使い、`innerHTML` に直接入れない
 - 各モードのファイルは、`initXxx()`（例：`initSemesters()`）を `export` し、`main.js` が呼ぶ。`export` は名前つきにし、`export default` は使わない
-- 画面の骨組み（ボタン・モーダル・表示領域）のHTMLは、`index.html`（または、そこから `{% include %}` する部分テンプレート）に書く。JavaScriptが行うのは、表示・非表示の切り替え（Bootstrapの `d-none`）と、文字（`textContent`）の変更。動的に作るのは、件数によって増える部分（一覧のタブや行など）だけで、`createElement` で作り、`replaceChildren()` で差し替える
+- 画面の骨組み（ボタン・モーダル・表示領域）のHTMLは、`index.html`（または、そこから `{% include %}` する部分テンプレート）に書く。JavaScriptが行うのは、表示・非表示の切り替え（Bootstrapの `d-none`）と、文字（`textContent`）の変更。動的に作るのは、件数によって増える部分（一覧のタブや行など）だけで、`createElement` で作り、`replaceChildren()` で差し替える（例外：カレンダーのカテゴリの絞り込みの選択肢は、表示名を1か所で持つため、`categories.js` の対応表から作る）
 - DOMの `id` は、`<リソース名の単数形>-<部分>` の形にする（例：`semester-tabs`、`semester-form`）。入力欄のエラー表示の `id` は、`<項目>-error`（例：`semester-start-date-error`）
 - モーダルはBootstrapのものを使う。決まった操作で開くときは、HTMLの `data-bs-toggle="modal"` を使ってよい。値を設定して開くときなどは、JavaScriptから `window.bootstrap.Modal` で開く。閉じるときも、`window.bootstrap.Modal` を使う（インスタンスは、`getOrCreateInstance` で取得する）。`base.html` のBootstrapの `<script>` は通常のスクリプトで、先に読み込まれ、`type="module"` のスクリプトは、ページの解析後に実行されるため、`window.bootstrap` を使える。モーダルのHTMLは、`<main>` や `.tab-pane` の外（ページの最上位）に置く
 - JavaScriptからモーダルを閉じるとき（例：登録に成功したとき）は、表示のアニメーションの途中でも閉じられるようにする。Bootstrapは、モーダルを開き始めてから表示が終わるまで（`show.bs.modal` から `shown.bs.modal` まで）の `hide()` を、何もせずに無視するため、そのまま呼ぶと、開いた直後の操作でモーダルが閉じずに残る。表示の途中かどうかは、そのモジュールが `show.bs.modal` と `shown.bs.modal` のイベントで自分で記録し（Bootstrapの内部の値は使わない）、途中なら、`shown.bs.modal` を待ってから閉じる。この処理は、使うモジュールの中に置く（今は `semesters.js` だけ）。2つ目のモジュールで必要になったときに、`ui.js` へ共通化するかを決める（未決定事項「モーダルを閉じる処理の共通化」）
@@ -650,6 +663,21 @@ NAMING_CONVENTION = {
 - 画面のエラー表示：`ApiError` の `fields` があるときは、該当する項目の下に表示する。それ以外のエラーは、`message` を、フォームの上部や画面に表示する。`ApiError` でない例外（プログラムの誤りなど）は、技術的なメッセージを画面に出さず、固定の日本語のメッセージを表示し、詳細は `console.error` に出す
 - 選択に依存する取得（例：学期ごとの授業）は、要求のたびに通し番号を増やし、応答が届いたときに、通し番号が違えば（その間に、新しい要求や、選択の解除があれば）、その結果を捨てる
 - 選択に依存する画面での登録・削除（例：学期ごとの休講日）は、要求を始めたときの選択を控え、応答が届いたときに選択が変わっていれば、画面（入力欄・メッセージ・ボタン・一覧）を変えない。新しい選択の画面は、選択が変わったときに作り直しているため。控えるのは、選択が変わるたびに増やす通し番号で、取得の通し番号とは別にする（一覧の取得し直しでは、選択は変わらないため）。要求そのものは取り消さない（サーバーでは、登録・削除が行われ、元の選択に戻ると、一覧に反映されている）
+
+### FullCalendarの使い方（`calendar.js`）
+- FullCalendarは、`window.FullCalendar` として使う（`base.html` の通常のスクリプト。`window.bootstrap` と同じ）。読み込めなかった場合（`window.FullCalendar` がない）は、例外にせず、カレンダーの場所にメッセージを出す（ほかのモードは使える）。`main.js` は、`initCalendar()` を最後に呼ぶ（カレンダーは、ほかのモードと `CustomEvent` でつながらないため、順序の制約がない。予期しない例外で、ほかのモードの初期化が止まらないようにする）
+- **予定の取得は、`api.js` で行う。** FullCalendarに予定APIのURLを渡す方式（取得をFullCalendarに任せる方式）は使わない。`events` に関数を渡し、その中で `apiRequest` を呼ぶ（`fetch` は `api.js` の中だけ、の規則のため。URLの方式は、期間を `start`・`end` の名前の、時刻つきの値で送るため、予定APIの形とも合わない）。関数は、FullCalendarの予定の配列を返す（`Promise`）。失敗したときは、例外を投げて、FullCalendarに失敗を伝える
+- **期間の変換**：FullCalendarが渡す期間（`Date`。終わりの日を含まない）を、`dates.js` の `localDateString` で `YYYY-MM-DD` にする。終わりは、その前の日を `end_date` にする（予定APIの期間は、両端を含むため）。この変換は、FullCalendarに固有のため、`calendar.js` に置く
+- 古い取得の予定は、FullCalendarが捨てる。画面の表示（取得の失敗の表示）は、取得のたびに増やす通し番号で、最新の取得の結果だけを反映する（「選択に依存する取得」の規則と同じ考え方）。取得の失敗は、画面に表示するため、FullCalendarの既定の、コンソールへの警告は出さない（`eventSourceFailure` に、何もしない関数を渡す）
+- 予定の日時は、タイムゾーンのない `YYYY-MM-DDTHH:MM` で渡す（ブラウザのローカルの日時として読まれる。「データ設計」の、タイムゾーンなしの約束と同じ）
+- **色**：予定に、カテゴリのclass（`categories.js` の `className`）を付け、色は `style.css` で、そのclassに、FullCalendarのCSSの変数（`--fc-event-bg-color`・`--fc-event-border-color`・`--fc-event-text-color`）として設定する。JavaScriptでは色を指定しない（FullCalendarの `backgroundColor`・`eventColor` などの色の設定も使わない）
+- 表示の中身を変えるとき（一覧表示の行など）は、`eventContent` で、`createElement` と `textContent` で作った要素（`domNodes`）を返す。HTMLの文字列（`html`）は返さない（`innerHTML` を使わない規則と同じ理由）
+- **絞り込み**：選択肢（チェックボックス）は、`categories.js` の対応表から作る（表示名を1か所で持つため）。絞り込みを変えたら、予定を取得し直し（`refetchEvents`）、取得した予定から、外したカテゴリの予定を除く。対応表にないカテゴリの予定は、絞り込みによらず表示する
+- カレンダーのモードを開くたび（`calendar-tab` の `shown.bs.tab`）に、予定を取得し直す（ほかのモードでの登録を反映するため）。あわせて、大きさを計算し直す（`updateSize`。隠れている間に、画面の幅が変わった場合に備えるため）
+- **詳細パネル**：Bootstrapのモーダル（`event-modal`）。JavaScriptから開くだけで、閉じるのは、利用者のボタン（`data-bs-dismiss`）だけ。JavaScriptから閉じないため、未決定事項「モーダルを閉じる処理の共通化」には当たらない
+- **日本語**：日付の表示は `locale: "ja"`。ボタン・「＋N件」・予定がないときの文言・ボタンの説明（マウスを重ねたときに出る文字）などは、設定で日本語を指定する（「FullCalendarの読み込み」）
+- `eventDisplay`（予定の表示の形）は、表示ごと（`views`）には指定できない（FullCalendar 6 の仕様。指定しても効かない）。カレンダー全体に `"block"` を指定する
+- 一覧表示の期間は、日数（`duration: { days: 28 }`）で指定する。週（`weeks`）で指定すると、期間の始まりが日曜日にそろってしまうため
 
 ### モード間の連携（`CustomEvent`）
 - モード（機能）のファイル同士は、互いを `import` しない。連携は、`document` に対する `CustomEvent` で行う
@@ -743,7 +771,7 @@ schedule_app/
 │   │   ├── events.py        # 予定（Event）のAPI（期間を指定した一覧と1件取得。カレンダーからの登録・編集・削除は、設計するときに決める）
 │   │   └── tasks.py         # 課題・タスクのAPI（課題・タスクモードの一覧、カレンダーの締切、「直近の締切」欄のための一覧の取得と、登録・編集・削除・完了切替。取得の条件などは、課題・タスクのAPIを設計するときに決める）
 │   ├── templates/
-│   │   ├── base.html        # 共通の骨組み。Bootstrapの読み込みと、JavaScript用の scripts ブロック
+│   │   ├── base.html        # 共通の骨組み。Bootstrap・FullCalendar・style.css の読み込みと、JavaScript用の scripts ブロック
 │   │   └── index.html
 │   └── static/
 │       ├── css/style.css    # カテゴリの色・独自スタイル
@@ -752,8 +780,9 @@ schedule_app/
 │           ├── api.js       # fetchの共通処理
 │           ├── ui.js        # 表示の切り替え・フォームのエラー表示などの共通処理
 │           ├── dates.js     # 日付の補助処理（今日の日付の文字列、日付の表示形式）
+│           ├── categories.js # カテゴリの対応表（保存値 → 表示名・アイコン・色のclass）
 │           ├── semesters.js # 授業モードの学期タブ・登録フォーム
-│           ├── calendar.js  # FullCalendarの設定、期限型の表示、直近の締切欄
+│           ├── calendar.js  # カレンダーモード（FullCalendarの設定、予定の取得・絞り込み、詳細パネル。期限型の表示と直近の締切欄は、課題・タスクのタスクで足す）
 │           ├── subjects.js  # 授業モードの一覧・登録フォーム
 │           ├── closures.js  # 授業モードの休講日の一覧・追加・削除
 │           └── tasks.js     # 課題モードの一覧・完了切替
