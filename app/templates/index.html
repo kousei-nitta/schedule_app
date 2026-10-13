@@ -4,7 +4,19 @@
 <main class="container mb-5 pb-3">
   <div class="tab-content">
     <section class="tab-pane fade show active" id="calendar-pane" role="tabpanel" aria-labelledby="calendar-tab" tabindex="0">
-      <p>カレンダー（準備中）</p>
+      <div id="calendar-load-error" class="alert alert-danger d-none" role="alert">
+        <p id="calendar-load-error-message" class="mb-2"></p>
+        <button type="button" id="calendar-retry-button" class="btn btn-outline-danger btn-sm">再読み込み</button>
+      </div>
+
+      <div id="calendar-content">
+        <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+          <span id="calendar-filter-label" class="text-muted small">表示するカテゴリ</span>
+          <div id="calendar-filter" class="d-flex flex-wrap gap-3" role="group" aria-labelledby="calendar-filter-label"></div>
+          <span id="calendar-loading" class="text-muted small d-none">読み込み中…</span>
+        </div>
+        <div id="calendar-view"></div>
+      </div>
     </section>
     <section class="tab-pane fade" id="subjects-pane" role="tabpanel" aria-labelledby="subjects-tab" tabindex="0">
       <div id="semester-loading" class="text-muted">読み込み中…</div>
@@ -229,6 +241,48 @@
           <button type="submit" id="subject-submit-button" class="btn btn-primary">登録する</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="event-modal" tabindex="-1" aria-labelledby="event-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="event-modal-title"></h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+      </div>
+      <div class="modal-body">
+        <dl class="mb-0">
+          <div class="row mb-2">
+            <dt class="col-4">カテゴリ</dt>
+            <dd class="col-8 mb-0"><span id="event-modal-category-icon" class="me-1" aria-hidden="true"></span><span id="event-modal-category"></span></dd>
+          </div>
+          <div class="row mb-2">
+            <dt class="col-4">日付</dt>
+            <dd id="event-modal-date" class="col-8 mb-0"></dd>
+          </div>
+          <div class="row mb-2">
+            <dt class="col-4">時間</dt>
+            <dd id="event-modal-time" class="col-8 mb-0"></dd>
+          </div>
+          <div id="event-modal-room-row" class="row mb-2">
+            <dt class="col-4">教室</dt>
+            <dd id="event-modal-room" class="col-8 mb-0"></dd>
+          </div>
+          <div id="event-modal-employer-row" class="row mb-2">
+            <dt class="col-4">派遣会社</dt>
+            <dd id="event-modal-employer" class="col-8 mb-0"></dd>
+          </div>
+          <div id="event-modal-notes-row" class="row mb-2">
+            <dt class="col-4">詳細・メモ</dt>
+            <dd id="event-modal-notes" class="col-8 mb-0 text-pre-wrap"></dd>
+          </div>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+      </div>
     </div>
   </div>
 </div>

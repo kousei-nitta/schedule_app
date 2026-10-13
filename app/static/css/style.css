@@ -1,0 +1,49 @@
+/* 独自のスタイル。Bootstrapにない指定だけを、ここに書く。 */
+
+/*
+  カテゴリの色（docs/ui_ux.md の「色・アイコン」）。FullCalendarは、
+  予定の色をCSSの変数で受け取るため、カテゴリのclass（categories.js の
+  className）に、変数を設定する。色の見本（.category-swatch）も、
+  同じ変数を使う。
+*/
+.category-class {
+  --fc-event-bg-color: #0a58ca;
+  --fc-event-border-color: #0a58ca;
+  --fc-event-text-color: #ffffff;
+}
+
+.category-part-time {
+  --fc-event-bg-color: #146c43;
+  --fc-event-border-color: #146c43;
+  --fc-event-text-color: #ffffff;
+}
+
+.category-other {
+  --fc-event-bg-color: #6c757d;
+  --fc-event-border-color: #6c757d;
+  --fc-event-text-color: #ffffff;
+}
+
+/*
+  Bootstrapは、<a> の文字を、青い下線つきにする。FullCalendarは、日付の
+  見出しや「＋N件」に <a> を使うため、FullCalendarの本来の見た目
+  （通常の文字。クリックできる日付は、マウスを重ねると下線）に戻す。
+*/
+.fc a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* カレンダーの絞り込みの選択肢に添える、カテゴリの色の見本 */
+.category-swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  border-radius: 0.2em;
+  background-color: var(--fc-event-bg-color);
+}
+
+/* 改行を、そのまま改行して表示する（予定の詳細パネルのメモ） */
+.text-pre-wrap {
+  white-space: pre-wrap;
+}
