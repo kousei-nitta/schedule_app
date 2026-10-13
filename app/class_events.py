@@ -1,8 +1,10 @@
 """授業の予定（Event）の生成。
 
-授業の登録と、休講日の削除による予定の作成から使う部品。
+授業の登録、休講日の削除による予定の作成、授業全体の編集による
+予定の作り直しから使う部品。
 DBの読み書き（セッションへの追加・commit）は行わない。休講日の日付の
-取得と、データの保存は、各routeが担当する。
+取得と、データの保存は、各routeが担当する。「今日」の日付も、この
+ファイルでは求めない（作り直しの開始日は、routeが引数で渡す）。
 """
 
 from datetime import date, timedelta
@@ -72,6 +74,28 @@ def build_class_events(
     """
     dates = class_event_dates(
         semester.start_date,
+        semester.end_date,
+        subject.weekday,
+        excluded_dates,
+    )
+    return [build_class_event(subject, event_date) for event_date in dates]
+
+
+def build_class_events_from(
+    subject: Subject,
+    semester: Semester,
+    excluded_dates: set[date],
+    from_date: date,
+) -> list[Event]:
+    """from_date以降の、授業の自動生成の予定を作る（セッションには追加しない）。
+
+    授業全体の編集による作り直しで使う。対象の期間は、from_date（含む）と
+    学期の開始日の遅いほうから、学期の終了日まで。from_dateが学期の
+    終了日より後なら、空の一覧を返す。
+    """
+    start_date = max(from_date, semester.start_date)
+    dates = class_event_dates(
+        start_date,
         semester.end_date,
         subject.weekday,
         excluded_dates,
