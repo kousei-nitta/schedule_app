@@ -1,3 +1,4 @@
+import { initCalendar } from "./calendar.js";
 import { initClosures } from "./closures.js";
 import { initSemesters } from "./semesters.js";
 import { initSubjects } from "./subjects.js";
@@ -7,3 +8,6 @@ import { initSubjects } from "./subjects.js";
 initSubjects();
 initClosures();
 initSemesters();
+// カレンダーは、ほかのモードとイベントでつながらない。予期しない例外で、
+// ほかのモードの初期化が止まらないように、最後に初期化する。
+initCalendar();
