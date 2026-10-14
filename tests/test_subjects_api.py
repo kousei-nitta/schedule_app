@@ -685,6 +685,9 @@ def test_subject_get_returns_created_subject(client, app):
     expected = dict(created.json)
     # 作成のレスポンスにだけ付ける付加情報は、1件取得には含めない。
     del expected["generated_event_count"]
+    # 1件取得にだけ付ける付加情報（授業を削除すると一緒に削除される件数）。
+    expected["event_count"] = 17
+    expected["task_count"] = 0
     assert client.get(f"/api/subjects/{created.json['id']}").json == (
         expected
     )
@@ -715,8 +718,9 @@ def test_subject_get_not_found_and_invalid_urls(client, url, message):
 @pytest.mark.parametrize(
     ("method", "url"),
     [
-        ("patch", "/api/subjects/{subject_id}"),
-        ("delete", "/api/subjects/{subject_id}"),
+        # 1件のURLのPATCH・DELETEは、授業の編集・削除として提供する
+        # （tests/test_subjects_update_delete_api.py）。
+        ("put", "/api/subjects/{subject_id}"),
         ("put", "/api/subjects"),
         ("patch", "/api/subjects"),
         ("delete", "/api/subjects"),

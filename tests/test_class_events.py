@@ -6,6 +6,7 @@ from app.class_events import (
     EVENT_CATEGORY_CLASS,
     build_class_event,
     build_class_events,
+    build_class_events_from,
     class_event_dates,
 )
 from app.models.semester import Semester
@@ -201,3 +202,77 @@ def test_build_class_events_returns_empty_list_without_matching_days():
     )
 
     assert build_class_events(make_subject(), semester, set()) == []
+
+
+# --- 授業全体の編集による作り直し（build_class_events_from） ---
+
+
+def test_build_class_events_from_includes_from_date():
+    subject = make_subject()
+
+    # 2026-06-15は月曜日。その日を含む。
+    events = build_class_events_from(
+        subject, make_semester(), set(), date(2026, 6, 15)
+    )
+
+    assert [event.date for event in events] == [
+        day for day in MONDAYS_FROM_APRIL_1 if day >= date(2026, 6, 15)
+    ]
+    assert all(event.subject is subject for event in events)
+    assert all(event.is_generated is True for event in events)
+
+
+def test_build_class_events_from_starts_at_next_matching_day():
+    # 2026-06-16は火曜日。次の月曜日（6/22）から。
+    events = build_class_events_from(
+        make_subject(), make_semester(), set(), date(2026, 6, 16)
+    )
+
+    assert [event.date for event in events] == [
+        date(2026, 6, 22),
+        date(2026, 6, 29),
+        date(2026, 7, 6),
+        date(2026, 7, 13),
+        date(2026, 7, 20),
+        date(2026, 7, 27),
+    ]
+
+
+def test_build_class_events_from_before_semester_uses_whole_semester():
+    events = build_class_events_from(
+        make_subject(), make_semester(), set(), date(2026, 3, 1)
+    )
+
+    assert [event.date for event in events] == MONDAYS_FROM_APRIL_1
+
+
+def test_build_class_events_from_on_last_day_includes_it():
+    # 学期の終了日（2026-07-31）は金曜日。
+    events = build_class_events_from(
+        make_subject(weekday=4), make_semester(), set(), date(2026, 7, 31)
+    )
+
+    assert [event.date for event in events] == [date(2026, 7, 31)]
+
+
+def test_build_class_events_from_after_semester_returns_empty_list():
+    events = build_class_events_from(
+        make_subject(), make_semester(), set(), date(2026, 8, 1)
+    )
+
+    assert events == []
+
+
+def test_build_class_events_from_skips_excluded_dates():
+    events = build_class_events_from(
+        make_subject(),
+        make_semester(),
+        {date(2026, 5, 4), date(2026, 7, 20)},
+        date(2026, 7, 1),
+    )
+
+    assert [event.date for event in events] == [
+        date(2026, 7, 6),
+        date(2026, 7, 13),
+        date(2026, 7, 27),
+    ]
