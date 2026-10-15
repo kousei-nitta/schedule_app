@@ -9,6 +9,7 @@ from app.api_helpers import (
     format_time,
     read_id_query,
     read_json_object,
+    read_patch_object,
     validate_allowed_fields,
     validate_optional_string,
     validate_required_integer,
@@ -339,15 +340,10 @@ def update_subject(subject_id: int):
     if subject is None:
         return api_error_response("not_found", "授業が見つかりません")
 
-    payload, error_response = read_json_object()
+    # 項目が1つもない本文（{}）も、誤りにする（API共通ルール）。
+    payload, error_response = read_patch_object()
     if error_response is not None:
         return error_response
-    # 項目が1つもない本文（{}）は、誤りにする（API共通ルール）。
-    if not payload:
-        return api_error_response(
-            "validation_error",
-            "変更する項目を指定してください",
-        )
 
     values, fields = validate_subject_values(payload, partial=True)
 

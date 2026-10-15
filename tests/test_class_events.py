@@ -2,8 +2,8 @@ from datetime import date, time, timedelta
 
 import pytest
 
+from app.categories import EVENT_CATEGORY_CLASS
 from app.class_events import (
-    EVENT_CATEGORY_CLASS,
     build_class_event,
     build_class_events,
     build_class_events_from,

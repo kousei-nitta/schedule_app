@@ -1,5 +1,6 @@
 import re
-from datetime import date, time
+from collections.abc import Collection
+from datetime import date, datetime, time
 from typing import Any
 
 from flask import Flask, Response, jsonify, request
@@ -22,6 +23,7 @@ INVALID_JSON_MESSAGE = (
     "Content-Typeを application/json にして、JSONで送ってください"
 )
 UNUSABLE_CHARACTER_MESSAGE = "使用できない文字が含まれています"
+EMPTY_PATCH_MESSAGE = "変更する項目を指定してください"
 
 
 def contains_unusable_character(value: str) -> bool:
@@ -98,6 +100,26 @@ def read_json_object() -> tuple[
         return None, api_error_response(
             "validation_error",
             "リクエストの本文は、JSONのオブジェクトにしてください",
+        )
+    return payload, None
+
+
+def read_patch_object() -> tuple[
+    dict[str, Any] | None,
+    tuple[Response, int] | None,
+]:
+    """PATCHの本文を読み、項目が1つもないオブジェクト（{}）を誤りにする。
+
+    本文の読み取りは、read_json_object と同じ。{} は、特定の項目に
+    結びつかない誤りのため、fields を付けない。
+    """
+    payload, error_response = read_json_object()
+    if error_response is not None:
+        return None, error_response
+    if not payload:
+        return None, api_error_response(
+            "validation_error",
+            EMPTY_PATCH_MESSAGE,
         )
     return payload, None
 
@@ -249,6 +271,50 @@ def validate_required_integer(
     return value, None
 
 
+def validate_required_boolean(
+    payload: dict[str, Any],
+    field: str,
+    required_message: str,
+    type_message: str,
+) -> tuple[bool | None, str | None]:
+    """必須の真偽値を検査する。JSONの true・false だけを受け付ける。
+
+    数値（0・1）や文字列（"true" など）は、型の誤りにする。
+    """
+    value = payload.get(field)
+    if field not in payload or value is None or value == "":
+        return None, required_message
+    if not isinstance(value, bool):
+        return None, type_message
+    return value, None
+
+
+def validate_required_choice(
+    payload: dict[str, Any],
+    field: str,
+    choices: Collection[str],
+    required_message: str,
+    choice_message: str,
+) -> tuple[str | None, str | None]:
+    """決まった値（choices）の中から選ぶ、必須の文字列を検査する。
+
+    カテゴリ（category）に使う。choices のどれかと完全に一致する文字列
+    だけを受け付ける（前後の空白を取り除かない）。文字列でない値と、
+    choices にない値は、どちらも choice_message を返す。使用できない
+    文字（孤立サロゲート）を含む場合は、UNUSABLE_CHARACTER_MESSAGE を返す。
+    """
+    value = payload.get(field)
+    if field not in payload or value is None or value == "":
+        return None, required_message
+    if not isinstance(value, str):
+        return None, choice_message
+    if contains_unusable_character(value):
+        return None, UNUSABLE_CHARACTER_MESSAGE
+    if value not in choices:
+        return None, choice_message
+    return value, None
+
+
 def parse_time(value: Any) -> time | None:
     """HH:MMの厳密な形式と時刻の範囲を確認して変換する。"""
     if not isinstance(value, str):
@@ -335,6 +401,55 @@ def validate_required_date(
         return None, UNUSABLE_CHARACTER_MESSAGE
 
     parsed_value = parse_date(value)
+    if parsed_value is None:
+        return None, format_message
+    return parsed_value, None
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    """YYYY-MM-DDTHH:MMの形式と実在性を確認して日時に変換する。"""
+    if not isinstance(value, str):
+        return None
+
+    # fromisoformatは秒や別の書式も受理するため、先に厳密な形式を確認する。
+    if (
+        re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}", value)
+        is None
+    ):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def format_datetime(value: datetime) -> str:
+    """日時をAPIのYYYY-MM-DDTHH:MM形式にする（秒は出さない）。"""
+    return value.isoformat(timespec="minutes")
+
+
+def validate_required_datetime(
+    payload: dict[str, Any],
+    field: str,
+    required_message: str,
+    format_message: str,
+) -> tuple[datetime | None, str | None]:
+    """必須の日時を検査し、Pythonのdatetimeかエラーメッセージを返す。
+
+    文字列でない値は、日付・時刻と同じく、format_messageを返す。
+    使用できない文字（孤立サロゲート）を含む場合は、
+    UNUSABLE_CHARACTER_MESSAGEを返す。この検査は、型の検査のあと、
+    形式の検査より前に、常に行う。
+    """
+    value = payload.get(field)
+    if field not in payload or value is None or value == "":
+        return None, required_message
+    if not isinstance(value, str):
+        return None, format_message
+    if contains_unusable_character(value):
+        return None, UNUSABLE_CHARACTER_MESSAGE
+
+    parsed_value = parse_datetime(value)
     if parsed_value is None:
         return None, format_message
     return parsed_value, None
