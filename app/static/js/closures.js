@@ -90,9 +90,10 @@ function renderClosures(closures) {
     item.className =
       "list-group-item d-flex justify-content-between align-items-center";
 
+    const dateLabel = formatJapaneseDateWithWeekday(closure.date);
     const text = document.createElement("div");
     const dateText = document.createElement("span");
-    dateText.textContent = formatJapaneseDateWithWeekday(closure.date);
+    dateText.textContent = dateLabel;
     text.append(dateText);
     if (closure.name !== null) {
       const name = document.createElement("span");
@@ -107,6 +108,8 @@ function renderClosures(closures) {
     deleteButton.id = `closure-delete-${closure.id}`;
     deleteButton.className = "btn btn-outline-danger btn-sm text-nowrap ms-2";
     deleteButton.textContent = CLOSURE_DELETE_LABELS.idle;
+    // 読み上げで、どの休講日の「削除」ボタンかを区別できるようにする。
+    deleteButton.setAttribute("aria-label", `${dateLabel}の休講日を削除`);
     deleteButton.addEventListener("click", () => {
       deleteClosure(closure.id, deleteButton);
     });

@@ -93,3 +93,40 @@ export function setSubmitting(button, submitting, labels) {
   button.disabled = submitting;
   button.textContent = submitting ? labels.busy : labels.idle;
 }
+
+// 表示のアニメーションの途中（show.bs.modal から shown.bs.modal まで）の
+// モーダルの要素。Bootstrapは、表示の途中の hide() を、何もせずに無視する
+// ため、閉じるとき（hideModal）に確かめる。Bootstrapの内部の値は使わず、
+// イベントで記録する。
+const showingModals = new Set();
+
+// modal（モーダルの要素）が、表示のアニメーションの途中かを記録する。
+// JavaScriptから閉じる（hideModal を使う）モーダルごとに、初期化のときに
+// 1回だけ呼ぶ。
+export function trackModalShowing(modal) {
+  modal.addEventListener("show.bs.modal", () => {
+    showingModals.add(modal);
+  });
+  modal.addEventListener("shown.bs.modal", () => {
+    showingModals.delete(modal);
+  });
+}
+
+// modal（モーダルの要素）を閉じる。表示のアニメーションの途中なら、表示が
+// 終わったとき（shown.bs.modal）に閉じる。trackModalShowing を呼んでおいた
+// モーダルにだけ使う。
+export function hideModal(modal) {
+  const instance = window.bootstrap.Modal.getOrCreateInstance(modal);
+
+  if (showingModals.has(modal)) {
+    modal.addEventListener(
+      "shown.bs.modal",
+      () => {
+        instance.hide();
+      },
+      { once: true },
+    );
+    return;
+  }
+  instance.hide();
+}

@@ -93,6 +93,7 @@
                     <th scope="col">時間</th>
                     <th scope="col">科目名</th>
                     <th scope="col">教室</th>
+                    <th scope="col" class="text-end">操作</th>
                   </tr>
                 </thead>
                 <tbody id="subject-table-body"></tbody>
@@ -241,6 +242,115 @@
           <button type="submit" id="subject-submit-button" class="btn btn-primary">登録する</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="subject-edit-modal" tabindex="-1" aria-labelledby="subject-edit-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="subject-edit-form">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="subject-edit-modal-title">授業を編集</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-1">学期：<strong id="subject-edit-modal-semester"></strong></p>
+          <p class="text-muted small mb-3">学期は変更できません。誤った場合は、授業を削除して、正しい学期に登録し直してください。</p>
+          <div id="subject-edit-form-error" class="alert alert-danger d-none" role="alert"></div>
+          <div class="mb-3">
+            <label for="subject-edit-name" class="form-label">科目名</label>
+            <input type="text" id="subject-edit-name" class="form-control" required>
+            <div id="subject-edit-name-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="subject-edit-room" class="form-label">教室（任意）</label>
+            <input type="text" id="subject-edit-room" class="form-control">
+            <div id="subject-edit-room-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="subject-edit-weekday" class="form-label">曜日</label>
+            <select id="subject-edit-weekday" class="form-select" required>
+              <option value="0">月曜日</option>
+              <option value="1">火曜日</option>
+              <option value="2">水曜日</option>
+              <option value="3">木曜日</option>
+              <option value="4">金曜日</option>
+              <option value="5">土曜日</option>
+              <option value="6">日曜日</option>
+            </select>
+            <div id="subject-edit-weekday-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label for="subject-edit-start-time" class="form-label">開始時刻</label>
+              <select id="subject-edit-start-time" class="form-select" required>
+                <option value="09:00">09:00</option>
+                <option value="10:00">10:00</option>
+                <option value="11:00">11:00</option>
+                <option value="12:00">12:00</option>
+                <option value="13:00">13:00</option>
+                <option value="14:00">14:00</option>
+                <option value="15:00">15:00</option>
+                <option value="16:00">16:00</option>
+                <option value="17:00">17:00</option>
+                <option value="18:00">18:00</option>
+              </select>
+              <div id="subject-edit-start-time-error" class="text-danger small mt-1"></div>
+            </div>
+            <div class="col-6">
+              <label for="subject-edit-end-time" class="form-label">終了時刻</label>
+              <select id="subject-edit-end-time" class="form-select" required>
+                <option value="10:00">10:00</option>
+                <option value="11:00">11:00</option>
+                <option value="12:00">12:00</option>
+                <option value="13:00">13:00</option>
+                <option value="14:00">14:00</option>
+                <option value="15:00">15:00</option>
+                <option value="16:00">16:00</option>
+                <option value="17:00">17:00</option>
+                <option value="18:00">18:00</option>
+                <option value="19:00">19:00</option>
+              </select>
+              <div id="subject-edit-end-time-error" class="text-danger small mt-1"></div>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="subject-edit-notes" class="form-label">詳細・メモ（任意）</label>
+            <textarea id="subject-edit-notes" class="form-control" rows="3"></textarea>
+            <div id="subject-edit-notes-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="subject-edit-notice" class="alert alert-warning small mb-0">
+            保存すると、今日以降（今日を含む）のこの授業の予定が、新しい内容で作り直されます。カレンダーで個別に変更・削除した日も、元に戻ります。今日より前の予定と、カレンダーから追加した単発の授業（補講など）は、変わりません。
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" id="subject-edit-submit-button" class="btn btn-primary">保存する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="subject-delete-modal" tabindex="-1" aria-labelledby="subject-delete-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="subject-delete-modal-title">授業を削除</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+      </div>
+      <div class="modal-body">
+        <p id="subject-delete-target" class="mb-2"></p>
+        <p id="subject-delete-loading" class="text-muted mb-2">予定と課題の件数を確認しています…</p>
+        <p id="subject-delete-counts" class="mb-2 d-none"></p>
+        <div id="subject-delete-error" class="alert alert-danger d-none" role="alert"></div>
+        <p class="text-danger mb-0">削除は取り消せません。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="subject-delete-cancel-button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+        <button type="button" id="subject-delete-submit-button" class="btn btn-danger" disabled>削除する</button>
+      </div>
     </div>
   </div>
 </div>
