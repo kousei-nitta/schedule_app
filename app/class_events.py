@@ -9,13 +9,12 @@ DBの読み書き（セッションへの追加・commit）は行わない。休
 
 from datetime import date, timedelta
 
+# 授業の予定のカテゴリの保存値は、app/categories.py の定数を使う
+# （文字列 "class" を、ほかの場所に直接書かない）。
+from app.categories import EVENT_CATEGORY_CLASS
 from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
-
-
-# 授業の予定のカテゴリの保存値。文字列 "class" を、ほかの場所に直接書かない。
-EVENT_CATEGORY_CLASS = "class"
 
 
 def class_event_dates(

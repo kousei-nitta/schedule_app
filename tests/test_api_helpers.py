@@ -1,18 +1,24 @@
-from datetime import date, time
+from datetime import date, datetime, time
 
 import pytest
 from flask import Flask
 
 from app.api_helpers import (
+    EMPTY_PATCH_MESSAGE,
     MAX_ID,
     UNUSABLE_CHARACTER_MESSAGE,
     contains_unusable_character,
+    format_datetime,
     format_time,
     parse_time,
     read_id_query,
+    read_patch_object,
     validate_optional_string,
+    validate_required_boolean,
+    validate_required_choice,
     validate_required_integer,
     validate_required_date,
+    validate_required_datetime,
     validate_required_string,
     validate_required_time,
 )
@@ -463,3 +469,243 @@ def test_read_id_query_returns_id(value, expected_id):
     assert read_semester_id_query(
         {"semester_id": value}
     ) == (True, expected_id, None)
+
+
+# --- 日時（Task 016） ---
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2026-10-12T23:59", datetime(2026, 10, 12, 23, 59)),
+        ("2026-01-01T00:00", datetime(2026, 1, 1, 0, 0)),
+        ("2028-02-29T12:30", datetime(2028, 2, 29, 12, 30)),
+    ],
+)
+def test_validate_required_datetime_converts_value(value, expected):
+    assert validate_required_datetime(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (expected, None)
+
+
+@pytest.mark.parametrize("payload", [{}, {"value": None}, {"value": ""}])
+def test_validate_required_datetime_reports_required(payload):
+    assert validate_required_datetime(
+        payload,
+        "value",
+        "必須",
+        "形式",
+    ) == (None, "必須")
+
+
+@pytest.mark.parametrize("value", [202610122359, True, ["2026-10-12T23:59"]])
+def test_validate_required_datetime_reports_non_string_as_format_error(
+    value,
+):
+    assert validate_required_datetime(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (None, "形式")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-10-12",
+        "2026-10-12 23:59",
+        "2026-10-12t23:59",
+        "2026-10-12T23:59:00",
+        "2026-10-12T23:59Z",
+        "2026-10-12T23:59+09:00",
+        "2026-10-12T24:00",
+        "2026-10-12T23:60",
+        "2026-02-30T10:00",
+        "2026-10-12T9:00",
+        "2026-10-12T0900",
+        " 2026-10-12T23:59",
+        "2026-10-12T23:59 ",
+        "２０２６-10-12T23:59",
+    ],
+)
+def test_validate_required_datetime_reports_format_error(value):
+    assert validate_required_datetime(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (None, "形式")
+
+
+@pytest.mark.parametrize("value", ["\ud800", "2026-10-12T23:59\udc00"])
+def test_validate_required_datetime_rejects_unusable_characters(value):
+    assert validate_required_datetime(
+        {"value": value},
+        "value",
+        "必須",
+        "形式",
+    ) == (None, UNUSABLE_CHARACTER_MESSAGE)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (datetime(2026, 1, 2, 3, 4), "2026-01-02T03:04"),
+        (datetime(2026, 1, 2, 3, 4, 59), "2026-01-02T03:04"),
+    ],
+)
+def test_format_datetime_omits_seconds(value, expected):
+    assert format_datetime(value) == expected
+
+
+# --- 真偽値（Task 016） ---
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_validate_required_boolean_accepts_booleans(value):
+    assert validate_required_boolean(
+        {"value": value},
+        "value",
+        "必須",
+        "型",
+    ) == (value, None)
+
+
+@pytest.mark.parametrize("payload", [{}, {"value": None}, {"value": ""}])
+def test_validate_required_boolean_checks_required(payload):
+    assert validate_required_boolean(
+        payload,
+        "value",
+        "必須",
+        "型",
+    ) == (None, "必須")
+
+
+@pytest.mark.parametrize("value", [0, 1, 1.0, "true", "false", [], {}])
+def test_validate_required_boolean_rejects_non_booleans(value):
+    assert validate_required_boolean(
+        {"value": value},
+        "value",
+        "必須",
+        "型",
+    ) == (None, "型")
+
+
+# --- 決まった値から選ぶ文字列（カテゴリ。Task 016） ---
+
+
+CHOICES = ("assignment", "other")
+
+
+@pytest.mark.parametrize("value", ["assignment", "other"])
+def test_validate_required_choice_accepts_choices(value):
+    assert validate_required_choice(
+        {"value": value},
+        "value",
+        CHOICES,
+        "必須",
+        "選択肢",
+    ) == (value, None)
+
+
+@pytest.mark.parametrize("payload", [{}, {"value": None}, {"value": ""}])
+def test_validate_required_choice_checks_required(payload):
+    assert validate_required_choice(
+        payload,
+        "value",
+        CHOICES,
+        "必須",
+        "選択肢",
+    ) == (None, "必須")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "class",
+        "Assignment",
+        " assignment",
+        "assignment ",
+        "課題",
+        1,
+        True,
+        ["assignment"],
+    ],
+)
+def test_validate_required_choice_rejects_other_values(value):
+    assert validate_required_choice(
+        {"value": value},
+        "value",
+        CHOICES,
+        "必須",
+        "選択肢",
+    ) == (None, "選択肢")
+
+
+@pytest.mark.parametrize("value", ["\ud800", "assignment\udc00"])
+def test_validate_required_choice_rejects_unusable_characters(value):
+    assert validate_required_choice(
+        {"value": value},
+        "value",
+        CHOICES,
+        "必須",
+        "選択肢",
+    ) == (None, UNUSABLE_CHARACTER_MESSAGE)
+
+
+# --- PATCHの本文の読み取り（Task 016） ---
+
+
+def call_read_patch_object(**request_options):
+    # read_patch_objectは、要求の本文を読むため、DBを使わない最小の
+    # Flaskアプリで、要求の中の状態を作って呼ぶ。
+    request_app = Flask(__name__)
+    with request_app.test_request_context(method="PATCH", **request_options):
+        payload, error_response = read_patch_object()
+        if error_response is None:
+            return payload, None
+        response, status = error_response
+        return payload, (status, response.get_json())
+
+
+def test_read_patch_object_returns_payload():
+    assert call_read_patch_object(json={"title": "レポート"}) == (
+        {"title": "レポート"},
+        None,
+    )
+
+
+def test_read_patch_object_rejects_empty_object():
+    assert call_read_patch_object(json={}) == (
+        None,
+        (
+            400,
+            {
+                "error": {
+                    "code": "validation_error",
+                    "message": EMPTY_PATCH_MESSAGE,
+                }
+            },
+        ),
+    )
+
+
+def test_read_patch_object_keeps_read_json_object_errors():
+    assert call_read_patch_object(json=[]) == (
+        None,
+        (
+            400,
+            {
+                "error": {
+                    "code": "validation_error",
+                    "message": (
+                        "リクエストの本文は、JSONのオブジェクトにしてください"
+                    ),
+                }
+            },
+        ),
+    )
