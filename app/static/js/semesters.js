@@ -4,16 +4,15 @@ import {
   clearFormErrors,
   errorMessageOf,
   getElement,
+  hideModal,
   setSubmitting,
   setVisible,
   showApiError,
+  trackModalShowing,
 } from "./ui.js";
 
 let semesters = [];
 let selectedId = null;
-// 学期の登録モーダルが、表示のアニメーションの途中か。Bootstrapは、
-// 表示の途中のhide()を無視するため、閉じるときに確かめる。
-let semesterModalShowing = false;
 
 const SEMESTER_FIELDS = {
   name: {
@@ -214,24 +213,6 @@ function showContent() {
   renderBanner();
 }
 
-function closeSemesterModal() {
-  const modal = getElement("semester-modal");
-  const instance = window.bootstrap.Modal.getOrCreateInstance(modal);
-
-  if (semesterModalShowing) {
-    // 表示の途中なら、表示が終わったとき（shown.bs.modal）に閉じる。
-    modal.addEventListener(
-      "shown.bs.modal",
-      () => {
-        instance.hide();
-      },
-      { once: true },
-    );
-    return;
-  }
-  instance.hide();
-}
-
 async function loadSemesters(preferredId = null) {
   showLoading();
   try {
@@ -283,7 +264,8 @@ async function submitSemester(event) {
     return;
   }
 
-  closeSemesterModal();
+  // 表示のアニメーションの途中でも、表示が終わってから閉じる（ui.js）。
+  hideModal(getElement("semester-modal"));
   await loadSemesters(created.id);
 }
 
@@ -292,12 +274,8 @@ export function initSemesters() {
     loadSemesters();
   });
   const modal = getElement("semester-modal");
-  modal.addEventListener("show.bs.modal", () => {
-    semesterModalShowing = true;
-  });
-  modal.addEventListener("shown.bs.modal", () => {
-    semesterModalShowing = false;
-  });
+  // 登録に成功したら、JavaScriptから閉じるため、表示の途中かを記録する。
+  trackModalShowing(modal);
   modal.addEventListener("show.bs.modal", resetForm);
   getElement("semester-form").addEventListener("submit", submitSemester);
   loadSemesters();
