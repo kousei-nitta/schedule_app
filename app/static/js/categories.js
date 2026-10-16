@@ -5,7 +5,6 @@
 // （JavaScriptでは、色の値を持たない）。
 
 // 予定（Event）のカテゴリ。並びは、カレンダーの絞り込みの選択肢の並び。
-// 課題・タスク（Task）のカテゴリは、課題・タスクの画面を作るタスクで足す。
 export const EVENT_CATEGORIES = {
   class: {
     label: "授業",
@@ -24,12 +23,37 @@ export const EVENT_CATEGORIES = {
   },
 };
 
-// 予定のカテゴリの保存値に対応する項目を返す。対応表にない値は、
-// DBに入らない想定だが、画面が止まらないように、保存値をそのまま
-// 表示名にし、アイコンと色のclassを付けない。
-export function eventCategoryOf(category) {
-  if (Object.prototype.hasOwnProperty.call(EVENT_CATEGORIES, category)) {
-    return EVENT_CATEGORIES[category];
+// 課題・タスク（Task）のカテゴリ。その他（締切のみ）は、予定のその他と
+// 同じ色・アイコンを使う。
+export const TASK_CATEGORIES = {
+  assignment: {
+    label: "課題",
+    icon: "✅",
+    className: "category-assignment",
+  },
+  other: {
+    label: "その他",
+    icon: "⭐",
+    className: "category-other",
+  },
+};
+
+// 対応表（categories）から、保存値（category）に対応する項目を返す。
+// 対応表にない値は、DBに入らない想定だが、画面が止まらないように、
+// 保存値をそのまま表示名にし、アイコンと色のclassを付けない。
+function categoryOf(categories, category) {
+  if (Object.prototype.hasOwnProperty.call(categories, category)) {
+    return categories[category];
   }
   return { label: category, icon: "", className: "" };
+}
+
+// 予定のカテゴリの保存値に対応する項目を返す。
+export function eventCategoryOf(category) {
+  return categoryOf(EVENT_CATEGORIES, category);
+}
+
+// 課題・タスクのカテゴリの保存値に対応する項目を返す。
+export function taskCategoryOf(category) {
+  return categoryOf(TASK_CATEGORIES, category);
 }

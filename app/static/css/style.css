@@ -12,6 +12,12 @@
   --fc-event-text-color: #ffffff;
 }
 
+.category-assignment {
+  --fc-event-bg-color: #fd7e14;
+  --fc-event-border-color: #fd7e14;
+  --fc-event-text-color: #000000;
+}
+
 .category-part-time {
   --fc-event-bg-color: #146c43;
   --fc-event-border-color: #146c43;
@@ -46,4 +52,30 @@
 /* 改行を、そのまま改行して表示する（予定の詳細パネルのメモ） */
 .text-pre-wrap {
   white-space: pre-wrap;
+}
+
+/*
+  課題・タスクの一覧（未完了・完了の2つの表）。列の幅を決めて、2つの表の
+  列をそろえる（幅を中身に合わせると、表ごとにずれるため）。完了と操作の
+  列は、中身が入る幅、締切と対象授業の列は、表の幅に対する割合。課題名の
+  列は、残りの幅を使う。
+*/
+.task-table {
+  table-layout: fixed;
+}
+
+.task-col-completed {
+  width: 3rem;
+}
+
+.task-col-due {
+  width: 26%;
+}
+
+.task-col-subject {
+  width: 17%;
+}
+
+.task-col-actions {
+  width: 8rem;
 }

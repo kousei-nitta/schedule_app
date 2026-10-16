@@ -1,4 +1,5 @@
 import { apiRequest } from "./api.js";
+import { chooseCurrentSemester } from "./current_semester.js";
 import { formatJapaneseDate, localDateString } from "./dates.js";
 import {
   clearFormErrors,
@@ -34,40 +35,6 @@ const SEMESTER_SUBMIT_LABELS = {
   idle: "登録する",
   busy: "登録中…",
 };
-
-function chooseInitialSemester(items, today) {
-  // YYYY-MM-DDは桁が固定されているため、文字列の大小が日付の前後と一致する。
-  const current = items.find(
-    (semester) => semester.start_date <= today && today <= semester.end_date,
-  );
-  if (current !== undefined) {
-    return current;
-  }
-
-  let next = null;
-  for (const semester of items) {
-    if (
-      semester.start_date > today &&
-      (next === null || semester.start_date < next.start_date)
-    ) {
-      next = semester;
-    }
-  }
-  if (next !== null) {
-    return next;
-  }
-
-  let mostRecent = null;
-  for (const semester of items) {
-    if (
-      mostRecent === null ||
-      semester.end_date > mostRecent.end_date
-    ) {
-      mostRecent = semester;
-    }
-  }
-  return mostRecent;
-}
 
 function clearSemesterFormErrors() {
   clearFormErrors(SEMESTER_FIELDS, SEMESTER_FORM_ERROR_ID);
@@ -227,7 +194,7 @@ async function loadSemesters(preferredId = null) {
       (semester) => semester.id === preferredId,
     );
     const initial =
-      preferred ?? chooseInitialSemester(semesters, localDateString());
+      preferred ?? chooseCurrentSemester(semesters, localDateString());
     showContent();
     renderTabs();
     selectSemester(initial.id);
