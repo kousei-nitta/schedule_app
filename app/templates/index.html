@@ -104,7 +104,50 @@
       </div>
     </section>
     <section class="tab-pane fade" id="tasks-pane" role="tabpanel" aria-labelledby="tasks-tab" tabindex="0">
-      <p>課題・タスク（準備中）</p>
+      <div id="task-loading" class="text-muted d-none">読み込み中…</div>
+      <div id="task-load-error" class="alert alert-danger d-none" role="alert">
+        <p id="task-load-error-message" class="mb-2"></p>
+        <button type="button" id="task-retry-button" class="btn btn-outline-danger btn-sm">再読み込み</button>
+      </div>
+      <div id="task-content" class="d-none">
+        <div id="task-action-error" class="alert alert-danger d-none" role="alert"></div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 mb-0">未完了</h2>
+          <button type="button" id="task-add-button" class="btn btn-primary btn-sm"
+                  data-bs-toggle="modal" data-bs-target="#task-modal">課題を追加</button>
+        </div>
+        <p id="task-incomplete-empty" class="text-muted d-none">未完了の課題・タスクはありません</p>
+        <div id="task-incomplete-list" class="table-responsive d-none">
+          <table class="table table-sm align-middle task-table">
+            <thead>
+              <tr>
+                <th scope="col" class="task-col-completed">完了</th>
+                <th scope="col" class="task-col-due">締切</th>
+                <th scope="col">課題名</th>
+                <th scope="col" class="task-col-subject">対象授業</th>
+                <th scope="col" class="task-col-actions text-end">操作</th>
+              </tr>
+            </thead>
+            <tbody id="task-incomplete-body"></tbody>
+          </table>
+        </div>
+        <h2 class="h6 mt-4 mb-2">完了</h2>
+        <p id="task-completed-empty" class="text-muted d-none">完了した課題・タスクはありません</p>
+        <div id="task-completed-list" class="table-responsive d-none">
+          <table class="table table-sm align-middle task-table">
+            <thead>
+              <tr>
+                <th scope="col" class="task-col-completed">完了</th>
+                <th scope="col" class="task-col-due">締切</th>
+                <th scope="col">課題名</th>
+                <th scope="col" class="task-col-subject">対象授業</th>
+                <th scope="col" class="task-col-actions text-end">操作</th>
+              </tr>
+            </thead>
+            <tbody id="task-completed-body"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
   </div>
 </main>
@@ -326,14 +369,14 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
-          <button type="submit" id="subject-edit-submit-button" class="btn btn-primary">保存する</button>
+          <button type="submit" id="subject-edit-submit-button" class="btn btn-primary" aria-describedby="subject-edit-notice">保存する</button>
         </div>
       </form>
     </div>
   </div>
 </div>
 
-<div class="modal fade" id="subject-delete-modal" tabindex="-1" aria-labelledby="subject-delete-modal-title" aria-hidden="true">
+<div class="modal fade" id="subject-delete-modal" tabindex="-1" aria-labelledby="subject-delete-modal-title" aria-describedby="subject-delete-target subject-delete-counts subject-delete-warning" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
@@ -345,11 +388,129 @@
         <p id="subject-delete-loading" class="text-muted mb-2">予定と課題の件数を確認しています…</p>
         <p id="subject-delete-counts" class="mb-2 d-none"></p>
         <div id="subject-delete-error" class="alert alert-danger d-none" role="alert"></div>
-        <p class="text-danger mb-0">削除は取り消せません。</p>
+        <p id="subject-delete-warning" class="text-danger mb-0">削除は取り消せません。</p>
       </div>
       <div class="modal-footer">
         <button type="button" id="subject-delete-cancel-button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
-        <button type="button" id="subject-delete-submit-button" class="btn btn-danger" disabled>削除する</button>
+        <button type="button" id="subject-delete-submit-button" class="btn btn-danger" aria-describedby="subject-delete-target subject-delete-counts subject-delete-warning" disabled>削除する</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="task-modal" tabindex="-1" aria-labelledby="task-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="task-form">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="task-modal-title">課題を追加</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <div id="task-form-error" class="alert alert-danger d-none" role="alert"></div>
+          <div class="mb-3">
+            <label for="task-title" class="form-label">課題名</label>
+            <input type="text" id="task-title" class="form-control" required>
+            <div id="task-title-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="task-subject" class="form-label">対象授業</label>
+            <select id="task-subject" class="form-select" required aria-describedby="task-subject-note"></select>
+            <div id="task-subject-note" class="form-text"></div>
+            <div id="task-subject-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <div class="row g-2">
+              <div class="col-7">
+                <label for="task-due-date" class="form-label">締切日</label>
+                <input type="date" id="task-due-date" class="form-control" required>
+              </div>
+              <div class="col-5">
+                <label for="task-due-time" class="form-label">締切時刻</label>
+                <input type="time" id="task-due-time" class="form-control" required>
+              </div>
+            </div>
+            <div id="task-due-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="task-notes" class="form-label">詳細・メモ（任意）</label>
+            <textarea id="task-notes" class="form-control" rows="3"></textarea>
+            <div id="task-notes-error" class="text-danger small mt-1"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" id="task-submit-button" class="btn btn-primary">登録する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="task-edit-modal" tabindex="-1" aria-labelledby="task-edit-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="task-edit-form">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="task-edit-modal-title"></h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <div id="task-edit-form-error" class="alert alert-danger d-none" role="alert"></div>
+          <div class="mb-3">
+            <label for="task-edit-title" id="task-edit-title-label" class="form-label"></label>
+            <input type="text" id="task-edit-title" class="form-control" required>
+            <div id="task-edit-title-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="task-edit-subject-row" class="mb-3">
+            <label for="task-edit-subject" class="form-label">対象授業</label>
+            <select id="task-edit-subject" class="form-select" required aria-describedby="task-edit-subject-note"></select>
+            <div id="task-edit-subject-note" class="form-text"></div>
+            <div id="task-edit-subject-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <div class="row g-2">
+              <div class="col-7">
+                <label for="task-edit-due-date" class="form-label">締切日</label>
+                <input type="date" id="task-edit-due-date" class="form-control" required>
+              </div>
+              <div class="col-5">
+                <label for="task-edit-due-time" class="form-label">締切時刻</label>
+                <input type="time" id="task-edit-due-time" class="form-control" required>
+              </div>
+            </div>
+            <div id="task-edit-due-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="task-edit-notes" class="form-label">詳細・メモ（任意）</label>
+            <textarea id="task-edit-notes" class="form-control" rows="3"></textarea>
+            <div id="task-edit-notes-error" class="text-danger small mt-1"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" id="task-edit-submit-button" class="btn btn-primary">保存する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="task-delete-modal" tabindex="-1" aria-labelledby="task-delete-modal-title" aria-describedby="task-delete-target task-delete-warning" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="task-delete-modal-title">課題・タスクを削除</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+      </div>
+      <div class="modal-body">
+        <p id="task-delete-target" class="mb-2"></p>
+        <div id="task-delete-error" class="alert alert-danger d-none" role="alert"></div>
+        <p id="task-delete-warning" class="text-danger mb-0">削除は取り消せません。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="task-delete-cancel-button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+        <button type="button" id="task-delete-submit-button" class="btn btn-danger" aria-describedby="task-delete-target task-delete-warning">削除する</button>
       </div>
     </div>
   </div>

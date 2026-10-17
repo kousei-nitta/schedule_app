@@ -26,3 +26,18 @@ export function formatJapaneseDateWithWeekday(dateString) {
   const weekday = new Date(year, month - 1, day).getDay();
   return `${formatJapaneseDate(dateString)}（${WEEKDAY_LABELS[weekday]}）`;
 }
+
+// 今の日時の文字列（「YYYY-MM-DDTHH:MM」。課題・タスクのAPIの締切日時と
+// 同じ形）。秒は持たない。ブラウザのローカルの日時から作る。
+export function localDateTimeString(date = new Date()) {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${localDateString(date)}T${hours}:${minutes}`;
+}
+
+// 日時の表示（例：「2026年10月20日（火） 23:59」）。dateTimeString は
+// 「YYYY-MM-DDTHH:MM」。
+export function formatJapaneseDateTime(dateTimeString) {
+  const [dateString, timeString] = dateTimeString.split("T");
+  return `${formatJapaneseDateWithWeekday(dateString)} ${timeString}`;
+}
