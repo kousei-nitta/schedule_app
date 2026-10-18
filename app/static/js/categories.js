@@ -4,7 +4,8 @@
 // 色の値は、style.css の、className と同じ名前のclassに書く
 // （JavaScriptでは、色の値を持たない）。
 
-// 予定（Event）のカテゴリ。並びは、カレンダーの絞り込みの選択肢の並び。
+// 予定（Event）のカテゴリ。並びは、app/categories.py の EVENT_CATEGORIES と
+// 同じ（カレンダーの絞り込みの選択肢の並びは、calendar.js で決める）。
 export const EVENT_CATEGORIES = {
   class: {
     label: "授業",
