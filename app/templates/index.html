@@ -15,7 +15,29 @@
           <div id="calendar-filter" class="d-flex flex-wrap gap-3" role="group" aria-labelledby="calendar-filter-label"></div>
           <span id="calendar-loading" class="text-muted small d-none">読み込み中…</span>
         </div>
-        <div id="calendar-view"></div>
+        <div class="row g-3">
+          <div class="col-lg-9">
+            <div id="calendar-view"></div>
+          </div>
+          <div class="col-lg-3">
+            <section id="calendar-deadline-panel" class="card" aria-labelledby="calendar-deadline-heading">
+              <div class="card-body p-2">
+                <h2 id="calendar-deadline-heading" class="h6 mb-1">直近の締切</h2>
+                <p class="text-muted small mb-2">期限切れと、今日から7日後までの、未完了の課題・タスク</p>
+                <div id="calendar-deadline-loading" class="text-muted small">読み込み中…</div>
+                <div id="calendar-deadline-load-error" class="alert alert-danger d-none mb-0" role="alert">
+                  <p id="calendar-deadline-load-error-message" class="mb-2"></p>
+                  <button type="button" id="calendar-deadline-retry-button" class="btn btn-outline-danger btn-sm">再読み込み</button>
+                </div>
+                <div id="calendar-deadline-content" class="d-none">
+                  <div id="calendar-deadline-action-error" class="alert alert-danger d-none mb-2" role="alert"></div>
+                  <p id="calendar-deadline-empty" class="text-muted small mb-0 d-none">直近の締切はありません</p>
+                  <ul id="calendar-deadline-list" class="list-unstyled mb-0 d-none"></ul>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
       </div>
     </section>
     <section class="tab-pane fade" id="subjects-pane" role="tabpanel" aria-labelledby="subjects-tab" tabindex="0">
@@ -520,11 +542,11 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h2 class="modal-title h5" id="event-modal-title"></h2>
+        <h2 class="modal-title h5 text-break" id="event-modal-title"></h2>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
       </div>
       <div class="modal-body">
-        <dl class="mb-0">
+        <dl class="mb-0 text-break">
           <div class="row mb-2">
             <dt class="col-4">カテゴリ</dt>
             <dd class="col-8 mb-0"><span id="event-modal-category-icon" class="me-1" aria-hidden="true"></span><span id="event-modal-category"></span></dd>
@@ -550,6 +572,44 @@
             <dd id="event-modal-notes" class="col-8 mb-0 text-pre-wrap"></dd>
           </div>
         </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal fade" id="task-detail-modal" tabindex="-1" aria-labelledby="task-detail-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5 text-break" id="task-detail-modal-title"></h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+      </div>
+      <div class="modal-body">
+        <div id="task-detail-error" class="alert alert-danger d-none" role="alert"></div>
+        <dl class="mb-3 text-break">
+          <div class="row mb-2">
+            <dt class="col-4">カテゴリ</dt>
+            <dd class="col-8 mb-0"><span id="task-detail-category-icon" class="me-1" aria-hidden="true"></span><span id="task-detail-category"></span></dd>
+          </div>
+          <div class="row mb-2">
+            <dt class="col-4">締切</dt>
+            <dd class="col-8 mb-0"><span id="task-detail-due"></span><span id="task-detail-overdue" class="badge text-bg-danger ms-1 d-none">期限切れ</span></dd>
+          </div>
+          <div id="task-detail-subject-row" class="row mb-2">
+            <dt class="col-4">対象授業</dt>
+            <dd id="task-detail-subject" class="col-8 mb-0"></dd>
+          </div>
+          <div id="task-detail-notes-row" class="row mb-2">
+            <dt class="col-4">詳細・メモ</dt>
+            <dd id="task-detail-notes" class="col-8 mb-0 text-pre-wrap"></dd>
+          </div>
+        </dl>
+        <div class="form-check">
+          <input type="checkbox" id="task-detail-completed" class="form-check-input">
+          <label class="form-check-label" for="task-detail-completed">完了</label>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>

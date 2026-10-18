@@ -1,11 +1,16 @@
 import { apiRequest } from "./api.js";
-import { taskCategoryOf } from "./categories.js";
 import { chooseCurrentSemester } from "./current_semester.js";
 import {
   formatJapaneseDateTime,
   localDateString,
   localDateTimeString,
 } from "./dates.js";
+import {
+  createOverdueBadge,
+  createTaskTitle,
+  isTaskOverdue,
+  taskLabel,
+} from "./task_display.js";
 import {
   clearFormErrors,
   errorMessageOf,
@@ -87,15 +92,6 @@ let addSerial = 0;
 let editSerial = 0;
 let deleteSerial = 0;
 
-// 課題・タスクを表す文字列（例：「レポート第1回」（締切 2026年10月20日（火）
-// 23:59））。同じタイトルの課題・タスクを、締切で区別できるようにする。
-function taskLabel(task) {
-  return (
-    `「${task.title}」` +
-    `（締切 ${formatJapaneseDateTime(task.due_datetime)}）`
-  );
-}
-
 // 締切日と締切時刻の入力欄の値を、APIの日時（YYYY-MM-DDTHH:MM）にする。
 function dueDateTimeOf(dateInputId, timeInputId) {
   const date = getElement(dateInputId).value;
@@ -128,10 +124,9 @@ function hideActionError() {
   setVisible(actionError, false);
 }
 
-// 一覧の1行を作る。overdueBefore は、期限切れの判定に使う今の日時
-// （YYYY-MM-DDTHH:MM）。完了の表では null（期限切れを出さない）。
-function createTaskRow(task, overdueBefore) {
-  const category = taskCategoryOf(task.category);
+// 一覧の1行を作る。now は、期限切れの判定に使う今の日時
+// （YYYY-MM-DDTHH:MM）。
+function createTaskRow(task, now) {
   const label = taskLabel(task);
   const row = document.createElement("tr");
 
@@ -150,28 +145,16 @@ function createTaskRow(task, overdueBefore) {
 
   const dueCell = document.createElement("td");
   dueCell.textContent = formatJapaneseDateTime(task.due_datetime);
-  // 締切日時が今より前なら、期限切れ（YYYY-MM-DDTHH:MMは桁が固定されて
-  // いるため、文字列の大小で前後を比べられる）。
-  if (overdueBefore !== null && task.due_datetime < overdueBefore) {
-    const badge = document.createElement("span");
-    badge.className = "badge text-bg-danger ms-1";
-    badge.textContent = "期限切れ";
-    dueCell.append(badge);
+  if (isTaskOverdue(task, now)) {
+    dueCell.append(createOverdueBadge());
   }
   row.append(dueCell);
 
+  // 課題名と対象授業のセルは、区切れる場所のない長い文字列（空白のない
+  // 長いURLなど）も、折り返す（右の列にはみ出さないため。017-L1）。
   const titleCell = document.createElement("td");
-  const titleLine = document.createElement("div");
-  const icon = document.createElement("span");
-  icon.className = "me-1";
-  icon.setAttribute("aria-hidden", "true");
-  icon.textContent = category.icon;
-  // アイコンは読み上げないため、カテゴリの表示名を、見えない文字で添える。
-  const categoryName = document.createElement("span");
-  categoryName.className = "visually-hidden";
-  categoryName.textContent = `${category.label}：`;
-  titleLine.append(icon, categoryName, task.title);
-  titleCell.append(titleLine);
+  titleCell.className = "text-break";
+  titleCell.append(createTaskTitle(task));
   if (task.notes !== null) {
     const notes = document.createElement("div");
     notes.className = "text-muted small text-pre-wrap";
@@ -181,6 +164,7 @@ function createTaskRow(task, overdueBefore) {
   row.append(titleCell);
 
   const subjectCell = document.createElement("td");
+  subjectCell.className = "text-break";
   subjectCell.textContent = task.subject_name ?? "—";
   row.append(subjectCell);
 
@@ -215,10 +199,10 @@ function createTaskRow(task, overdueBefore) {
 
 // 1つの表（未完了か完了）の行を作り直す。0件なら、表を隠して、
 // 0件の文言を出す。
-function renderTaskTable(tasks, { bodyId, listId, emptyId, overdueBefore }) {
+function renderTaskTable(tasks, { bodyId, listId, emptyId, now }) {
   const fragment = document.createDocumentFragment();
   for (const task of tasks) {
-    fragment.append(createTaskRow(task, overdueBefore));
+    fragment.append(createTaskRow(task, now));
   }
   getElement(bodyId).replaceChildren(fragment);
   setVisible(getElement(emptyId), tasks.length === 0);
@@ -227,22 +211,24 @@ function renderTaskTable(tasks, { bodyId, listId, emptyId, overdueBefore }) {
 
 // 一覧を、未完了と完了の2つの表に分けて表示する。APIの並びは、締切日時の
 // 早い順。未完了は、そのまま（期限切れが上に来る）。完了は、逆にして、
-// 締切日時の新しい順にする。期限切れは、表示するときの日時で判定する。
+// 締切日時の新しい順にする。期限切れは、表示するときの日時で判定する
+// （完了の表には、期限切れの印は付かない）。
 function renderTasks(tasks) {
   const incomplete = tasks.filter((task) => !task.is_completed);
   const completed = tasks.filter((task) => task.is_completed).reverse();
+  const now = localDateTimeString();
 
   renderTaskTable(incomplete, {
     bodyId: "task-incomplete-body",
     listId: "task-incomplete-list",
     emptyId: "task-incomplete-empty",
-    overdueBefore: localDateTimeString(),
+    now,
   });
   renderTaskTable(completed, {
     bodyId: "task-completed-body",
     listId: "task-completed-list",
     emptyId: "task-completed-empty",
-    overdueBefore: null,
+    now,
   });
   setVisible(getElement("task-loading"), false);
   setVisible(getElement("task-load-error"), false);
