@@ -54,9 +54,11 @@ def make_event(
     category="other",
     subject_id=None,
     title="予定",
+    employer=None,
     is_generated=False,
 ):
-    """予定の行を、ORMで直接作る（予定を登録するAPIは、まだないため）。"""
+    """予定の行を、ORMで直接作る（自動生成の予定や、カテゴリにない項目を
+    持つ予定も作れるように、APIを使わない）。"""
     with app.app_context():
         event = Event(
             subject_id=subject_id,
@@ -65,6 +67,7 @@ def make_event(
             start_time=start_time,
             end_time=time(start_time.hour + 1, start_time.minute),
             title=title,
+            employer=employer,
             is_generated=is_generated,
         )
         db.session.add(event)
@@ -454,20 +457,85 @@ def test_event_get_not_found_and_invalid_urls(client, url, message):
     }
 
 
+# --- 派遣会社の候補（GET /api/events/employers） ---
+
+
+def employers(client, query=""):
+    response = client.get(f"/api/events/employers{query}")
+    assert response.status_code == 200
+    return response.json
+
+
+def test_employer_list_is_empty_without_events(client):
+    assert employers(client) == []
+
+
+def test_employer_list_is_empty_without_employers(client, app):
+    make_event(app, date(2026, 4, 6), category="part_time")
+
+    assert employers(client) == []
+
+
+def test_employer_list_is_distinct_and_in_recent_order(client, app):
+    make_event(app, date(2026, 4, 6), category="part_time", employer="A社")
+    make_event(app, date(2026, 4, 7), category="part_time", employer="B社")
+    make_event(app, date(2026, 4, 1), category="part_time", employer="A社")
+    make_event(app, date(2026, 4, 8), category="part_time", employer="C社")
+    make_event(app, date(2026, 4, 9), category="part_time", employer="B社")
+
+    # 新しく登録した予定（idの大きいもの）の派遣会社から順に並ぶ
+    # （予定の日付の順ではない）。
+    assert employers(client) == ["B社", "C社", "A社"]
+
+
+def test_employer_list_uses_only_part_time_events(client, app):
+    make_event(app, date(2026, 4, 6), category="part_time", employer="A社")
+    make_event(app, date(2026, 4, 7), category="other", employer="B社")
+    make_event(app, date(2026, 4, 8), category="class", employer="C社")
+
+    assert employers(client) == ["A社"]
+
+
+def test_employer_list_compares_exact_strings(client, app):
+    for employer in ["abc", "ABC", "ａｂｃ", "abc"]:
+        make_event(
+            app, date(2026, 4, 6), category="part_time", employer=employer
+        )
+
+    assert employers(client) == ["abc", "ａｂｃ", "ABC"]
+
+
+def test_employer_list_ignores_unknown_query(client, app):
+    make_event(app, date(2026, 4, 6), category="part_time", employer="A社")
+
+    assert employers(client, "?category=other&limit=0") == ["A社"]
+
+
+@pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
+def test_employer_list_url_accepts_only_get(client, app, method):
+    make_event(app, date(2026, 4, 6), category="part_time", employer="A社")
+
+    response = getattr(client, method)(
+        "/api/events/employers", json={"employer": "B社"}
+    )
+
+    assert response.status_code == 405
+    assert response.json["error"]["code"] == "method_not_allowed"
+    assert employers(client) == ["A社"]
+    assert event_count(app) == 1
+
+
 # --- 提供しない操作（405） ---
 
 
 @pytest.mark.parametrize(
     ("method", "url"),
     [
-        ("post", "/api/events"),
         ("put", "/api/events"),
         ("patch", "/api/events"),
         ("delete", "/api/events"),
         ("post", "/api/events/{event_id}"),
         ("put", "/api/events/{event_id}"),
-        ("patch", "/api/events/{event_id}"),
-        ("delete", "/api/events/{event_id}"),
     ],
 )
 def test_unsupported_event_methods_do_not_change_rows(
