@@ -12,12 +12,24 @@ import {
   localDateTimeString,
 } from "./dates.js";
 import {
+  initEventForms,
+  openEventAddModal,
+  openEventDeleteModal,
+  openEventEditModal,
+} from "./event_forms.js";
+import {
   createOverdueBadge,
   createTaskTitle,
   isTaskOverdue,
   taskLabel,
 } from "./task_display.js";
-import { errorMessageOf, getElement, setVisible } from "./ui.js";
+import {
+  errorMessageOf,
+  getElement,
+  hideModal,
+  setVisible,
+  trackModalShowing,
+} from "./ui.js";
 
 // 表示の種類（FullCalendarの表示の名前）。
 const WEEK_VIEW = "timeGridWeek";
@@ -69,6 +81,11 @@ let deadlinesShown = true;
 let detailTask = null;
 let detailOpenedAt = "";
 let detailSerial = 0;
+// 予定の詳細パネルの対象（予定のコピー）。
+let detailEvent = null;
+// 詳細パネル（予定・締切）を閉じたあとに行う操作（「編集」「削除」で
+// 控える）。ないときは null。
+let afterDetailHidden = null;
 
 function showLoadError(error) {
   getElement("calendar-load-error-message").textContent =
@@ -236,8 +253,10 @@ function setDetailRow(rowId, valueId, value) {
   setVisible(getElement(rowId), value !== null);
 }
 
-// 予定の詳細パネルを開く（読み取りだけ。閉じるのは、利用者のボタンだけ）。
+// 予定の詳細パネルを開く。「編集」「削除」は、パネルを閉じてから、
+// 編集・削除の確認のモーダルを開く（event_forms.js）。
 function showEventDetail(apiEvent) {
+  detailEvent = { ...apiEvent };
   const category = eventCategoryOf(apiEvent.category);
   getElement("event-modal-title").textContent = apiEvent.title;
   getElement("event-modal-category-icon").textContent = category.icon;
@@ -408,7 +427,8 @@ async function toggleDeadlineCompleted(task, checkbox) {
 }
 
 // 課題・タスクの詳細パネルを開く（カレンダーの締切のクリック）。値は、
-// 開くとき（show.bs.modal）に入れる。閉じるのは、利用者のボタンだけ。
+// 開くとき（show.bs.modal）に入れる。「編集」「削除」は、パネルを閉じて
+// から、課題・タスクモードの編集・削除の確認のモーダルを開く。
 function showTaskDetail(apiTask) {
   detailTask = { ...apiTask };
   window.bootstrap.Modal.getOrCreateInstance(
@@ -501,6 +521,50 @@ async function toggleDetailCompleted() {
     checkbox.focus();
   }
   await loadDeadlines({ showLoading: false });
+}
+
+// 詳細パネル（予定・締切。modalId）を閉じ、閉じ終わってから
+// （hidden.bs.modal）、action を行う（Bootstrapでは、2つのモーダルを
+// 重ねて開けないため）。表示の途中なら、表示が終わってから閉じる
+// （ui.js の hideModal）。
+function closeDetailThen(modalId, action) {
+  afterDetailHidden = action;
+  hideModal(getElement(modalId));
+}
+
+// 詳細パネルが閉じたとき（hidden.bs.modal）に、控えた操作を行う。
+function runAfterDetailHidden() {
+  const action = afterDetailHidden;
+  afterDetailHidden = null;
+  if (action !== null) {
+    action();
+  }
+}
+
+// 課題・タスクモードに、編集・削除のモーダルを開くように頼む（eventName は
+// task-edit-requested か task-delete-requested。モードのファイル同士は、
+// 互いを import しないため、CustomEvent でつなぐ）。
+function requestTaskAction(eventName, task) {
+  document.dispatchEvent(
+    new CustomEvent(eventName, { detail: { task: { ...task } } }),
+  );
+}
+
+// 空き枠のクリック（FullCalendarの dateClick）。追加フォームを、クリック
+// した日時を入れて開く。週表示の時間軸は、日付と、30分の枠の始まりの
+// 時刻。週表示の「締切」の行（終日の行）は、その他の「締切のみ」。月表示の
+// 日付の枠は、日付だけ（時刻は、初期値）。一覧表示では、起きない。
+function handleDateClick(info) {
+  const [date, time] = localDateTimeString(info.date).split("T");
+  if (!info.allDay) {
+    openEventAddModal({ date, time });
+    return;
+  }
+  if (info.view.type === WEEK_VIEW) {
+    openEventAddModal({ date, deadlineOnly: true });
+    return;
+  }
+  openEventAddModal({ date });
 }
 
 // 絞り込みの選択肢を、カテゴリの対応表から作る（表示名を1か所で持つため）。
@@ -662,6 +726,20 @@ export function initCalendar() {
       }
       showEventDetail(apiEvent);
     },
+    // 空き枠のクリック。予定・締切・月表示の日付の数字・「＋N件」の
+    // クリックでは、起きない（FullCalendarの仕様）。
+    dateClick: handleDateClick,
+  });
+  // 予定の追加・編集・削除のモーダル（event_forms.js）。登録・編集・削除が
+  // できたら、予定（その他（締切のみ）は、締切と「直近の締切」欄）を
+  // 取得し直す。
+  initEventForms({
+    onEventsChanged: () => {
+      calendar.refetchEvents();
+    },
+    onTasksChanged: () => {
+      loadDeadlines({ showLoading: false });
+    },
   });
 
   getElement("calendar-retry-button").addEventListener("click", () => {
@@ -691,6 +769,44 @@ export function initCalendar() {
     "change",
     toggleDetailCompleted,
   );
+
+  // 詳細パネル（予定・締切）は、「編集」「削除」で、JavaScriptから閉じる
+  // ため、表示の途中かを記録する（ui.js の hideModal）。開くときは、前に
+  // 控えた操作を消す。閉じたら、控えた操作を行う。
+  for (const modalId of ["event-modal", "task-detail-modal"]) {
+    const modal = getElement(modalId);
+    trackModalShowing(modal);
+    modal.addEventListener("show.bs.modal", () => {
+      afterDetailHidden = null;
+    });
+    modal.addEventListener("hidden.bs.modal", runAfterDetailHidden);
+  }
+  getElement("event-modal-edit-button").addEventListener("click", () => {
+    const target = detailEvent;
+    closeDetailThen("event-modal", () => openEventEditModal(target));
+  });
+  getElement("event-modal-delete-button").addEventListener("click", () => {
+    const target = detailEvent;
+    closeDetailThen("event-modal", () => openEventDeleteModal(target));
+  });
+  getElement("task-detail-edit-button").addEventListener("click", () => {
+    const target = detailTask;
+    closeDetailThen("task-detail-modal", () => {
+      requestTaskAction("task-edit-requested", target);
+    });
+  });
+  getElement("task-detail-delete-button").addEventListener("click", () => {
+    const target = detailTask;
+    closeDetailThen("task-detail-modal", () => {
+      requestTaskAction("task-delete-requested", target);
+    });
+  });
+  // 課題・タスクモードで、課題・タスクを編集・削除したら（カレンダーの
+  // 締切の詳細パネルから開いた場合を含む）、締切と「直近の締切」欄を
+  // 取得し直す。
+  document.addEventListener("task-changed", () => {
+    loadDeadlines({ showLoading: false });
+  });
   calendar.render();
   // カレンダーのモードは、ページを開いたときに表示されているため、ここで
   // 課題・タスクを取得する（タブの shown.bs.tab は、最初は起きない）。
