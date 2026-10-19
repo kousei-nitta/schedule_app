@@ -10,8 +10,7 @@ EVENT_CATEGORY_CLASS = "class"
 EVENT_CATEGORY_PART_TIME = "part_time"
 EVENT_CATEGORY_OTHER = "other"
 
-# 予定のAPIで category を受け付けるときの許可値（予定の登録・編集を
-# 作るタスクで使う）。
+# 予定のAPIで category を受け付けるときの許可値（予定の登録で使う）。
 EVENT_CATEGORIES = (
     EVENT_CATEGORY_CLASS,
     EVENT_CATEGORY_PART_TIME,
