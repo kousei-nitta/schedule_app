@@ -15,6 +15,11 @@
           <div id="calendar-filter" class="d-flex flex-wrap gap-3" role="group" aria-labelledby="calendar-filter-label"></div>
           <span id="calendar-loading" class="text-muted small d-none">読み込み中…</span>
         </div>
+        <div id="event-added-notice" class="alert alert-success d-flex flex-wrap align-items-center gap-2 py-2 d-none" role="status">
+          <span id="event-added-notice-message" class="me-auto text-break"></span>
+          <button type="button" id="event-repeat-button" class="btn btn-success btn-sm">同じ内容で別の日も登録</button>
+          <button type="button" id="event-added-notice-close-button" class="btn-close" aria-label="閉じる"></button>
+        </div>
         <div class="row g-3">
           <div class="col-lg-9">
             <div id="calendar-view"></div>
@@ -574,6 +579,8 @@
         </dl>
       </div>
       <div class="modal-footer">
+        <button type="button" id="event-modal-delete-button" class="btn btn-outline-danger me-auto">削除</button>
+        <button type="button" id="event-modal-edit-button" class="btn btn-primary">編集</button>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
       </div>
     </div>
@@ -612,11 +619,201 @@
         </div>
       </div>
       <div class="modal-footer">
+        <button type="button" id="task-detail-delete-button" class="btn btn-outline-danger me-auto">削除</button>
+        <button type="button" id="task-detail-edit-button" class="btn btn-primary">編集</button>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
       </div>
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="event-add-modal" tabindex="-1" aria-labelledby="event-add-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="event-add-form">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="event-add-modal-title">予定を追加</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <div id="event-add-form-error" class="alert alert-danger d-none" role="alert"></div>
+          <fieldset class="mb-3">
+            <legend class="form-label fs-6">カテゴリ</legend>
+            <div class="btn-group">
+              <input type="radio" class="btn-check" name="event-add-category" id="event-add-category-class" value="class">
+              <label class="btn btn-outline-primary" for="event-add-category-class">授業（補講など）</label>
+              <input type="radio" class="btn-check" name="event-add-category" id="event-add-category-part-time" value="part_time">
+              <label class="btn btn-outline-primary" for="event-add-category-part-time">アルバイト</label>
+              <input type="radio" class="btn-check" name="event-add-category" id="event-add-category-other" value="other">
+              <label class="btn btn-outline-primary" for="event-add-category-other">その他</label>
+            </div>
+          </fieldset>
+          <fieldset id="event-add-other-type-row" class="mb-3">
+            <legend class="form-label fs-6">その他の種類</legend>
+            <div class="form-check form-check-inline">
+              <input type="radio" class="form-check-input" name="event-add-other-type" id="event-add-other-type-timed" value="timed">
+              <label class="form-check-label" for="event-add-other-type-timed">時間指定あり</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input type="radio" class="form-check-input" name="event-add-other-type" id="event-add-other-type-deadline" value="deadline">
+              <label class="form-check-label" for="event-add-other-type-deadline">締切のみ</label>
+            </div>
+          </fieldset>
+          <div id="event-add-subject-row" class="mb-3">
+            <label for="event-add-subject" class="form-label">授業</label>
+            <select id="event-add-subject" class="form-select" required aria-describedby="event-add-subject-note"></select>
+            <div id="event-add-subject-note" class="form-text"></div>
+            <div id="event-add-subject-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="event-add-title-row" class="mb-3">
+            <label for="event-add-title" id="event-add-title-label" class="form-label"></label>
+            <input type="text" id="event-add-title" class="form-control" required>
+            <div id="event-add-title-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="event-add-employer-row" class="mb-3">
+            <label for="event-add-employer" class="form-label">派遣会社（任意）</label>
+            <input type="text" id="event-add-employer" class="form-control" list="event-employer-options" autocomplete="off">
+            <div id="event-add-employer-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="event-add-date-row" class="mb-3">
+            <label for="event-add-date" class="form-label">日付</label>
+            <input type="date" id="event-add-date" class="form-control" required>
+            <div id="event-add-date-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="event-add-time-row" class="row g-2 mb-3">
+            <div class="col-6">
+              <label for="event-add-start-time" class="form-label">開始時刻</label>
+              <input type="time" id="event-add-start-time" class="form-control" required>
+              <div id="event-add-start-time-error" class="text-danger small mt-1"></div>
+            </div>
+            <div class="col-6">
+              <label for="event-add-end-time" class="form-label">終了時刻</label>
+              <input type="time" id="event-add-end-time" class="form-control" required>
+              <div id="event-add-end-time-error" class="text-danger small mt-1"></div>
+            </div>
+          </div>
+          <div id="event-add-due-row" class="mb-3">
+            <div class="row g-2">
+              <div class="col-7">
+                <label for="event-add-due-date" class="form-label">締切日</label>
+                <input type="date" id="event-add-due-date" class="form-control" required>
+              </div>
+              <div class="col-5">
+                <label for="event-add-due-time" class="form-label">締切時刻</label>
+                <input type="time" id="event-add-due-time" class="form-control" required>
+              </div>
+            </div>
+            <div id="event-add-due-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="event-add-room-row" class="mb-3">
+            <label for="event-add-room" class="form-label">教室（任意）</label>
+            <input type="text" id="event-add-room" class="form-control">
+            <div id="event-add-room-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="event-add-notes" class="form-label">詳細・メモ（任意）</label>
+            <textarea id="event-add-notes" class="form-control" rows="3"></textarea>
+            <div id="event-add-notes-error" class="text-danger small mt-1"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" id="event-add-submit-button" class="btn btn-primary">登録する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="event-edit-modal" tabindex="-1" aria-labelledby="event-edit-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="event-edit-form">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="event-edit-modal-title">予定を編集</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <div id="event-edit-form-error" class="alert alert-danger d-none" role="alert"></div>
+          <p class="mb-3">カテゴリ：<span id="event-edit-category-icon" class="me-1" aria-hidden="true"></span><span id="event-edit-category"></span></p>
+          <div id="event-edit-subject-row" class="mb-3">
+            <div class="form-label mb-0">授業</div>
+            <p id="event-edit-subject" class="mb-0 text-break"></p>
+          </div>
+          <div id="event-edit-title-row" class="mb-3">
+            <label for="event-edit-title" id="event-edit-title-label" class="form-label"></label>
+            <input type="text" id="event-edit-title" class="form-control" required>
+            <div id="event-edit-title-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="event-edit-employer-row" class="mb-3">
+            <label for="event-edit-employer" class="form-label">派遣会社（任意）</label>
+            <input type="text" id="event-edit-employer" class="form-control" list="event-employer-options" autocomplete="off">
+            <div id="event-edit-employer-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="event-edit-date-row" class="mb-3">
+            <label for="event-edit-date" class="form-label">日付</label>
+            <input type="date" id="event-edit-date" class="form-control" required>
+            <div id="event-edit-date-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="event-edit-fixed-date-row" class="mb-3">
+            <div class="form-label mb-0">日付</div>
+            <p id="event-edit-fixed-date" class="mb-1"></p>
+            <p class="small text-muted mb-0">授業の登録で作られた予定のため、日付は変えられません。別の日に移すときは、この予定を削除して、移す先の日に、単発の授業（補講など）を追加してください。授業全体を編集すると、今日以降のこの授業の予定は、授業の設定どおりに作り直されます（ここで変えた内容も、元に戻ります）。</p>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label for="event-edit-start-time" class="form-label">開始時刻</label>
+              <input type="time" id="event-edit-start-time" class="form-control" required>
+              <div id="event-edit-start-time-error" class="text-danger small mt-1"></div>
+            </div>
+            <div class="col-6">
+              <label for="event-edit-end-time" class="form-label">終了時刻</label>
+              <input type="time" id="event-edit-end-time" class="form-control" required>
+              <div id="event-edit-end-time-error" class="text-danger small mt-1"></div>
+            </div>
+          </div>
+          <div id="event-edit-room-row" class="mb-3">
+            <label for="event-edit-room" class="form-label">教室（任意）</label>
+            <input type="text" id="event-edit-room" class="form-control">
+            <div id="event-edit-room-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="event-edit-notes" class="form-label">詳細・メモ（任意）</label>
+            <textarea id="event-edit-notes" class="form-control" rows="3"></textarea>
+            <div id="event-edit-notes-error" class="text-danger small mt-1"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" id="event-edit-submit-button" class="btn btn-primary">保存する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="event-delete-modal" tabindex="-1" aria-labelledby="event-delete-modal-title" aria-describedby="event-delete-target event-delete-generated-note event-delete-warning" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="event-delete-modal-title">予定を削除</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+      </div>
+      <div class="modal-body">
+        <p id="event-delete-target" class="mb-2 text-break"></p>
+        <p id="event-delete-generated-note" class="mb-2 d-none"></p>
+        <div id="event-delete-error" class="alert alert-danger d-none" role="alert"></div>
+        <p id="event-delete-warning" class="text-danger mb-0">削除は取り消せません。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="event-delete-cancel-button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+        <button type="button" id="event-delete-submit-button" class="btn btn-danger" aria-describedby="event-delete-target event-delete-generated-note event-delete-warning">削除する</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<datalist id="event-employer-options"></datalist>
 {% endblock %}
 
 {% block scripts %}

@@ -1,10 +1,11 @@
 import { apiRequest } from "./api.js";
-import { chooseCurrentSemester } from "./current_semester.js";
+import { formatJapaneseDateTime, localDateTimeString } from "./dates.js";
 import {
-  formatJapaneseDateTime,
-  localDateString,
-  localDateTimeString,
-} from "./dates.js";
+  SUBJECTS_LOADING_NOTE,
+  currentSubjectsNote,
+  fetchCurrentSubjects,
+  renderSubjectOptions,
+} from "./subject_options.js";
 import {
   createOverdueBadge,
   createTaskTitle,
@@ -27,8 +28,6 @@ import {
 const ASSIGNMENT = "assignment";
 // 締切時刻の初期値（課題は、23:59の締切が多いため）。
 const DEFAULT_DUE_TIME = "23:59";
-const SUBJECT_PLACEHOLDER = "選択してください";
-const SUBJECT_LOADING_NOTE = "授業を読み込み中…";
 
 const TASK_FIELDS = {
   title: {
@@ -282,55 +281,11 @@ async function toggleTaskCompleted(task, checkbox) {
   await loadTasks({ showLoading: false });
 }
 
-// 対象授業のプルダウンの選択肢を作る。先頭は「選択してください」（値は空）。
-// extraSubject は、今の学期の授業の一覧にない、課題の今の対象授業（編集の
-// とき。{ id, subject_name }）。ないときは null。
-function renderSubjectOptions(select, subjects, extraSubject) {
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = SUBJECT_PLACEHOLDER;
-  const options = [placeholder];
-  const items =
-    extraSubject === null ? subjects : [extraSubject, ...subjects];
-  for (const subject of items) {
-    const option = document.createElement("option");
-    option.value = String(subject.id);
-    option.textContent = subject.subject_name;
-    options.push(option);
-  }
-  select.replaceChildren(...options);
-}
-
-// 今の学期（授業モードで最初に選ばれる学期と同じ規則。current_semester.js）
-// と、その学期の授業の一覧を取得する。学期が0件なら、semester は null。
-async function fetchCurrentSubjects() {
-  const semesters = await apiRequest("GET", "/api/semesters");
-  const semester = chooseCurrentSemester(semesters, localDateString());
-  if (semester === null) {
-    return { semester: null, subjects: [] };
-  }
-  const subjects = await apiRequest(
-    "GET",
-    `/api/subjects?semester_id=${semester.id}`,
-  );
-  return { semester, subjects };
-}
-
-// 対象授業の欄の下に出す説明。
-function subjectNoteOf(semester, subjects) {
-  if (semester === null) {
-    return (
-      "学期が登録されていません。" +
-      "授業モードで、学期と授業を登録してください"
-    );
-  }
-  if (subjects.length === 0) {
-    return (
-      `${semester.name}には、授業が登録されていません。` +
-      "授業モードで、授業を登録してください"
-    );
-  }
-  return `${semester.name}の授業から選びます`;
+// 課題・タスクを編集・削除したことを、ほかのモード（カレンダーの締切と
+// 「直近の締切」欄）に知らせる（モードのファイル同士は、互いを import
+// しないため、CustomEvent でつなぐ）。
+function notifyTaskChanged() {
+  document.dispatchEvent(new CustomEvent("task-changed"));
 }
 
 // 追加のモーダルを開くたびに、入力欄を初期値に戻し、今の学期の授業を
@@ -354,7 +309,7 @@ async function prepareAddModal() {
   // 授業を取得するまでは、「選択してください」だけ（必須のため、
   // ブラウザの入力チェックで、登録は止まる）。
   renderSubjectOptions(select, [], null);
-  note.textContent = SUBJECT_LOADING_NOTE;
+  note.textContent = SUBJECTS_LOADING_NOTE;
 
   let result;
   try {
@@ -373,7 +328,7 @@ async function prepareAddModal() {
     return;
   }
   renderSubjectOptions(select, result.subjects, null);
-  note.textContent = subjectNoteOf(result.semester, result.subjects);
+  note.textContent = currentSubjectsNote(result.semester, result.subjects);
 }
 
 async function submitTask(event) {
@@ -411,7 +366,8 @@ async function submitTask(event) {
   await loadTasks({ showLoading: false });
 }
 
-// 一覧の「編集」ボタン。対象を控えて、編集のモーダルを開く（入力欄は、
+// 一覧の「編集」ボタンと、カレンダーの締切の詳細パネルの「編集」
+// （task-edit-requested）。対象を控えて、編集のモーダルを開く（入力欄は、
 // モーダルを開くとき（show.bs.modal）に入れる）。
 function openEditModal(task) {
   editingTask = { ...task };
@@ -467,7 +423,7 @@ async function prepareEditModal() {
   };
   renderSubjectOptions(select, [], currentSubject);
   select.value = String(task.subject_id);
-  note.textContent = SUBJECT_LOADING_NOTE;
+  note.textContent = SUBJECTS_LOADING_NOTE;
 
   let result;
   try {
@@ -495,7 +451,7 @@ async function prepareEditModal() {
     inCurrentSemester ? null : currentSubject,
   );
   select.value = String(task.subject_id);
-  note.textContent = subjectNoteOf(result.semester, result.subjects);
+  note.textContent = currentSubjectsNote(result.semester, result.subjects);
 }
 
 async function submitTaskEdit(event) {
@@ -535,10 +491,12 @@ async function submitTaskEdit(event) {
   if (startedSerial === editSerial) {
     hideModal(getElement("task-edit-modal"));
   }
+  notifyTaskChanged();
   await loadTasks({ showLoading: false });
 }
 
-// 一覧の「削除」ボタン。対象を控えて、削除の確認のモーダルを開く。
+// 一覧の「削除」ボタンと、カレンダーの締切の詳細パネルの「削除」
+// （task-delete-requested）。対象を控えて、削除の確認のモーダルを開く。
 function openDeleteModal(task) {
   deletingTask = { ...task };
   window.bootstrap.Modal.getOrCreateInstance(
@@ -596,6 +554,7 @@ async function submitTaskDelete() {
   if (startedSerial === deleteSerial) {
     hideModal(getElement("task-delete-modal"));
   }
+  notifyTaskChanged();
   await loadTasks({ showLoading: false });
 }
 
@@ -609,6 +568,14 @@ export function initTasks() {
   });
   getElement("task-retry-button").addEventListener("click", () => {
     loadTasks();
+  });
+  // カレンダーの締切の詳細パネルの「編集」「削除」で、このモードの編集・
+  // 削除のモーダルを開く（detail.task は、課題・タスクのコピー）。
+  document.addEventListener("task-edit-requested", (event) => {
+    openEditModal(event.detail.task);
+  });
+  document.addEventListener("task-delete-requested", (event) => {
+    openDeleteModal(event.detail.task);
   });
 
   // 追加・編集・削除のモーダルは、成功したら、JavaScriptから閉じるため、

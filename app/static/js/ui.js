@@ -88,10 +88,38 @@ export function showApiError(error, fieldMap, formErrorId) {
   showFormMessage(formErrorId, errorMessageOf(error));
 }
 
+// 送信を始めたときに、フォーカスがあったボタン（送信が終わったら、
+// フォーカスを戻す）。
+const focusReturnButtons = new WeakSet();
+
 // 送信中の表示。labels は { idle: 通常の文字, busy: 送信中の文字 } の形。
+// 押せなくしたボタンからは、フォーカスがページ本体に移り、モーダルを
+// Escapeキーで閉じられなくなる（017-N2）。そのため、送信を始めるときに、
+// ボタンにフォーカスがあれば覚えておき、ボタンがモーダルの中なら、
+// フォーカスをモーダル（の要素）に移す。送信が終わって、ボタンを押せる
+// ように戻すときに、フォーカスがモーダルかページ本体にあれば、ボタンに
+// 戻す（ほかの欄に移していれば、そのまま）。
 export function setSubmitting(button, submitting, labels) {
+  const modal = button.closest(".modal");
+  if (submitting && document.activeElement === button) {
+    focusReturnButtons.add(button);
+  }
   button.disabled = submitting;
   button.textContent = submitting ? labels.busy : labels.idle;
+
+  if (submitting) {
+    if (focusReturnButtons.has(button) && modal !== null) {
+      modal.focus();
+    }
+    return;
+  }
+  if (!focusReturnButtons.delete(button)) {
+    return;
+  }
+  const active = document.activeElement;
+  if (active === document.body || active === modal) {
+    button.focus();
+  }
 }
 
 // 表示のアニメーションの途中（show.bs.modal から shown.bs.modal まで）の
