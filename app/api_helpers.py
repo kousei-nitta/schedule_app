@@ -4,7 +4,12 @@ from datetime import date, datetime, time
 from typing import Any
 
 from flask import Flask, Response, jsonify, request
-from werkzeug.exceptions import BadRequest, HTTPException, InternalServerError
+from werkzeug.exceptions import (
+    BadRequest,
+    HTTPException,
+    InternalServerError,
+    MethodNotAllowed,
+)
 
 
 # IDの上限（SQLiteのINTEGERの最大値）。これを超える数をDBに渡すとエラーになるため、IDを受け取るURLでは、この値までに制限する
@@ -15,6 +20,7 @@ ERROR_STATUS_CODES = {
     "validation_error": 400,
     "not_found": 404,
     "method_not_allowed": 405,
+    "conflict": 409,
     "server_error": 500,
 }
 
@@ -64,13 +70,19 @@ def register_api_error_handlers(app: Flask) -> None:
         return api_error_response("not_found", "URLが見つかりません")
 
     @app.errorhandler(405)
-    def handle_method_not_allowed(error: HTTPException):
+    def handle_method_not_allowed(error: MethodNotAllowed):
         if not is_api_path(request.path):
             return error
-        return api_error_response(
+        response, status = api_error_response(
             "method_not_allowed",
             "このURLでは、そのメソッドは使えません",
         )
+        # そのURLで使えるメソッドを、Allow ヘッダーで知らせる（405の応答に
+        # 付ける決まり）。Werkzeugが渡すメソッドの並びは、決まっていない
+        # ため、名前の順に並べる。
+        if error.valid_methods:
+            response.headers["Allow"] = ", ".join(sorted(error.valid_methods))
+        return response, status
 
     @app.errorhandler(InternalServerError)
     def handle_internal_server_error(error: InternalServerError):

@@ -94,9 +94,10 @@ def test_semester_creation_get_and_ordering(client):
         "2099年度 後期",
         "2099年度 前期",
     ]
+    # 1件取得には、付加情報（授業と休講日の件数）が付く。
     assert client.get(
         f"/api/semesters/{created_objects[0]['id']}"
-    ).json == created_objects[0]
+    ).json == {**created_objects[0], "subject_count": 0, "closure_count": 0}
 
 
 @pytest.mark.parametrize(
@@ -420,15 +421,18 @@ def test_semester_and_url_not_found_responses(client, url, message):
 
 
 @pytest.mark.parametrize(
-    ("method", "url"),
+    ("method", "url", "allow"),
     [
-        ("delete", "/api/semesters/1"),
-        ("patch", "/api/semesters/1"),
-        ("put", "/api/semesters"),
-        ("post", "/api/semesters/1"),
+        ("put", "/api/semesters", "GET, HEAD, OPTIONS, POST"),
+        ("patch", "/api/semesters", "GET, HEAD, OPTIONS, POST"),
+        ("delete", "/api/semesters", "GET, HEAD, OPTIONS, POST"),
+        ("put", "/api/semesters/1", "DELETE, GET, HEAD, OPTIONS, PATCH"),
+        ("post", "/api/semesters/1", "DELETE, GET, HEAD, OPTIONS, PATCH"),
     ],
 )
-def test_unsupported_semester_methods_return_json_405(client, method, url):
+def test_unsupported_semester_methods_return_json_405(
+    client, method, url, allow
+):
     response = getattr(client, method)(url)
     assert_api_error(
         response,
@@ -436,6 +440,42 @@ def test_unsupported_semester_methods_return_json_405(client, method, url):
         "method_not_allowed",
         "このURLでは、そのメソッドは使えません",
     )
+    assert response.headers["Allow"] == allow
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "allow"),
+    [
+        ("put", "/api/subjects", "GET, HEAD, OPTIONS, POST"),
+        ("post", "/api/subjects/1", "DELETE, GET, HEAD, OPTIONS, PATCH"),
+        ("get", "/api/closures/1", "DELETE, OPTIONS"),
+        ("patch", "/api/closures/1", "DELETE, OPTIONS"),
+        ("put", "/api/events", "GET, HEAD, OPTIONS, POST"),
+        ("put", "/api/events/1", "DELETE, GET, HEAD, OPTIONS, PATCH"),
+        ("post", "/api/events/employers", "GET, HEAD, OPTIONS"),
+        ("put", "/api/tasks", "GET, HEAD, OPTIONS, POST"),
+        ("put", "/api/tasks/1", "DELETE, GET, HEAD, OPTIONS, PATCH"),
+    ],
+)
+def test_api_405_has_allow_header_in_name_order(client, method, url, allow):
+    # API共通ルール：405の応答には、そのURLで使えるメソッドを、名前の順に
+    # 並べた Allow ヘッダーを付ける（すべてのリソースで同じ）。
+    response = getattr(client, method)(url)
+    assert response.status_code == 405
+    assert response.json["error"]["code"] == "method_not_allowed"
+    assert response.headers["Allow"] == allow
+
+
+def test_regular_page_405_remains_html(client):
+    # 通常のHTMLページの405は、変えない（Flaskの標準のHTMLのまま）。
+    response = client.post("/")
+    assert response.status_code == 405
+    assert response.content_type.startswith("text/html")
+    assert set(response.headers["Allow"].split(", ")) == {
+        "GET",
+        "HEAD",
+        "OPTIONS",
+    }
 
 
 def test_regular_page_errors_remain_html_and_cors_is_disabled(client):

@@ -71,7 +71,13 @@
                   data-bs-toggle="modal" data-bs-target="#semester-modal">新しい学期を登録する</button>
         </div>
         <div id="semester-detail" role="tabpanel">
-          <h2 id="semester-detail-name" class="h5"></h2>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <h2 id="semester-detail-name" class="h5 mb-0"></h2>
+            <button type="button" id="semester-edit-button" class="btn btn-outline-secondary btn-sm"
+                    data-bs-toggle="modal" data-bs-target="#semester-edit-modal">編集</button>
+            <button type="button" id="semester-delete-button" class="btn btn-outline-danger btn-sm"
+                    data-bs-toggle="modal" data-bs-target="#semester-delete-modal">削除</button>
+          </div>
           <p id="semester-detail-period" class="text-muted"></p>
           <div id="closure-section" class="mt-4">
             <h3 class="h6 mb-2">休講日</h3>
@@ -227,6 +233,77 @@
           <button type="submit" id="semester-submit-button" class="btn btn-primary">登録する</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="semester-edit-modal" tabindex="-1" aria-labelledby="semester-edit-modal-title" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="semester-edit-form">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="semester-edit-modal-title">学期を編集</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <div id="semester-edit-form-error" class="alert alert-danger d-none" role="alert"></div>
+          <div class="mb-3">
+            <div class="row g-2">
+              <div class="col-6">
+                <label for="semester-edit-year" class="form-label">年度</label>
+                <input type="number" id="semester-edit-year" class="form-control" required>
+              </div>
+              <div class="col-6">
+                <label for="semester-edit-term" class="form-label">種別</label>
+                <select id="semester-edit-term" class="form-select" required>
+                  <option value="前期">前期</option>
+                  <option value="後期">後期</option>
+                </select>
+              </div>
+            </div>
+            <div id="semester-edit-name-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="semester-edit-start-date" class="form-label">開始日</label>
+            <input type="date" id="semester-edit-start-date" class="form-control" required>
+            <div id="semester-edit-start-date-error" class="text-danger small mt-1"></div>
+          </div>
+          <div class="mb-3">
+            <label for="semester-edit-end-date" class="form-label">終了日</label>
+            <input type="date" id="semester-edit-end-date" class="form-control" required>
+            <div id="semester-edit-end-date-error" class="text-danger small mt-1"></div>
+          </div>
+          <div id="semester-edit-notice" class="alert alert-warning small mb-0">
+            期間を変えると、新しい期間から外れる日の、授業の予定（授業の登録で作られたもの。カレンダーで個別に変更したものを含む）と休講日は、削除されます。新しく期間に入る日には、授業の予定が作られます。両方の期間に入る日の予定と、カレンダーから追加した単発の予定（補講など）、課題は、変わりません。
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" id="semester-edit-submit-button" class="btn btn-primary" aria-describedby="semester-edit-notice">保存する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="semester-delete-modal" tabindex="-1" aria-labelledby="semester-delete-modal-title" aria-describedby="semester-delete-target semester-delete-counts semester-delete-warning" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="semester-delete-modal-title">学期を削除</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+      </div>
+      <div class="modal-body">
+        <p id="semester-delete-target" class="mb-2"></p>
+        <p id="semester-delete-loading" class="text-muted mb-2">授業と休講日の件数を確認しています…</p>
+        <p id="semester-delete-counts" class="mb-2 d-none"></p>
+        <div id="semester-delete-error" class="alert alert-danger d-none" role="alert"></div>
+        <p id="semester-delete-warning" class="text-danger mb-0">削除は取り消せません。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="semester-delete-cancel-button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+        <button type="button" id="semester-delete-submit-button" class="btn btn-danger" aria-describedby="semester-delete-target semester-delete-counts semester-delete-warning" disabled>削除する</button>
+      </div>
     </div>
   </div>
 </div>
