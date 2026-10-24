@@ -28,7 +28,7 @@ def create_app(test_config: dict[str, Any] | None = None):
 
     # モデルをSQLAlchemyに登録するための読み込み。migrationがテーブルを
     # 見つけるために必要なので、名前は使わなくても削除しない。
-    from app import models
+    from app import models  # noqa: F401
 
     migrate.init_app(app, db, render_as_batch=True)
 

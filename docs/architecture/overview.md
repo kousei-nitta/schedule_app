@@ -16,6 +16,7 @@
 | CSS（UI部品） | Bootstrap 5.3.8 | CDN（jsDelivr）から、バージョンを固定して読み込む（「Bootstrapの読み込み」を参照）。タブ（モード切り替え）、モーダル（詳細パネル）、バッジ（カテゴリ表示）などに利用 |
 | 認証 | なし | ログイン機能は実装しない |
 | 自動テスト | pytest | APIのテストに使う。配置・DB・実行方法は「自動テスト（pytest）」を参照 |
+| 検査・CI | ruff・ESLint・GitHub Actions | 開発のときだけ使う（`requirements-dev.txt`・`package.json`）。設定と実行は `docs/development/testing.md` の「検査の道具」「CI」 |
 | 起動 | `run.py` | 開発用サーバーを `127.0.0.1:5001`（`debug=True`）で起動する。5001番を使うのは、macOSではAirPlayレシーバーが5000番を使うことがあるため |
 
 制約：費用をかけない（大学の授業の一環のため）。

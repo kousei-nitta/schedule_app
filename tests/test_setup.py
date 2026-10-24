@@ -3,6 +3,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from alembic import command
+from flask import current_app
 from sqlalchemy import inspect, text
 
 from app import create_app
@@ -34,6 +36,16 @@ def test_migrations_create_all_expected_tables(app):
         "closures",
         "alembic_version",
     } <= tables
+
+
+def test_models_and_migrations_have_no_differences(app):
+    # モデルの定義と、migrationで作ったテスト用DBを比べる（`flask db check` と
+    # 同じ確認）。モデルを変えたのに、migrationを作り忘れていると、
+    # 差の内容（足りないテーブル・列など）を出して失敗する。
+    migrations_directory = Path(__file__).resolve().parents[1] / "migrations"
+    with app.app_context():
+        migrate = current_app.extensions["migrate"].migrate
+        command.check(migrate.get_config(str(migrations_directory)))
 
 
 def test_closures_table_matches_design(app):
@@ -75,7 +87,8 @@ def test_closures_table_matches_design(app):
 
 
 def test_test_database_is_a_private_copy(app, template_db, tmp_path):
-    # 雛形や共有DBを直接使う誤りを検出し、各テストが空のコピーから始まることを確認する。
+    # 雛形や共有DBを直接使う誤りを検出し、各テストが空のコピーから
+    # 始まることを確認する。
     app_database_path = database_path_from_app(app).resolve()
     assert app_database_path.parent == tmp_path.resolve()
     assert app_database_path != template_db.resolve()

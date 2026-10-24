@@ -281,7 +281,11 @@ def test_empty_subject_payload_reports_all_required_fields(client):
         ("weekday", None, "曜日は必須です"),
         ("weekday", "", "曜日は必須です"),
         ("weekday", "1", "曜日は0（月曜）〜6（日曜）の整数で指定してください"),
-        ("weekday", True, "曜日は0（月曜）〜6（日曜）の整数で指定してください"),
+        (
+            "weekday",
+            True,
+            "曜日は0（月曜）〜6（日曜）の整数で指定してください",
+        ),
         ("weekday", 1.0, "曜日は0（月曜）〜6（日曜）の整数で指定してください"),
         ("weekday", [0], "曜日は0（月曜）〜6（日曜）の整数で指定してください"),
     ],
