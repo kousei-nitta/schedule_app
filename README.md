@@ -23,6 +23,8 @@ flask --app app db upgrade   # DB（instance/app.db）を作る
 python run.py                # http://127.0.0.1:5001 を開く
 ```
 
+すでにDBがある環境で、新しいmigrationを適用するときは、先にバックアップを取る（`docs/development/database.md` の「migrationの作成と適用」）。
+
 開発のとき（テストと検査）：
 ```sh
 pip install -r requirements-dev.txt

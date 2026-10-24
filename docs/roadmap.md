@@ -26,7 +26,7 @@
 | 段階 | Task | 内容 | 状態 | 設計で決めること・注意 |
 |---|---|---|---|---|
 | — | 001〜021 | MVP（学期・授業・休講日・予定の自動生成・カレンダー・課題・予定の操作・学期の編集と削除） | 完了（PR #1〜#38） | 一覧は `docs/archive/roadmap_until_task021.md` |
-| 1 地固め | 022 | 開発体制の移行：資料の分割（`docs/architecture/`）・索引・`open_questions.md`・`docs/development/`、過去の資料の `docs/archive/` への移動、この資料の作り直し、CI（pytest・ruff・ESLint・migrationのずれ）、`requirements-dev.txt`、`CLAUDE.md`、最低限のREADME、`.github/copilot-instructions.md` の削除 | 実装中（このPR） | マージのあと、`main` のルールセットに、ステータスチェック（`python`・`javascript`）の必須を足す（Koma）。Macで一度、`pip install -r requirements-dev.txt` を実行する（Koma） |
+| 1 地固め | 022 | 開発体制の移行：資料の分割（`docs/architecture/`）・索引・`open_questions.md`・`docs/development/`、過去の資料の `docs/archive/` への移動、この資料の作り直し、CI（pytest・ruff・ESLint・migrationのずれ）、`requirements-dev.txt`、`CLAUDE.md`、最低限のREADME、Copilot向けの指示ファイル（`.github/` の中）の削除 | 実装中（このPR） | マージのあと、`main` のルールセットに、ステータスチェック（`python`・`javascript`）の必須を足す（Koma）。Macで一度、`pip install -r requirements-dev.txt` を実行する（Koma） |
 | 1 地固め | 023 | データの保護（起動のときの1日1回の自動バックアップと、手動のスクリプト）、DBの切り替え（環境変数）、デモ用の架空のデータ、Playwrightの E2E の基盤（主な流れ）とCIへの追加 | 次に設計する | 要求定義の「初期段階ではバックアップの仕組みは作らない」の変更を、設計で承認する |
 | 2 クラウドへ | 024 | ログインと、利用者ごとのデータ（`users` テーブルと、データの利用者のID。まずローカルで） | 未着手 | 実データのDBの構造を変える（Komaがバックアップを取ってから適用）。ログインの仕組みを、別の目のレビューで重点的に確かめる |
 | 2 クラウドへ | 025 | クラウドへの公開（ホストとDB、本番の設定、日本時間の「今日」、データの移行、バックアップ）と、スマホでの最低限の表示 | 未着手 | ホストとDBは、設計のときに改めて調べて決める（候補と条件は、ADR 0001） |
@@ -42,6 +42,6 @@
 
 | ID | 内容 | 見つけた時 | 扱う予定 |
 |---|---|---|---|
-| — | なし | — | — |
+| 022-L6 | `architecture/overview.md` の「Bootstrapの読み込み」「FullCalendarの読み込み」に、古い言葉「Task MD」が残っている（新しい体制では「計画書」）。Task 022では、移した文を変えない方針のため直さなかった | Task 022のレビュー | その節を変えるタスクで直す |
 
 - Task 021までの持ち越し（010-N1〜021-N1の17件）は、Task 022で閉じた。多くは、Copilotが計画書を書き写して報告する経路に関するもので、開発体制の変更で不要になった。ブラウザ確認で分かったこと（010-N1・018-N2・020-N2・020-N3・021-N1）は、`docs/development/testing.md` の「画面の確認」に、`sqlite3` を `-readonly` で開くこと（011-L1）は、`docs/development/database.md` に残した。記録は `docs/archive/roadmap_until_task021.md`

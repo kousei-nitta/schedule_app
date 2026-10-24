@@ -57,7 +57,7 @@
 
 | 確認 | 道具と設定 | 実行 |
 |---|---|---|
-| Pythonの書き方 | ruff。`ruff.toml`：PEP8の主な規則（E・F・W）、1行79文字（全角の文字は2文字に数える）。`migrations/versions/` は対象から外す（自動生成で、確かめてマージしたファイルのため） | `ruff check .` |
+| Pythonの書き方 | ruff。`ruff.toml`：PEP8の主な規則（E・F・W）、1行79文字（全角の文字は2文字に数える）。`migrations/versions/` は対象から外す（自動生成で、確かめてマージしたファイルのため）。`docs/archive/` も、`.ignore` に従って外れる | `ruff check .` |
 | JavaScriptの書き方 | ESLint。`eslint.config.js`：推奨の規則（定義していない変数など）に、`no-var`・`prefer-const`・`eqeqeq`・`max-len`（80文字）・`quotes`（二重引用符）を足す。中に `"` を含む文字列だけ、単引用符を許す（`avoidEscape`）。対象は `app/static/js/` | `npm run lint` |
 | モデルとmigrationのずれ | pytestのテスト（`tests/test_setup.py` の `test_models_and_migrations_have_no_differences`）。migrationで作った一時的なDBと、モデルを比べる（`flask db check` と同じ確認）。ずれがあると、差の内容を出して失敗する | `python -m pytest` |
 

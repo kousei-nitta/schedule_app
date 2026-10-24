@@ -55,7 +55,7 @@ DBの構造の変え方（migration）と、実データのDBの扱い。デー�
   3. 適用の前の記録：`flask --app app db current` の版、スキーマ（`sqlite3 -readonly instance/app.db .schema`）、各テーブルの件数
   4. 適用：`flask --app app db upgrade`
   5. 適用の後の確認：`flask --app app db current` が最新の版（`(head)`）であること。適用の前とのスキーマの差が、そのmigrationの内容だけであること。各テーブルの件数が変わっていないこと（データを変えるmigrationでは、期待する変化を計画書に書く）
-  6. 戻し方：サーバーを止めて、バックアップのコピーを、元の名前（`instance/app.db`）に戻す（`flask db downgrade` は、通常は使わない）
+  6. 戻し方：サーバーを止めて、バックアップのコピーを、元の名前（`instance/app.db`）に戻す（`flask db downgrade` は、通常は使わない）。適用のあとで、migrationを作り直すことになった場合も、この方法で戻してから、作り直したmigrationを適用する
 - 実データのDBへの適用より前は、そのmigrationを含むコードで、サーバーを起動しない（テーブルや列がないため、エラーになる）
 
 ## 実データのDBの扱い
