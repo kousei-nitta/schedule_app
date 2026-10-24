@@ -1,5 +1,7 @@
 # テストと確認
 
+自動テスト（pytest）、検査の道具、CI、画面の確認。コマンドの一覧は、リポジトリ直下の `CLAUDE.md`。
+
 ## 自動テスト（pytest）
 **pytest** を採用する。APIの入力検証は項目が多く、`curl` での確認は手間がかかり、見落としも起きやすいため。
 
@@ -13,7 +15,7 @@
 - テストは `tests/` に置く。ファイル名は `test_*.py`。共通の準備は `tests/conftest.py`
 - 設定は、リポジトリ直下の `pytest.ini`（テストの場所と、`import app` のための `pythonpath`）
 - 実行：リポジトリのルートで、`.venv` を有効にして、`python -m pytest`。1つのファイルだけ：`python -m pytest tests/test_subjects_api.py`
-- `pytest` は、`requirements.txt` に、バージョンを固定して追加する（依存するライブラリも、ファイルの形式に合わせる）
+- `pytest` は、`requirements-dev.txt` に、バージョンを固定して書く（依存するライブラリも、ファイルの形式に合わせる。`requirements.txt` には、アプリを動かすものだけを書く）
 
 ### アプリの生成（テスト用の設定）
 - `create_app(test_config=None)`。`test_config` がなければ、これまでどおり `Config` を使う
@@ -49,3 +51,38 @@
 - 「今日」に依存する処理のテストでは、routeが「今日」を求める関数（`routes/subjects.py` の `current_date`）を、`monkeypatch` で置き換えて、日付を固定する（実行した日によって、結果が変わらないようにするため）。置き換える場所は、routeのモジュールの名前
 - migrationでテーブルを追加・変更したタスクでは、`tests/test_setup.py` で、そのテーブルの列（名前・型・NULL可否）と制約の名前が、「データ設計」と「制約の命名規則」のとおりであることを確かめる（テスト用DBはmigrationで作るため、migrationの内容の確認になる）
 - 各テストは独立させる（実行順に依存しない）。1つのテストで確認することは、1つにする
+
+## 検査の道具
+道具は、開発のときだけ使う（`requirements-dev.txt`・`package.json`）。版は固定する。
+
+| 確認 | 道具と設定 | 実行 |
+|---|---|---|
+| Pythonの書き方 | ruff。`ruff.toml`：PEP8の主な規則（E・F・W）、1行79文字（全角の文字は2文字に数える）。`migrations/versions/` は対象から外す（自動生成で、確かめてマージしたファイルのため） | `ruff check .` |
+| JavaScriptの書き方 | ESLint。`eslint.config.js`：推奨の規則（定義していない変数など）に、`no-var`・`prefer-const`・`eqeqeq`・`max-len`（80文字）・`quotes`（二重引用符）を足す。中に `"` を含む文字列だけ、単引用符を許す（`avoidEscape`）。対象は `app/static/js/` | `npm run lint` |
+| モデルとmigrationのずれ | pytestのテスト（`tests/test_setup.py` の `test_models_and_migrations_have_no_differences`）。migrationで作った一時的なDBと、モデルを比べる（`flask db check` と同じ確認）。ずれがあると、差の内容を出して失敗する | `python -m pytest` |
+
+- 検査の例外は、理由をコメントに書いて、その行だけに付ける。今の例外：`app/__init__.py` の `from app import models  # noqa: F401`（モデルの登録のための読み込みで、名前は使わない）
+- コードの自動整形（ruff format）は使わない（変更と関係のない差分が大きくなるため。ADR 0001）
+- `flask db check` は、ふだん直接は実行しない（Macでは、実データのDBと比べることになるため）。pytestで確かめる
+
+## CI
+- `.github/workflows/ci.yml`（GitHub Actions）。PRと、`main` へのpushのときに動く
+- ジョブ `python`（Python 3.11）：`pip install -r requirements-dev.txt` → `ruff check .` → `python -m pytest`
+- ジョブ `javascript`（Node.js 22）：`npm ci` → `npm run lint`
+- 通らないPRは、マージしない。`main` のルールセットで、2つのジョブの合格を必須にする（設定はKoma）
+
+## E2Eテスト
+- Task 023で、Playwright（pytestから動かす）の基盤と、主な流れ（学期 → 休講日 → 授業 → カレンダー → 課題 → 完了）を作り、CIに足す（ADR 0001 の「自動の確認」）。手動の確認を、すべて置き換えるものではない
+- Claudeの作業環境からは、CDN（jsDelivr）に届かない。そこでは、SRIが一致するnpmのファイルで代用する（CIからは、CDNを読む）
+
+## 画面の確認
+画面が変わるタスクでは、Komaが、Macで触って確かめる。Claudeがブラウザで確かめるときも含めて、次の知見を使う（Task 008〜021で分かったこと）。
+
+- データ：確認用の架空のデータで確かめる。実データのDBで確かめるときは、データを変える操作の前に、Komaがバックアップを取る（`database.md` の「実データのDBの扱い」）
+- 日付：確認用のデータは、確認する日からの相対の日付で作り、日付をまたがずに確かめる（「直近の締切」欄や期限切れの表示は、今日によって変わるため）
+- 取得：FullCalendarは、取得済みの範囲を取得し直さない（`lazyFetching`）。取得を確かめる手順には、取得を起こす操作（取得済みの範囲の外へ移る、絞り込みやモードを切り替える）を書く
+- 再読み込みは、ページを開き直して行う。スクリーンショットは古いことがあるため、表示は、DOMで確かめる
+- 空き枠を押す手順は、それより前の手順で作った予定と重ならない枠にする
+- 週をまたぐかどうかが曜日で変わる手順は、「次へ」「前へ」で移る形にするか、曜日による違いを書く
+- コンソールは、「JavaScriptの例外（`Uncaught …`）が出ていない」ことで確かめる。想定した400・404の応答は、Chromeが「Failed to load resource」として記録するため、除いて考える
+- `grep -r` などの結果の並びは、環境によって違うことがある。件数で確かめ、並びは期待しない

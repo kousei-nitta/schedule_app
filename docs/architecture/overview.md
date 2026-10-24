@@ -47,7 +47,7 @@
 - 独自のスタイル（`app/static/css/style.css`）は、`base.html` の `<head>` で、BootstrapのCSSのあとに読み込む（Bootstrapの指定を、上書きできるようにするため）。
 
 ## ディレクトリ構成
-以下は目標の構成。`.git/`・`.gitignore`・`.venv/`・`.vscode/`・`README.md` は作成済みで、変更しない。
+以下は目標の構成。`.git/`・`.venv/`・`.vscode/` は作成済みで、変更しない。
 
 ```
 schedule_app/
@@ -98,11 +98,12 @@ schedule_app/
 ├── instance/                # Git管理対象外（.gitignore）
 │   ├── app.db               # SQLiteファイル（開発用DB）
 │   └── backups/             # 開発用DBのバックアップ（migrationの適用の前など。「migrationの作成と適用」）
-├── docs/                    # 設計資料（正本）とタスク資料
-├── .github/copilot-instructions.md
+├── docs/                    # 資料（何がどこにあるかは docs/README.md）
+├── .github/workflows/ci.yml # CI（GitHub Actions。docs/development/testing.md の「CI」）
+├── node_modules/            # npmのパッケージ（Git管理対象外。npm ci で作る）
 ├── tests/                   # pytestのテスト（「自動テスト（pytest）」を参照）
 │   ├── conftest.py          # 共通のfixture（テスト用DB・アプリ・クライアント・開発用DBの保護）
-│   ├── test_setup.py        # テスト基盤そのものの確認（migrationで作られるテーブル・列・制約の確認を含む）
+│   ├── test_setup.py        # テスト基盤そのものの確認（migrationで作られるテーブル・列・制約の確認と、モデルとmigrationのずれの確認を含む）
 │   ├── test_api_helpers.py  # api_helpers.py の共通関数の単体テスト
 │   ├── test_class_events.py # class_events.py の単体テスト（日付の計算、Eventの値）
 │   ├── test_<リソース名>_api.py  # APIのテスト（リソースごと）
@@ -110,8 +111,15 @@ schedule_app/
 │   ├── test_events_create_update_delete_api.py  # 予定の登録・編集・削除のAPIのテスト（予定の一覧・1件取得・派遣会社の候補は test_events_api.py）
 │   └── test_semesters_update_delete_api.py  # 学期の編集・削除（期間の変更の、予定・休講日への反映を含む）と、1件取得の件数のAPIのテスト（学期の登録・一覧と、405の Allow などのAPI共通の確認は test_semesters_api.py）
 ├── pytest.ini               # pytestの設定
+├── ruff.toml                # ruff（Pythonの検査）の設定
+├── eslint.config.js         # ESLint（JavaScriptの検査）の設定
+├── package.json             # ESLintとその版（package-lock.json も同じ）。開発のときだけ使う
+├── package-lock.json
 ├── requirements.txt
-├── README.md                # 作成済み
+├── requirements-dev.txt     # 開発のときだけ使うもの（pytest・ruff）。requirements.txt も読み込む
+├── .ignore                  # 検索から外すフォルダ（docs/archive/）
+├── CLAUDE.md                # 実装の規則（Claudeが作業の始めに読む）
+├── README.md                # リポジトリの表紙（概要・機能・技術・起動方法・開発体制）
 └── run.py                   # 起動スクリプト（127.0.0.1:5001）
 ```
 
