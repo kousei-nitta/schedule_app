@@ -15,9 +15,9 @@
 | 最後にマージしたもの | Task 022（PR #40、2026-10-25。マージコミット `af60a32`。`main` のCIも合格） |
 | 実装中のタスク | Task 023（データの保護・DBの切り替え・デモデータ・E2Eの基盤。このPR） |
 | 次に設計するタスク | Task 024 |
-| 自動の確認 | pytest 1120件、ruff・ESLint・モデルとmigrationのずれ：指摘なし（Task 022のブランチ。CIで確かめる） |
-| DBの構造 | 初期migration（`0280f6cf8d09`）と、休講日の `closures` テーブル（`42bd53808fa1`）。Task 010〜022では変えていない |
-| 実データのDB | 2026-10-24から、KomaがMacの `instance/app.db` で、実データで使っている。バックアップは、Task 023で仕組みを作るまで、Komaが手で取る（`docs/development/database.md`） |
+| 自動の確認 | pytest 1171件（E2Eを除く）、E2E 1件（主な流れ）、ruff・ESLint・モデルとmigrationのずれ：指摘なし（Task 023のブランチ。CIの3つのジョブで確かめる） |
+| DBの構造 | 初期migration（`0280f6cf8d09`）と、休講日の `closures` テーブル（`42bd53808fa1`）。Task 010〜023では変えていない |
+| 実データのDB | 2026-10-24から、KomaがMacの `instance/app.db` で、実データで使っている。Task 023のマージのあとは、起動のときの自動のバックアップと、手動のコマンドで守る（`docs/development/database.md` の「実データのDBの扱い」） |
 | 最終更新 | 2026-10-25（Task 023） |
 
 ## 段階とタスク
@@ -42,6 +42,6 @@
 
 | ID | 内容 | 見つけた時 | 扱う予定 |
 |---|---|---|---|
-| 022-L6 | `architecture/overview.md` の「Bootstrapの読み込み」「FullCalendarの読み込み」に、古い言葉「Task MD」が残っている（新しい体制では「計画書」）。Task 022では、移した文を変えない方針のため直さなかった | Task 022のレビュー | その節を変えるタスクで直す |
+| — | （なし） | — | — |
 
 - Task 021までの持ち越し（010-N1〜021-N1の17件）は、Task 022で閉じた。多くは、Copilotが計画書を書き写して報告する経路に関するもので、開発体制の変更で不要になった。ブラウザ確認で分かったこと（010-N1・018-N2・020-N2・020-N3・021-N1）は、`docs/development/testing.md` の「画面の確認」に、`sqlite3` を `-readonly` で開くこと（011-L1）は、`docs/development/database.md` に残した。記録は `docs/archive/roadmap_until_task021.md`

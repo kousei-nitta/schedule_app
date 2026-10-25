@@ -10,7 +10,8 @@ from app.extensions import db
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEV_DB_PATH = PROJECT_ROOT / "instance" / "app.db"
+INSTANCE_PATH = PROJECT_ROOT / "instance"
+DEV_DB_PATH = INSTANCE_PATH / "app.db"
 
 
 def file_hash(path: Path) -> str | None:
@@ -19,13 +20,31 @@ def file_hash(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def instance_files() -> dict[str, str | None]:
+    """instance/ の中の、すべてのファイルの内容（ハッシュ）を返す。
+
+    実データのDB（app.db）と、そのバックアップ（backups/）を含む。
+    """
+    if not INSTANCE_PATH.is_dir():
+        return {}
+    return {
+        str(path.relative_to(INSTANCE_PATH)): file_hash(path)
+        for path in sorted(INSTANCE_PATH.rglob("*"))
+        if path.is_file()
+    }
+
+
 @pytest.fixture(scope="session", autouse=True)
 def protect_dev_db():
+    # テストの前後で、実データのDBと、instance/ の中のファイル
+    # （バックアップなど）が、作られず・変わらず・消えていないこと
     existed_before = DEV_DB_PATH.exists()
     hash_before = file_hash(DEV_DB_PATH)
+    files_before = instance_files()
     yield
     assert DEV_DB_PATH.exists() is existed_before
     assert file_hash(DEV_DB_PATH) == hash_before
+    assert instance_files() == files_before
 
 
 @pytest.fixture(scope="session")

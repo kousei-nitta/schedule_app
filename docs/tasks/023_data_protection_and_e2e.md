@@ -51,7 +51,7 @@ Komaの承認（2026-10-25）。
 3. バックアップ（`app/backup.py`・`app/cli.py`・`run.py`）とテスト
 4. デモデータ（`app/demo_data.py`・`app/cli.py`）とテスト
 5. E2E（ライブラリ・`pytest.ini`・`tests/e2e/`）とCI
-6. 資料（`requirements.md`・`architecture/overview.md`・`development/database.md`・`development/testing.md`・`architecture/api_endpoints.md` の古い文）、`CLAUDE.md`、`README.md`、`docs/README.md`
+6. 資料（`requirements.md`・`architecture/overview.md`・`development/database.md`・`development/testing.md`・`development/workflow.md`・`architecture/api_endpoints.md` の古い文）、`CLAUDE.md`、`README.md`、`docs/README.md`。`tests/conftest.py` の守りを、`instance/` の中のすべてのファイルに広げる
 
 ## 受け入れ条件
 - `DATABASE_URL` がない・空のときは、これまでどおり `instance/app.db` を使う。あるときは、その接続先を使う
@@ -61,7 +61,7 @@ Komaの承認（2026-10-25）。
 - `flask --app app create-demo-db` は、実データのDB・既存のファイル（`--replace` なし）・SQLite以外では、何も変えずにエラーで終わる。それ以外では、今日を含む学期と、架空のデータを作る
 - `python -m pytest`（E2Eを除く）、`python -m pytest -m e2e`、`ruff check .`、`npm run lint` が、すべて通る
 - CIの3つのジョブ（`python`・`javascript`・`e2e`）が、このPRで合格する
-- テストが、`instance/` の中のファイル（`app.db` とバックアップ）を作らない・変えない
+- テストが、`instance/` の中のファイル（`app.db` とバックアップ）を作らない・変えない・消さない（`tests/conftest.py` が、テストの前後で確かめる）
 
 ## テストの観点
 - DBの切り替え：設定がない・空・あるときの接続先。表示の文（実データかどうか、パスワードを隠す）
