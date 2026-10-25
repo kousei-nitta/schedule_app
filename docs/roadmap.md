@@ -12,13 +12,13 @@
 
 | 項目 | 状態 |
 |---|---|
-| 最後にマージしたもの | 仕様検討フェーズの決定（PR #39、2026-10-25。ADR 0001）。その前のタスクは Task 021（PR #38、2026-10-20） |
-| 実装中のタスク | Task 022（開発体制の移行。このPR） |
-| 次に設計するタスク | Task 023 |
+| 最後にマージしたもの | Task 022（PR #40、2026-10-25。マージコミット `af60a32`。`main` のCIも合格） |
+| 実装中のタスク | Task 023（データの保護・DBの切り替え・デモデータ・E2Eの基盤。このPR） |
+| 次に設計するタスク | Task 024 |
 | 自動の確認 | pytest 1120件、ruff・ESLint・モデルとmigrationのずれ：指摘なし（Task 022のブランチ。CIで確かめる） |
 | DBの構造 | 初期migration（`0280f6cf8d09`）と、休講日の `closures` テーブル（`42bd53808fa1`）。Task 010〜022では変えていない |
 | 実データのDB | 2026-10-24から、KomaがMacの `instance/app.db` で、実データで使っている。バックアップは、Task 023で仕組みを作るまで、Komaが手で取る（`docs/development/database.md`） |
-| 最終更新 | 2026-10-25（Task 022） |
+| 最終更新 | 2026-10-25（Task 023） |
 
 ## 段階とタスク
 024より後の番号は仮。段階や順序を変える場合は、`docs/decisions/` に残す。
@@ -26,8 +26,8 @@
 | 段階 | Task | 内容 | 状態 | 設計で決めること・注意 |
 |---|---|---|---|---|
 | — | 001〜021 | MVP（学期・授業・休講日・予定の自動生成・カレンダー・課題・予定の操作・学期の編集と削除） | 完了（PR #1〜#38） | 一覧は `docs/archive/roadmap_until_task021.md` |
-| 1 地固め | 022 | 開発体制の移行：資料の分割（`docs/architecture/`）・索引・`open_questions.md`・`docs/development/`、過去の資料の `docs/archive/` への移動、この資料の作り直し、CI（pytest・ruff・ESLint・migrationのずれ）、`requirements-dev.txt`、`CLAUDE.md`、最低限のREADME、Copilot向けの指示ファイル（`.github/` の中）の削除 | 実装中（このPR） | マージのあと、`main` のルールセットに、ステータスチェック（`python`・`javascript`）の必須を足す（Koma）。Macで一度、`pip install -r requirements-dev.txt` を実行する（Koma） |
-| 1 地固め | 023 | データの保護（起動のときの1日1回の自動バックアップと、手動のスクリプト）、DBの切り替え（環境変数）、デモ用の架空のデータ、Playwrightの E2E の基盤（主な流れ）とCIへの追加 | 次に設計する | 要求定義の「初期段階ではバックアップの仕組みは作らない」の変更を、設計で承認する |
+| 1 地固め | 022 | 開発体制の移行：資料の分割（`docs/architecture/`）・索引・`open_questions.md`・`docs/development/`、過去の資料の `docs/archive/` への移動、この資料の作り直し、CI（pytest・ruff・ESLint・migrationのずれ）、`requirements-dev.txt`、`CLAUDE.md`、最低限のREADME、Copilot向けの指示ファイル（`.github/` の中）の削除 | 完了（PR #40） | マージのあと、`main` のルールセットに、ステータスチェック（`python`・`javascript`）の必須を足した（Koma）。Macで `pip install -r requirements-dev.txt` を実行した（Koma） |
+| 1 地固め | 023 | データの保護（起動のときの1日1回の自動バックアップと、手動のコマンド）、DBの切り替え（環境変数）、デモ用の架空のデータ、Playwrightの E2E の基盤（主な流れ）とCIへの追加。計画書は `docs/tasks/023_data_protection_and_e2e.md` | 実装中（このPR） | 要求定義の変更（バックアップの仕組みを作る）は、設計で承認した（2026-10-25）。マージのあと、`main` のルールセットに、ステータスチェック `e2e` の必須を足す（Koma）。Macで `pip install -r requirements-dev.txt` と `npm ci` を実行する（Koma） |
 | 2 クラウドへ | 024 | ログインと、利用者ごとのデータ（`users` テーブルと、データの利用者のID。まずローカルで） | 未着手 | 実データのDBの構造を変える（Komaがバックアップを取ってから適用）。ログインの仕組みを、別の目のレビューで重点的に確かめる |
 | 2 クラウドへ | 025 | クラウドへの公開（ホストとDB、本番の設定、日本時間の「今日」、データの移行、バックアップ）と、スマホでの最低限の表示 | 未着手 | ホストとDBは、設計のときに改めて調べて決める（候補と条件は、ADR 0001） |
 | 3 見た目と使い心地 | 026〜 | デザインの方向を、主な画面の案（2〜3案）で決めてから実装する。アニメーション、スマホの画面、`index.html` の分割 | 未着手 | Apple風の考え方を取り入れる（Appleの素材そのものは使わない） |
