@@ -4,6 +4,7 @@
 instance/ の場所（pytestの一時ディレクトリ）を与えて確かめる。
 DBには接続しない。
 """
+import os
 from pathlib import Path
 
 from flask import Flask
@@ -86,6 +87,22 @@ def test_real_database_is_app_db_in_instance_directory(tmp_path):
     assert is_real_database(tmp_path / "sub" / ".." / "app.db", bare_app)
     assert not is_real_database(tmp_path / "demo.db", bare_app)
     assert not is_real_database(tmp_path / "backups" / "app.db", bare_app)
+
+
+def test_same_file_with_other_path_is_real_database(tmp_path):
+    # パスの文字は違っても、同じファイル（ハードリンク）なら実データのDB。
+    # macOSで大文字・小文字だけが違う名前（APP.db）も、同じ扱いになる
+    real_path = tmp_path / "app.db"
+    real_path.write_bytes(b"real data")
+    alias_path = tmp_path / "alias.db"
+    os.link(real_path, alias_path)
+    other_path = tmp_path / "other.db"
+    other_path.write_bytes(b"real data")
+    bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
+
+    assert is_real_database(alias_path, bare_app)
+    # 中身が同じでも、別のファイルは実データのDBではない
+    assert not is_real_database(other_path, bare_app)
 
 
 def test_describe_real_database(tmp_path):

@@ -4,6 +4,7 @@
 instance/ を一時ディレクトリにした空のFlaskアプリで行う。
 """
 import hashlib
+import os
 from datetime import date
 from pathlib import Path
 
@@ -200,6 +201,23 @@ def test_refuses_existing_real_database_even_with_replace(tmp_path):
 
     assert file_hash(real_path) == hash_before
     assert sorted(path.name for path in tmp_path.iterdir()) == ["app.db"]
+
+
+def test_refuses_real_database_with_same_file_other_name(tmp_path):
+    # 実データのDBと同じファイル（ハードリンク）を指しても断る。macOSで
+    # 大文字・小文字だけが違う名前（APP.db）を指定した場合と同じ形
+    real_path = tmp_path / "app.db"
+    real_path.write_bytes(b"real data")
+    hash_before = file_hash(real_path)
+    alias_path = tmp_path / "alias.db"
+    os.link(real_path, alias_path)
+    bare_app = make_bare_app(tmp_path, f"sqlite:///{alias_path}")
+
+    with pytest.raises(DemoDataError, match="実データのDB"):
+        create_demo_database(bare_app, TODAY, replace=True)
+
+    assert alias_path.exists()
+    assert file_hash(real_path) == hash_before
 
 
 def test_refuses_non_file_database(tmp_path):

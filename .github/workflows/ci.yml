@@ -47,6 +47,8 @@ jobs:
   # FullCalendarは、アプリと同じく、CDNから読み込む
   e2e:
     runs-on: ubuntu-latest
+    # ブラウザが止まったときに、長く動き続けないように
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:

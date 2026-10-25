@@ -209,16 +209,25 @@ def backup_real_database_on_startup(app: Flask, today: date) -> None:
     # どんな失敗でも、起動は続ける（上の説明）
     try:
         backup_path = create_daily_backup(database_path, today)
-        if backup_path is None:
-            print("自動のバックアップ：今日の分は、作成済みです")
-            return
-        print(f"自動のバックアップを作りました：{backup_path}")
-        removed_paths = remove_old_auto_backups(database_path)
     except Exception as error:
         print(
             "警告：自動のバックアップを作れませんでした。"
             "アプリは起動しますが、早めに、flask --app app backup-db で、"
             f"手動のバックアップを取ってください（理由：{error}）"
+        )
+        return
+    if backup_path is None:
+        print("自動のバックアップ：今日の分は、作成済みです")
+        return
+    print(f"自動のバックアップを作りました：{backup_path}")
+
+    # 古いものを消せなくても、今日のバックアップは作れている
+    try:
+        removed_paths = remove_old_auto_backups(database_path)
+    except Exception as error:
+        print(
+            "警告：古い自動のバックアップを消せませんでした"
+            f"（今日のバックアップは作れています。理由：{error}）"
         )
         return
     if removed_paths:

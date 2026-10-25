@@ -138,6 +138,17 @@ def test_create_backup_removes_copy_when_check_fails(
     assert list((tmp_path / "backups").iterdir()) == []
 
 
+def test_copy_and_verify_opens_source_read_only(tmp_path):
+    # 元のDBは、読み取り専用（mode=ro）で開く。読み取り専用なら、ない
+    # ファイルを開こうとしても、ファイルを作らずに失敗する
+    missing_path = tmp_path / "missing.db"
+
+    with pytest.raises(sqlite3.Error):
+        backup.copy_and_verify(missing_path, tmp_path / "copy.db")
+
+    assert not missing_path.exists()
+
+
 def test_backup_paths(tmp_path):
     database_path = tmp_path / "app.db"
 
@@ -293,6 +304,42 @@ def test_startup_backup_failure_does_not_raise(
     output = capsys.readouterr().out
     assert "警告：自動のバックアップを作れませんでした" in output
     assert "ディスクがいっぱいです" in output
+
+
+def test_startup_backup_unexpected_error_does_not_raise(
+    source_db, tmp_path, capsys, monkeypatch
+):
+    # BackupError でない、思いがけない例外でも、起動は続ける
+    def failing_backup(database_path, today):
+        raise RuntimeError("思いがけない失敗")
+
+    monkeypatch.setattr(backup, "create_daily_backup", failing_backup)
+    bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
+
+    backup_real_database_on_startup(bare_app, TODAY)
+
+    output = capsys.readouterr().out
+    assert "警告：自動のバックアップを作れませんでした" in output
+    assert "思いがけない失敗" in output
+
+
+def test_startup_backup_reports_failed_removal_separately(
+    source_db, tmp_path, capsys, monkeypatch
+):
+    def failing_removal(database_path):
+        raise OSError("消せません")
+
+    monkeypatch.setattr(backup, "remove_old_auto_backups", failing_removal)
+    bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
+
+    backup_real_database_on_startup(bare_app, TODAY)
+
+    # 今日のバックアップは作れていて、そのことと、消せなかったことを表示する
+    assert (tmp_path / "backups" / "app-20261025-auto.db").exists()
+    output = capsys.readouterr().out
+    assert "自動のバックアップを作りました" in output
+    assert "警告：古い自動のバックアップを消せませんでした" in output
+    assert "作れませんでした" not in output
 
 
 def test_backup_db_command(app, tmp_path):

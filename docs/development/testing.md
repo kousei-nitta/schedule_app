@@ -33,7 +33,7 @@
 2. `test_config` に `SQLALCHEMY_DATABASE_URI` がなければ、`create_app` が `ValueError` にする
 3. `conftest.py` のfixtureが、DBのパスが、pytestの一時ディレクトリの中であることを確認する（外なら、テストを失敗させる）
 4. セッション全体で、`instance/app.db` の内容（ハッシュ）と、`instance/` の中のすべてのファイル（バックアップなど）が、テストの前後で、作られず・変わらず・消えていないことを確認する（違えば、失敗させる）
-5. バックアップは、DBのファイルと同じフォルダの `backups/` にできるため、テストのバックアップは、一時ディレクトリの中にだけできる。実データのDBかどうか（`instance/app.db` か）の判定を確かめるテストは、`instance/` を一時ディレクトリにした空のFlaskアプリ（`Flask(__name__, instance_path=…)`）で行う（`tests/test_backup.py`・`tests/test_demo_data.py`）
+5. バックアップは、DBのファイルと同じフォルダの `backups/` にできるため、テストのバックアップは、一時ディレクトリの中にだけできる。実データのDBかどうか（`instance/app.db` か）の判定を確かめるテストは、`instance/` を一時ディレクトリにした空のFlaskアプリ（`Flask(__name__, instance_path=…)`）で行う（`tests/test_database_files.py`・`tests/test_backup.py`・`tests/test_demo_data.py`）
 
 ### テストの書き方
 - APIは、`app.test_client()` で呼ぶ。JSONの本文は `client.post(url, json=...)`。JSONでない本文や、`Content-Type` の違いは、`data=` と `content_type=` で指定する
@@ -70,7 +70,7 @@
 - `.github/workflows/ci.yml`（GitHub Actions）。PRと、`main` へのpushのときに動く
 - ジョブ `python`（Python 3.11）：`pip install -r requirements-dev.txt` → `ruff check .` → `python -m pytest`
 - ジョブ `javascript`（Node.js 22）：`npm ci` → `npm run lint`
-- ジョブ `e2e`（Python 3.11）：`pip install -r requirements-dev.txt` → `python -m playwright install --with-deps chromium` → `python -m pytest -m e2e`（Bootstrap・FullCalendarは、CDNから読む）
+- ジョブ `e2e`（Python 3.11。15分で打ち切る）：`pip install -r requirements-dev.txt` → `python -m playwright install --with-deps chromium` → `python -m pytest -m e2e`（Bootstrap・FullCalendarは、CDNから読む）
 - 通らないPRは、マージしない。`main` のルールセットで、3つのジョブの合格を必須にする（設定はKoma）
 
 ## E2Eテスト
@@ -82,7 +82,7 @@
 
 ### 配置と実行
 - `tests/e2e/` に置き、ファイルの先頭に `pytestmark = pytest.mark.e2e` を書く。`pytest.ini` の設定で、印 `e2e` のテストは、ふだんの `python -m pytest` からは外れる（ブラウザの準備が要り、時間もかかるため）
-- 実行：`python -m pytest -m e2e`。初めて動かす前に、一度だけ、ブラウザを入れる：`python -m playwright install chromium`
+- 実行：`python -m pytest -m e2e`。ファイルを指定するときも、`-m e2e` を付ける（例：`python -m pytest -m e2e tests/e2e/test_main_flow.py`。付けないと、外されて何も動かない）。初めて動かす前に、一度だけ、ブラウザを入れる：`python -m playwright install chromium`
 - 操作を目で見るとき：`python -m pytest -m e2e --headed --slowmo 500`（ブラウザの画面を出し、1つの操作ごとに0.5秒待つ）
 - Claudeの作業環境：`E2E_CDN_FROM_NPM=1 python -m pytest -m e2e`。CDN（jsDelivr）に届かないため、この環境変数があるときだけ、CDNへの読み込みに、`node_modules` の同じ版のファイル（`npm ci` で入る）で答える（`tests/e2e/conftest.py`）。ブラウザが `integrity`（SRI）を確かめるので、違うファイルなら読み込まれない。CIとKomaのMacでは、付けない（CDNから読む）
 

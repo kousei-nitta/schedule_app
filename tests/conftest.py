@@ -20,31 +20,33 @@ def file_hash(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def instance_files() -> dict[str, str | None]:
-    """instance/ の中の、すべてのファイルの内容（ハッシュ）を返す。
+def instance_entries() -> dict[str, str | None] | None:
+    """instance/ の中の、すべてのファイルの内容（ハッシュ）とフォルダを返す。
 
     実データのDB（app.db）と、そのバックアップ（backups/）を含む。
+    instance/ がなければ None（空の instance/ と区別するため）。
     """
-    if not INSTANCE_PATH.is_dir():
-        return {}
+    if not INSTANCE_PATH.exists():
+        return None
     return {
-        str(path.relative_to(INSTANCE_PATH)): file_hash(path)
+        str(path.relative_to(INSTANCE_PATH)): (
+            file_hash(path) if path.is_file() else "フォルダ"
+        )
         for path in sorted(INSTANCE_PATH.rglob("*"))
-        if path.is_file()
     }
 
 
 @pytest.fixture(scope="session", autouse=True)
 def protect_dev_db():
-    # テストの前後で、実データのDBと、instance/ の中のファイル
+    # テストの前後で、実データのDBと、instance/ の中のファイル・フォルダ
     # （バックアップなど）が、作られず・変わらず・消えていないこと
     existed_before = DEV_DB_PATH.exists()
     hash_before = file_hash(DEV_DB_PATH)
-    files_before = instance_files()
+    entries_before = instance_entries()
     yield
     assert DEV_DB_PATH.exists() is existed_before
     assert file_hash(DEV_DB_PATH) == hash_before
-    assert instance_files() == files_before
+    assert instance_entries() == entries_before
 
 
 @pytest.fixture(scope="session")

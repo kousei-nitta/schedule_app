@@ -43,9 +43,19 @@ def database_file_path(app: Flask) -> Path | None:
 def is_real_database(path: Path, app: Flask) -> bool:
     """path が、実データのDB（instance/app.db）を指すかを返す。
 
-    別の書き方（../ を含むパスなど）でも、同じファイルなら True。
+    別の書き方（../ を含むパス、大文字・小文字の違いなど）でも、同じ
+    ファイルなら True。
     """
-    return path.resolve() == real_database_path(app).resolve()
+    real_path = real_database_path(app)
+    if path.resolve() == real_path.resolve():
+        return True
+    # パスの文字が違っても、同じファイルのことがある。macOSの既定の
+    # ファイルシステムは大文字・小文字を区別しない（APP.db も app.db）。
+    # ハードリンクや、別の場所にマウントしたフォルダも同じ。両方の
+    # ファイルがあれば、ファイルそのもの（samefile）で比べる。
+    if path.exists() and real_path.exists():
+        return path.samefile(real_path)
+    return False
 
 
 def describe_database(app: Flask) -> str:
