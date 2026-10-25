@@ -219,3 +219,5 @@ __marimo__/
 
 # VScode_file
 .vscode
+# npm（ESLint）のパッケージ
+node_modules/

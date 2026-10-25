@@ -13,7 +13,8 @@ from app.models.semester import Semester
 from app.models.subject import Subject
 
 
-# docs/architecture.md の例：2026-04-01（水）〜2026-07-31（金）の月曜日。
+# docs/architecture/class_events.md の例：
+# 2026-04-01（水）〜2026-07-31（金）の月曜日。
 MONDAYS_FROM_APRIL_1 = [
     date(2026, 4, 6),
     date(2026, 4, 13),

@@ -1413,7 +1413,7 @@ def test_delete_not_found_and_invalid_urls(client, url, message):
 def test_over_limit_id_for_patch_and_delete_is_method_not_allowed(
     client, method, event_id_text
 ):
-    # docs/architecture.md の「404の使い分け」の注意（Flaskの仕組みにより、
+    # docs/architecture/api.md の「404の使い分け」の注意（Flaskの仕組みにより、
     # 同じURLにほかのメソッドのrouteがあると、405になる）。
     response = getattr(client, method)(f"/api/events/{event_id_text}")
 

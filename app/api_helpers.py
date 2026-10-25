@@ -12,7 +12,8 @@ from werkzeug.exceptions import (
 )
 
 
-# IDの上限（SQLiteのINTEGERの最大値）。これを超える数をDBに渡すとエラーになるため、IDを受け取るURLでは、この値までに制限する
+# IDの上限（SQLiteのINTEGERの最大値）。これを超える数をDBに渡すと
+# エラーになるため、IDを受け取るURLでは、この値までに制限する
 MAX_ID = 2**63 - 1
 
 ERROR_STATUS_CODES = {
@@ -66,7 +67,8 @@ def register_api_error_handlers(app: Flask) -> None:
         if not is_api_path(request.path):
             return error
 
-        # URLそのものが存在しない場合のメッセージ。データが存在しない場合は、各routeが返す。
+        # URLそのものが存在しない場合のメッセージ。
+        # データが存在しない場合は、各routeが返す。
         return api_error_response("not_found", "URLが見つかりません")
 
     @app.errorhandler(405)
@@ -103,7 +105,8 @@ def read_json_object() -> tuple[
         return None, api_error_response("invalid_json", INVALID_JSON_MESSAGE)
 
     try:
-        # silent=TrueではJSONのnullと解析失敗が同じNoneになるため、例外で判別する。
+        # silent=TrueではJSONのnullと解析失敗が同じNoneになるため、
+        # 例外で判別する。
         payload = request.get_json()
     except BadRequest:
         return None, api_error_response("invalid_json", INVALID_JSON_MESSAGE)

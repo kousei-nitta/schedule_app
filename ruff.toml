@@ -1,0 +1,9 @@
+# ruff（Pythonの書き方の検査）の設定。docs/development/testing.md の「検査の道具」
+line-length = 79
+target-version = "py311"
+# 自動生成で、確かめてマージしたmigrationのファイルは、検査しない
+extend-exclude = ["migrations/versions"]
+
+[lint]
+# E・W：PEP8の書き方（pycodestyle）、F：使わないimportなど（Pyflakes）
+select = ["E", "F", "W"]

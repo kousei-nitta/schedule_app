@@ -885,7 +885,7 @@ def test_over_limit_id_for_patch_and_delete_is_method_not_allowed(
     client, method, subject_id
 ):
     # 上限を超えるIDは、URLに一致しない。同じURLに、ほかのメソッドの
-    # route（GET）があるため、Flaskは405を返す（docs/architecture.md の
+    # route（GET）があるため、Flaskは405を返す（docs/architecture/api.md の
     # 「404の使い分け」の注意）。
     response = getattr(client, method)(
         f"/api/subjects/{subject_id}",
