@@ -221,3 +221,5 @@ __marimo__/
 .vscode
 # npm（ESLint）のパッケージ
 node_modules/
+# Playwright（E2E）の失敗のときの記録
+test-results/

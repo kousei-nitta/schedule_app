@@ -1,14 +1,24 @@
 {
   "name": "schedule-app",
   "private": true,
-  "description": "開発のときだけ使う道具（ESLint）。アプリはPython・Flaskで動く",
+  "description": "開発のときだけ使う道具（ESLint と、E2EでのCDNの代用のファイル）。アプリはPython・Flaskで動く",
   "type": "module",
   "scripts": {
     "lint": "eslint app/static/js"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "bootstrap": "5.3.8",
     "eslint": "10.12.0",
+    "fullcalendar": "6.1.21",
     "globals": "17.13.0"
+  },
+  "overrides": {
+    "@fullcalendar/core": "6.1.21",
+    "@fullcalendar/daygrid": "6.1.21",
+    "@fullcalendar/interaction": "6.1.21",
+    "@fullcalendar/list": "6.1.21",
+    "@fullcalendar/multimonth": "6.1.21",
+    "@fullcalendar/timegrid": "6.1.21"
   }
 }
