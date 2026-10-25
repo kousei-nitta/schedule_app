@@ -57,4 +57,9 @@ def create_app(test_config: dict[str, Any] | None = None):
     from app.routes.tasks import tasks_bp
 
     app.register_blueprint(tasks_bp)
+
+    # 自作のコマンド（flask --app app backup-db など）
+    from app.cli import register_commands
+
+    register_commands(app)
     return app
