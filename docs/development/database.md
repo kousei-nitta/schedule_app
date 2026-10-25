@@ -71,8 +71,8 @@ DBの構造の変え方（migration）と、実データのDBの扱い（バッ�
 
 1. サーバー（`run.py`）を止める
 2. 今の実データのDBも、手動でバックアップする（`flask --app app backup-db --label before-restore`。戻したあとで、やはり今の状態が必要になったときのため）
-   - DBが壊れているときは、このコマンドは検査で失敗して終わる。そのときは、そのまま写してから進む（例：`cp instance/app.db instance/backups/app-20261025-broken.db`）
-   - `instance/app.db-journal` があれば、それも `instance/backups/` に移す（SQLiteの書きかけの記録。残したまま戻すと、戻したDBを壊すことがあるため）
+   - `instance/app.db-journal` がある（アプリが書き込みの途中で止まった。SQLiteの書きかけの記録）ときは、このコマンドは失敗して終わる。まだ戻さない。サーバーを一度起動して画面を開き（アプリが読むときに、SQLiteが書きかけを取り消し、`-journal` が消える）、止めてから、もう一度このコマンドを実行する。成功したら、DBは壊れていないので、戻す必要があるかを考え直す
+   - それでも検査で失敗する（DBが壊れている）ときは、そのまま写してから進む（例：`cp instance/app.db instance/backups/app-20261025-broken.db`）。`-journal` が残っていれば、名前を合わせて一緒に写す（例：`instance/backups/app-20261025-broken.db-journal`）
 3. 戻すバックアップを選ぶ（`instance/backups/` の中。名前の日付と時刻で選ぶ）
 4. そのファイルを、`instance/app.db` に上書きでコピーする（例：`cp instance/backups/app-20261025-auto.db instance/app.db`）
 5. サーバーを起動して、画面で確かめる。バックアップのあとに入れたデータは、なくなっている

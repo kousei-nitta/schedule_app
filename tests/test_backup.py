@@ -138,15 +138,36 @@ def test_create_backup_removes_copy_when_check_fails(
     assert list((tmp_path / "backups").iterdir()) == []
 
 
-def test_copy_and_verify_opens_source_read_only(tmp_path):
-    # 元のDBは、読み取り専用（mode=ro）で開く。読み取り専用なら、ない
-    # ファイルを開こうとしても、ファイルを作らずに失敗する
+def test_copy_and_verify_does_not_create_missing_source(tmp_path):
+    # 元のDBがないとき、ファイルを作らずに失敗する（mode=ro の効果の1つ）
     missing_path = tmp_path / "missing.db"
 
     with pytest.raises(sqlite3.Error):
         backup.copy_and_verify(missing_path, tmp_path / "copy.db")
 
     assert not missing_path.exists()
+
+
+def test_copy_and_verify_source_connection_cannot_write(
+    source_db, tmp_path, monkeypatch
+):
+    # 元のDBの接続（最初に件数を数える接続）では、書き込めないこと
+    # （読み取り専用 mode=ro で開いていること）を、書き込みを試して確かめる
+    original_counts = backup.table_row_counts
+    write_errors = []
+
+    def counts_with_write_probe(connection):
+        if not write_errors:
+            with pytest.raises(sqlite3.OperationalError) as error:
+                connection.execute("PRAGMA user_version = 7")
+            write_errors.append(str(error.value))
+        return original_counts(connection)
+
+    monkeypatch.setattr(backup, "table_row_counts", counts_with_write_probe)
+
+    backup.copy_and_verify(source_db, tmp_path / "copy.db")
+
+    assert "readonly" in write_errors[0]
 
 
 def test_backup_paths(tmp_path):

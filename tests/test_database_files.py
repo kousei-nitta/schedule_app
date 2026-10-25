@@ -7,6 +7,7 @@ DBには接続しない。
 import os
 from pathlib import Path
 
+import pytest
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
@@ -91,7 +92,7 @@ def test_real_database_is_app_db_in_instance_directory(tmp_path):
 
 def test_same_file_with_other_path_is_real_database(tmp_path):
     # パスの文字は違っても、同じファイル（ハードリンク）なら実データのDB。
-    # macOSで大文字・小文字だけが違う名前（APP.db）も、同じ扱いになる
+    # macOSの大文字・小文字の違い（APP.db）は、下のテストで確かめる
     real_path = tmp_path / "app.db"
     real_path.write_bytes(b"real data")
     alias_path = tmp_path / "alias.db"
@@ -103,6 +104,19 @@ def test_same_file_with_other_path_is_real_database(tmp_path):
     assert is_real_database(alias_path, bare_app)
     # 中身が同じでも、別のファイルは実データのDBではない
     assert not is_real_database(other_path, bare_app)
+
+
+def test_other_case_name_is_real_database(tmp_path):
+    # macOSの既定のように、大文字・小文字を区別しないファイルシステムでだけ
+    # 動く（CIや、Claudeの作業環境では skip）。一時ディレクトリの中だけで
+    # 確かめる（実データのDBで APP.db を試さない）
+    (tmp_path / "probe").write_bytes(b"")
+    if not (tmp_path / "PROBE").exists():
+        pytest.skip("大文字・小文字を区別するファイルシステム")
+    (tmp_path / "app.db").write_bytes(b"real data")
+    bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
+
+    assert is_real_database(tmp_path / "APP.db", bare_app)
 
 
 def test_describe_real_database(tmp_path):
