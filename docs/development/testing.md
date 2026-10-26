@@ -32,7 +32,7 @@
 1. テストは、`create_app({...})` に、一時ディレクトリのDBのURIを渡してアプリを作る。`create_app()` を、引数なしで呼ばない
 2. `test_config` に `SQLALCHEMY_DATABASE_URI` がなければ、`create_app` が `ValueError` にする
 3. `conftest.py` のfixtureが、DBのパスが、pytestの一時ディレクトリの中であることを確認する（外なら、テストを失敗させる）
-4. セッション全体で、`instance/app.db` の内容（ハッシュ）と、`instance/` の有無と、その中のすべてのファイル・フォルダ（バックアップなど）が、テストの前後で、作られず・変わらず・消えていないことを確認する（違えば、失敗させる）
+4. セッション全体で、`instance/app.db` の内容（ハッシュ）と、`instance/` の有無と、その中のすべてのファイル・フォルダ（バックアップなど）が、テストの前後で、作られず・変わらず・消えていないことを確認する（違えば、失敗させる）。テストの間に、アプリを使った・起動した（その日のバックアップができる）・`backup-db` を実行した場合も、この確認で失敗する（テストの不具合ではない）。テストの間は、アプリを使わない
 5. バックアップは、DBのファイルと同じフォルダの `backups/` にできるため、テストのバックアップは、一時ディレクトリの中にだけできる。実データのDBかどうか（`instance/app.db` か）の判定を確かめるテストは、`instance/` を一時ディレクトリにした空のFlaskアプリ（`Flask(__name__, instance_path=…)`）で行う（`tests/test_database_files.py`・`tests/test_backup.py`・`tests/test_demo_data.py`）
 
 ### テストの書き方

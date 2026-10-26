@@ -19,6 +19,7 @@ from app import create_app
 from app.backup import (
     AUTO_BACKUP_KEEP_COUNT,
     BackupError,
+    BackupExistsError,
     auto_backup_path,
     backup_real_database_on_startup,
     create_backup,
@@ -93,16 +94,153 @@ def test_create_backup_fails_without_source(tmp_path):
     assert not (tmp_path / "backups").exists()
 
 
-def test_create_backup_replaces_leftover_partial_file(source_db, tmp_path):
+def test_create_backup_leaves_other_process_partial_file(source_db, tmp_path):
+    # ほかの処理（別のプロセス番号）の途中のファイルは、消さない
     backup_path = tmp_path / "backups" / "app-copy.db"
-    partial_path = tmp_path / "backups" / "app-copy.db.partial"
-    partial_path.parent.mkdir()
-    partial_path.write_bytes(b"broken")
+    other_partial = tmp_path / "backups" / "app-copy.db.99999999.partial"
+    other_partial.parent.mkdir()
+    other_partial.write_bytes(b"other process")
 
     create_backup(source_db, backup_path)
 
     assert table_dump(backup_path) == table_dump(source_db)
-    assert not partial_path.exists()
+    assert other_partial.read_bytes() == b"other process"
+    assert sorted(path.name for path in backup_path.parent.iterdir()) == [
+        "app-copy.db",
+        "app-copy.db.99999999.partial",
+    ]
+
+
+def test_create_backup_does_not_overwrite_file_made_meanwhile(
+    source_db, tmp_path, monkeypatch
+):
+    # コピーの間に、ほかの処理が同じ名前のバックアップを作った場合も、
+    # そのファイルを上書きしない
+    backup_path = tmp_path / "backups" / "app-copy.db"
+    original_copy = backup.copy_and_verify
+
+    def copy_while_other_process_finishes(database_path, copy_path):
+        counts = original_copy(database_path, copy_path)
+        backup_path.write_bytes(b"made by other process")
+        return counts
+
+    monkeypatch.setattr(
+        backup, "copy_and_verify", copy_while_other_process_finishes
+    )
+
+    with pytest.raises(BackupExistsError):
+        create_backup(source_db, backup_path)
+
+    assert backup_path.read_bytes() == b"made by other process"
+    assert list(backup_path.parent.iterdir()) == [backup_path]
+
+
+def test_create_daily_backup_made_meanwhile_is_not_an_error(
+    source_db, tmp_path, monkeypatch
+):
+    # 同時に起動したほかの処理が、その日の分を先に作った場合は、作成済み
+    def other_process_made_it(database_path, backup_path):
+        raise BackupExistsError("同じ名前のバックアップが、すでにあります")
+
+    monkeypatch.setattr(backup, "create_backup", other_process_made_it)
+
+    assert create_daily_backup(source_db, TODAY) is None
+
+
+def test_create_backup_removes_partial_companions_on_failure(
+    source_db, tmp_path, monkeypatch
+):
+    # 失敗したとき（ディスクがいっぱい、など）、途中のファイルと、SQLiteが
+    # その横に作ったファイル（-journal）を残さない
+    def fail_after_writing(database_path, copy_path):
+        copy_path.write_bytes(b"half")
+        copy_path.with_name(copy_path.name + "-journal").write_bytes(b"j")
+        raise sqlite3.OperationalError("database or disk is full")
+
+    monkeypatch.setattr(backup, "copy_and_verify", fail_after_writing)
+    backup_path = tmp_path / "backups" / "app-copy.db"
+
+    with pytest.raises(BackupError, match="disk is full"):
+        create_backup(source_db, backup_path)
+
+    assert list((tmp_path / "backups").iterdir()) == []
+
+
+def test_create_backup_when_backup_directory_is_a_file(source_db, tmp_path):
+    (tmp_path / "backups").write_bytes(b"not a folder")
+    backup_path = tmp_path / "backups" / "app-copy.db"
+
+    with pytest.raises(BackupError, match="フォルダでないもの"):
+        create_backup(source_db, backup_path)
+
+    assert (tmp_path / "backups").read_bytes() == b"not a folder"
+
+
+def make_hot_journal(database_path: Path, target_path: Path) -> None:
+    """書きかけの記録（hot journal）が残ったDBを、target_path に作る。
+
+    アプリが書き込みの途中で止まった状態と同じ。DBのファイルを書き換え
+    始めた（-journal に元の内容を控えた）瞬間の、DBと -journal を写し、
+    元のDBの書き込みは取り消す。
+    """
+    journal_path = database_path.with_name(database_path.name + "-journal")
+    with closing(sqlite3.connect(database_path)) as connection:
+        # 書き込みを、すぐDBのファイルへ書き出させる（キャッシュを小さく）
+        connection.execute("PRAGMA cache_size = 1")
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "INSERT INTO semesters (name, start_date, end_date)"
+            " SELECT name || '+', start_date, end_date FROM semesters"
+        )
+        for number in range(300):
+            connection.execute(
+                "INSERT INTO closures (semester_id, date, name)"
+                " VALUES (1, '2026-10-01', ?)",
+                (f"休講日{number}" * 20,),
+            )
+        shutil.copy2(database_path, target_path)
+        shutil.copy2(
+            journal_path,
+            target_path.with_name(target_path.name + "-journal"),
+        )
+        connection.rollback()
+
+
+def test_backup_fails_with_hot_journal_and_changes_nothing(
+    source_db, tmp_path
+):
+    hot_path = tmp_path / "hot" / "app.db"
+    hot_path.parent.mkdir()
+    make_hot_journal(source_db, hot_path)
+    hot_journal = hot_path.with_name("app.db-journal")
+    hashes_before = (file_hash(hot_path), file_hash(hot_journal))
+
+    with pytest.raises(BackupError, match="書きかけの記録（app.db-journal）"):
+        create_backup(hot_path, tmp_path / "hot" / "backups" / "copy.db")
+
+    # 読み取り専用で開くため、DBも -journal も変えない
+    assert (file_hash(hot_path), file_hash(hot_journal)) == hashes_before
+    assert list((tmp_path / "hot" / "backups").iterdir()) == []
+
+
+def test_backup_copies_only_committed_rows_while_app_writes(
+    source_db, tmp_path
+):
+    # アプリが書き込みの途中（commit の前）でも、バックアップは待たずに、
+    # commit 済みの内容だけを写す
+    with closing(sqlite3.connect(source_db)) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(
+            "INSERT INTO semesters (name, start_date, end_date)"
+            " VALUES ('2027年度 前期', '2027-04-01', '2027-07-31')"
+        )
+        backup_path = tmp_path / "backups" / "app-copy.db"
+
+        counts = create_backup(source_db, backup_path)
+
+        writer.rollback()
+    assert counts["semesters"] == 1
+    assert table_dump(backup_path) == table_dump(source_db)
 
 
 def test_create_backup_removes_copy_when_counts_differ(
@@ -233,7 +371,7 @@ def test_remove_old_auto_backups_keeps_newest(tmp_path):
     for name in other_names:
         (directory / name).write_bytes(b"other")
 
-    removed = remove_old_auto_backups(database_path)
+    removed = remove_old_auto_backups(database_path, TODAY)
 
     assert sorted(path.name for path in removed) == [
         "app-20260901-auto.db",
@@ -245,8 +383,25 @@ def test_remove_old_auto_backups_keeps_newest(tmp_path):
     assert AUTO_BACKUP_KEEP_COUNT == 30
 
 
+def test_remove_old_auto_backups_ignores_future_dates(tmp_path):
+    # 日付が今日より後の名前のファイルは、数えず、消さない（今日作った
+    # ものが、古いものとして消えないように）
+    database_path = tmp_path / "app.db"
+    directory = tmp_path / "backups"
+    directory.mkdir()
+    future_names = [f"app-202711{day:02d}-auto.db" for day in range(1, 31)]
+    for name in future_names + ["app-20261025-auto.db"]:
+        (directory / name).write_bytes(b"auto")
+
+    removed = remove_old_auto_backups(database_path, TODAY)
+
+    assert removed == []
+    assert (directory / "app-20261025-auto.db").exists()
+    assert len(list(directory.iterdir())) == 31
+
+
 def test_remove_old_auto_backups_without_directory(tmp_path):
-    assert remove_old_auto_backups(tmp_path / "app.db") == []
+    assert remove_old_auto_backups(tmp_path / "app.db", TODAY) == []
 
 
 def make_bare_app(instance_path: Path, uri: str) -> Flask:
@@ -347,7 +502,7 @@ def test_startup_backup_unexpected_error_does_not_raise(
 def test_startup_backup_reports_failed_removal_separately(
     source_db, tmp_path, capsys, monkeypatch
 ):
-    def failing_removal(database_path):
+    def failing_removal(database_path, today):
         raise OSError("消せません")
 
     monkeypatch.setattr(backup, "remove_old_auto_backups", failing_removal)

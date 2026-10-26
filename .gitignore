@@ -223,3 +223,9 @@ __marimo__/
 node_modules/
 # Playwright（E2E）の失敗のときの記録
 test-results/
+# SQLiteのDB（instance/ の外に作った場合も、Gitに入れない。リポジトリは公開）
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.partial

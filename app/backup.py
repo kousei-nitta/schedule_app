@@ -7,6 +7,7 @@
 仕様は docs/architecture/overview.md の「データの保護（バックアップ）」。
 元のDBは、読み取り専用で開く（バックアップの処理で、元のDBを変えないため）。
 """
+import os
 import re
 import sqlite3
 from contextlib import closing
@@ -28,9 +29,21 @@ AUTO_BACKUP_KEEP_COUNT = 30
 # 英数字・「-」・「_」だけにする
 LABEL_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,40}")
 
+# 元のDBを開くとき、ほかの接続（動いているアプリ）が書き込み中なら、
+# 終わるまで最大で何秒待つか（超えると「database is locked」で失敗する）
+SQLITE_WAIT_SECONDS = 5
+
+# SQLiteが、DBのファイルの横に作ることがあるファイルの名前の終わり
+# （-journal：書きかけの記録、-wal・-shm：WALのモードのときの記録）
+SQLITE_COMPANION_SUFFIXES = ("-journal", "-wal", "-shm")
+
 
 class BackupError(Exception):
     """バックアップを作れなかったときの例外。理由を、日本語の文で持つ。"""
+
+
+class BackupExistsError(BackupError):
+    """同じ名前のバックアップが、すでにあるときの例外。"""
 
 
 def backup_directory(database_path: Path) -> Path:
@@ -89,6 +102,14 @@ def integrity_check_result(connection: sqlite3.Connection) -> str:
     return "\n".join(row[0] for row in rows)
 
 
+def companion_paths(path: Path) -> list[Path]:
+    """SQLiteが、path の横に作ることがあるファイル（-journal など）を返す。"""
+    return [
+        path.with_name(path.name + suffix)
+        for suffix in SQLITE_COMPANION_SUFFIXES
+    ]
+
+
 def copy_and_verify(database_path: Path, copy_path: Path) -> dict[str, int]:
     """DBを copy_path にコピーし、壊れていないことと、件数を確かめる。
 
@@ -96,7 +117,10 @@ def copy_and_verify(database_path: Path, copy_path: Path) -> dict[str, int]:
     """
     # mode=ro：元のDBを、読み取り専用で開く
     source_uri = database_path.resolve().as_uri() + "?mode=ro"
-    with closing(sqlite3.connect(source_uri, uri=True)) as source:
+    source_connection = sqlite3.connect(
+        source_uri, uri=True, timeout=SQLITE_WAIT_SECONDS
+    )
+    with closing(source_connection) as source:
         with closing(sqlite3.connect(copy_path)) as copy:
             # 件数を数えてからコピーが終わるまで、読み取りのトランザクションの
             # 中で行う。その間、ほかの接続（動いているアプリ）の書き込みは
@@ -120,71 +144,127 @@ def copy_and_verify(database_path: Path, copy_path: Path) -> dict[str, int]:
     return source_counts
 
 
+def remove_partial_files(partial_path: Path) -> None:
+    """途中のファイルと、SQLiteがその横に作ったファイルを消す。
+
+    消せなくても、例外を出さない（後片付けの失敗で、バックアップを
+    作れなかった本当の理由が、隠れないようにするため）。
+    """
+    for path in [partial_path, *companion_paths(partial_path)]:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def failure_message(database_path: Path, error: Exception) -> str:
+    """バックアップを作れなかったときの、日本語の説明を返す。"""
+    message = f"バックアップを作れませんでした：{error}"
+    journal_path = database_path.with_name(database_path.name + "-journal")
+    if journal_path.exists():
+        # 書きかけの記録があると、読み取り専用では開けない（SQLiteが、
+        # 書きかけを取り消すために、DBに書き込む必要があるため）
+        message += (
+            f"。書きかけの記録（{journal_path.name}）があります。アプリが"
+            "書き込みの途中で止まった可能性があります。アプリを起動して"
+            "画面を一度開くと、SQLiteが書きかけを取り消します。そのあとで、"
+            "もう一度バックアップを取ってください"
+            "（docs/development/database.md の「実データのDBの扱い」）"
+        )
+    return message
+
+
 def create_backup(database_path: Path, backup_path: Path) -> dict[str, int]:
     """database_path のDBのバックアップを、backup_path に作る。
 
-    途中のファイルは「名前.partial」で作り、確かめてから、正式な名前に
-    変える（失敗したときに、確かめていないファイルが、バックアップの
-    名前で残らないため）。返り値は、各テーブルの件数。
+    途中のファイルは「名前.<プロセス番号>.partial」で作り、確かめてから、
+    正式な名前を付ける（失敗したときに、確かめていないファイルが、
+    バックアップの名前で残らないため）。返り値は、各テーブルの件数。
     """
     if not database_path.is_file():
         raise BackupError(
             f"バックアップするDBが見つかりません：{database_path}"
         )
     if backup_path.exists():
-        raise BackupError(
+        raise BackupExistsError(
             f"同じ名前のバックアップが、すでにあります：{backup_path}"
         )
-
-    partial_path = backup_path.with_name(backup_path.name + ".partial")
-    try:
-        backup_path.parent.mkdir(parents=True, exist_ok=True)
-        # 前に失敗したときの途中のファイルが残っていれば、消してから作る
-        partial_path.unlink(missing_ok=True)
-        counts = copy_and_verify(database_path, partial_path)
-        partial_path.rename(backup_path)
-    except BackupError:
-        partial_path.unlink(missing_ok=True)
-        raise
-    except (sqlite3.Error, OSError) as error:
-        partial_path.unlink(missing_ok=True)
+    directory = backup_path.parent
+    if directory.exists() and not directory.is_dir():
         raise BackupError(
-            f"バックアップを作れませんでした：{error}"
+            f"バックアップのフォルダの場所に、フォルダでないものがあります："
+            f"{directory}"
+        )
+
+    # 途中のファイルの名前に、プロセス番号を入れる（同時に2つの処理が
+    # 同じ名前のバックアップを作っても、互いの途中のファイルを消さないため）
+    partial_path = backup_path.with_name(
+        f"{backup_path.name}.{os.getpid()}.partial"
+    )
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        counts = copy_and_verify(database_path, partial_path)
+        # 正式な名前を付ける。os.link は、同じ名前のファイルがあると失敗する
+        # （rename は黙って上書きするため使わない。確かめたバックアップを、
+        # ほかの処理が作ったファイルで上書きしないように）。途中のファイルは、
+        # 下の finally で消す（正式な名前のファイルは残る）
+        os.link(partial_path, backup_path)
+    except FileExistsError as error:
+        raise BackupExistsError(
+            f"同じ名前のバックアップが、すでにあります：{backup_path}"
         ) from error
+    except (sqlite3.Error, OSError) as error:
+        raise BackupError(failure_message(database_path, error)) from error
+    finally:
+        remove_partial_files(partial_path)
     return counts
 
 
 def create_daily_backup(database_path: Path, today: date) -> Path | None:
     """その日の自動のバックアップを作り、そのパスを返す。
 
-    その日の分がすでにあれば、作らずに None を返す。
+    その日の分がすでにあれば（ほかの処理が、同時に作った場合を含む）、
+    作らずに None を返す。
     """
     backup_path = auto_backup_path(database_path, today)
     if backup_path.exists():
         return None
-    create_backup(database_path, backup_path)
+    try:
+        create_backup(database_path, backup_path)
+    except BackupExistsError:
+        return None
     return backup_path
 
 
 def remove_old_auto_backups(
-    database_path: Path, keep_count: int = AUTO_BACKUP_KEEP_COUNT
+    database_path: Path,
+    today: date,
+    keep_count: int = AUTO_BACKUP_KEEP_COUNT,
 ) -> list[Path]:
     """自動のバックアップを、新しいものから keep_count 個だけ残して消す。
 
     消すのは、「DBの名前-YYYYMMDD-auto.db」の形のファイルだけ。手動の
-    バックアップや、ほかのファイルは消さない。消したファイルを返す。
+    バックアップや、ほかのファイルは消さない。日付が今日より後の名前の
+    ファイル（Macの時計が一時的にずれていた場合など）は、数えず、消さない
+    （数えると、今日作ったものが、古いものとして消えてしまうため）。
+    消したファイルを返す。
     """
     directory = backup_directory(database_path)
     if not directory.is_dir():
         return []
     name_pattern = re.compile(
-        re.escape(database_path.stem) + r"-[0-9]{8}-auto\.db"
+        re.escape(database_path.stem) + r"-([0-9]{8})-auto\.db"
     )
-    auto_backups = [
-        path
-        for path in directory.iterdir()
-        if path.is_file() and name_pattern.fullmatch(path.name)
-    ]
+    today_text = f"{today:%Y%m%d}"
+    auto_backups = []
+    for path in directory.iterdir():
+        match = name_pattern.fullmatch(path.name)
+        if match is None or not path.is_file():
+            continue
+        # YYYYMMDD は桁が決まっているので、文字列の大小で日付を比べられる
+        if match.group(1) > today_text:
+            continue
+        auto_backups.append(path)
     # 名前に日付（YYYYMMDD）が入っているので、名前の順が、日付の順になる
     auto_backups.sort(key=lambda path: path.name, reverse=True)
     old_backups = auto_backups[keep_count:]
@@ -224,7 +304,7 @@ def backup_real_database_on_startup(app: Flask, today: date) -> None:
 
     # 古いものを消せなくても、今日のバックアップは作れている
     try:
-        removed_paths = remove_old_auto_backups(database_path)
+        removed_paths = remove_old_auto_backups(database_path, today)
     except Exception as error:
         print(
             "警告：古い自動のバックアップを消せませんでした"

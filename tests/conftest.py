@@ -44,9 +44,17 @@ def protect_dev_db():
     hash_before = file_hash(DEV_DB_PATH)
     entries_before = instance_entries()
     yield
-    assert DEV_DB_PATH.exists() is existed_before
-    assert file_hash(DEV_DB_PATH) == hash_before
-    assert instance_entries() == entries_before
+    # テストの間に、アプリを使った・起動した（その日のバックアップが
+    # できる）・backup-db を実行した場合も、ここで失敗する
+    message = (
+        "テストの前後で、instance/ の中（実データのDB・バックアップ）が"
+        "変わりました。テストの間に、アプリを使った・起動した・backup-db を"
+        "実行した場合も、こうなります。どれもしていなければ、テストが"
+        "instance/ に触れています（docs/development/testing.md）"
+    )
+    assert DEV_DB_PATH.exists() is existed_before, message
+    assert file_hash(DEV_DB_PATH) == hash_before, message
+    assert instance_entries() == entries_before, message
 
 
 @pytest.fixture(scope="session")

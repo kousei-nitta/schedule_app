@@ -51,31 +51,44 @@ DBの構造の変え方（migration）と、実データのDBの扱い（バッ�
 - マージしたmigrationファイルは、変更しない。直す必要が出たら、新しいmigrationを作り、もう一度PRで確かめる
 - `migrations/` の削除・作り直しは、Komaの確認なしに行わない
 - 実データのDBへの適用の手順（Koma）
-  1. サーバー（`run.py`）を止める
-  2. バックアップ：`flask --app app backup-db --label before-NNN`（NNNは、そのタスクの番号）。`instance/backups/app-YYYYMMDD-HHMMSS-before-NNN.db` ができる。コピーが壊れていないことと、各テーブルの件数が元と同じことは、コマンドが確かめる（エラーで終わったら、適用しない）。`instance/` は `.gitignore` の対象なので、Gitには入らない
-  3. 適用の前の記録：`flask --app app db current` の版、スキーマ（`sqlite3 -readonly instance/app.db .schema`）、各テーブルの件数（手順2のコマンドが表示した件数を使ってよい）
-  4. 適用：`flask --app app db upgrade`
-  5. 適用の後の確認：`flask --app app db current` が最新の版（`(head)`）であること。適用の前とのスキーマの差が、そのmigrationの内容だけであること。各テーブルの件数が変わっていないこと（データを変えるmigrationでは、期待する変化を計画書に書く）
-  6. 戻し方：手順2のバックアップから戻す（下の「バックアップから戻す」。`flask db downgrade` は、通常は使わない）。適用のあとで、migrationを作り直すことになった場合も、この方法で戻してから、作り直したmigrationを適用する（マージの前に限る。マージのあとは、上のとおり、新しいmigrationを作って適用する。バックアップに戻すと、バックアップのあとに入れたデータはなくなる）
+  1. サーバー（`run.py`）を止める。`git pull` やブランチの切り替えより**前に**止める（`debug=True` では、コードが変わるとすぐ起動し直し、まだmigrationを適用していないDBで、新しいコードが動いてしまうため）
+  2. コードを新しくする（`git pull` など）
+  3. バックアップ：`flask --app app backup-db --label before-NNN`（NNNは、そのタスクの番号）。`instance/backups/app-YYYYMMDD-HHMMSS-before-NNN.db` ができる。コピーが壊れていないことと、各テーブルの件数が元と同じことは、コマンドが確かめる（エラーで終わったら、適用しない）。`instance/` は `.gitignore` の対象なので、Gitには入らない
+  4. 適用の前の記録：`flask --app app db current` の版、スキーマ（`sqlite3 -readonly instance/app.db .schema`）、各テーブルの件数（手順3のコマンドが表示した件数を使ってよい）
+  5. 適用：`flask --app app db upgrade`
+  6. 適用の後の確認：`flask --app app db current` が最新の版（`(head)`）であること。適用の前とのスキーマの差が、そのmigrationの内容だけであること。各テーブルの件数が変わっていないこと（データを変えるmigrationでは、期待する変化を計画書に書く）
+  7. 戻し方：手順3のバックアップから戻す（下の「バックアップから戻す」。`flask db downgrade` は、通常は使わない）。適用のあとで、migrationを作り直すことになった場合も、この方法で戻してから、作り直したmigrationを適用する（マージの前に限る。マージのあとは、上のとおり、新しいmigrationを作って適用する。バックアップに戻すと、バックアップのあとに入れたデータはなくなる）
 - 実データのDBへの適用より前は、そのmigrationを含むコードで、サーバーを起動しない（テーブルや列がないため、エラーになる）
 
 ## 実データのDBの扱い
-- 自動のバックアップ：`python run.py` の起動のとき、その日の分がなければ、`instance/backups/app-YYYYMMDD-auto.db` ができる（新しい30個を残す）。起動のときの表示で、作れたかを確かめる。「警告：自動のバックアップを作れませんでした」と出たら、理由を見て、手動で取る
-- 手動のバックアップ：`flask --app app backup-db [--label <ラベル>]`。学期や授業を削除する前、migrationを適用する前（上の手順）、データをまとめて直す前に取る。サーバーを動かしたままでも取れる
+- 毎日の起動は `python run.py` で行う。`flask --app app run`（VS Codeの「Flask」の起動の設定も同じ）では、使っているDBの表示も、自動のバックアップもない
+- 自動のバックアップ：`python run.py` の起動のとき、その日の分がなければ、`instance/backups/app-YYYYMMDD-auto.db` ができる（新しい30個を残す）。中身は、**その日に初めて起動したときの状態**（その日に入れたデータは、次の日の分に入る）。起動したまま日をまたぐと、次に起動するまで作られない
+  - 起動のときの表示で、作れたかを確かめる。「警告：自動のバックアップを作れませんでした」と出たら、理由を見て、手動で取る
+  - 理由に「書きかけの記録（app.db-journal）があります」とあるとき：アプリが書き込みの途中で止まった（Macの電源が切れた、など）。画面を一度開くと、SQLiteが書きかけを取り消す（`-journal` が消える）。そのあとで、手動のバックアップを取る
+- 手動のバックアップ：`flask --app app backup-db [--label <ラベル>]`。学期や授業を削除する前、migrationを適用する前（上の手順）、データをまとめて直す前に取る。サーバーを動かしたままでも取れる（アプリが書き込み中なら、最大5秒待つ）
+- `instance/backups/` に、名前が `.partial` で終わるファイルが残っていたら、途中で止まったバックアップの残り。消してよい
 - 中を見るとき：`sqlite3` は、必ず `-readonly` を付けて開く（読むだけの確認で、ファイルを変えないため）
+- バックアップの中をアプリで見たいとき：先にコピーし、コピーのほうを `DATABASE_URL` で指定する（例：`cp instance/backups/app-20261025-auto.db instance/look.db` → `DATABASE_URL=sqlite:///look.db python run.py`）。バックアップをそのまま指定すると、読み書きできる状態で開き、バックアップが変わりうる
 - 画面の確認：データを変える操作で確かめるときは、実データのDBではなく、デモのDBを使う（下の「デモ用の架空のデータ」）。実データのDBで確かめるときは、先に手動のバックアップを取る
-- バックアップの置き場所は、Macの中だけ（`instance/backups/`）。Macそのものの故障に備えるには、ときどき、外部のディスクやクラウドのストレージにも写す（クラウドへの公開のときのバックアップは、Task 025で決める）
+- `git clean -x`（例：`git clean -fdx`）は使わない。`.gitignore` の対象の `instance/` ごと、実データのDBとすべてのバックアップが消える
+- Macの外へのコピー：バックアップの置き場所は、Macの中だけ（`instance/backups/`）。Macの故障・紛失に備えて、ときどき外へ写す（クラウドへの公開のときのバックアップは、Task 025で決める）
+  - 写すのは、`instance/backups/` の中のファイル（検査済みで、使っていないファイル）。動いているアプリの `instance/app.db` を、直接写さない
+  - Time Machine を使っていれば、自動で含まれる
+  - プロジェクトのフォルダを、iCloud Drive（「デスクトップと書類」の同期を含む）や Dropbox などの、同期するフォルダに置かない（使用中のSQLiteを同期すると、ずれたコピーや、衝突したコピーができうるため）
 
 ### バックアップから戻す
 戻すコマンドは作らない（実データのDBを上書きする操作のため）。Komaが、次の手順で行う。
 
 1. サーバー（`run.py`）を止める
 2. 今の実データのDBも、手動でバックアップする（`flask --app app backup-db --label before-restore`。戻したあとで、やはり今の状態が必要になったときのため）
-   - `instance/app.db-journal` がある（アプリが書き込みの途中で止まった。SQLiteの書きかけの記録）ときは、このコマンドは失敗して終わる。まだ戻さない。サーバーを一度起動して画面を開き（アプリが読むときに、SQLiteが書きかけを取り消し、`-journal` が消える）、止めてから、もう一度このコマンドを実行する。成功したら、DBは壊れていないので、戻す必要があるかを考え直す
-   - それでも検査で失敗する（DBが壊れている）ときは、そのまま写してから進む（例：`cp instance/app.db instance/backups/app-20261025-broken.db`）。`-journal` が残っていれば、名前を合わせて一緒に写す（例：`instance/backups/app-20261025-broken.db-journal`）
-3. 戻すバックアップを選ぶ（`instance/backups/` の中。名前の日付と時刻で選ぶ）
-4. そのファイルを、`instance/app.db` に上書きでコピーする（例：`cp instance/backups/app-20261025-auto.db instance/app.db`）
-5. サーバーを起動して、画面で確かめる。バックアップのあとに入れたデータは、なくなっている
+   - 「書きかけの記録（app.db-journal）があります」で失敗したとき（アプリが書き込みの途中で止まった）：まだ戻さない。サーバーを一度起動して画面を開き（SQLiteが書きかけを取り消し、`-journal` が消える）、止めてから、もう一度このコマンドを実行する。成功したら、DBは壊れていないので、戻す必要があるかを考え直す
+   - それでも検査で失敗する（DBが壊れている）ときは、そのまま写してから進む（例：`cp instance/app.db instance/backups/app-20261025-broken.db`）
+3. `ls instance/` で、`app.db-journal`・`app.db-wal`・`app.db-shm` がないことを確かめる。あれば、消さずに、`instance/backups/` へ**移す**（例：`mv instance/app.db-journal instance/backups/app-20261025-broken.db-journal`。コピーにしない）。残ったまま戻すと、SQLiteが、古い記録を、戻したDBに書き戻してしまうため（検査では気づけない）
+4. 戻すバックアップを選ぶ（`instance/backups/` の中。名前の日付と時刻で選ぶ）。自動のバックアップの中身は、その日に初めて起動したときの状態
+5. そのファイルを、`instance/app.db` に上書きでコピーする（例：`cp instance/backups/app-20261025-auto.db instance/app.db`）
+6. サーバーを起動する**前に**、`flask --app app backup-db --label after-restore` を実行し、成功することを確かめる。このコマンドは、DBを読み取り専用で開くので、手順3の記録が残っていれば、書き戻す前に失敗して止まる。壊れていないことと件数も、同時に確かめられる。失敗したら、起動しない
+7. `flask --app app db current` で、版を確かめる。最新の版（`(head)`）でなければ（古い版のときのバックアップに戻した）、上の「実データのDBへの適用の手順」の手順3〜6で、migrationを適用する（そのままでは、今のコードの画面がエラーになる）
+8. サーバーを起動して、画面で確かめる。バックアップのあとに入れたデータは、なくなっている
 
 ### 開発中の注意（アプリの中で直せないデータ）
 - 授業の編集・削除は、授業モードの一覧の「編集」「削除」から行える（APIは `PATCH`・`DELETE /api/subjects/<id>`）。授業を削除すると、その予定と課題も削除され、元に戻せない（確認のモーダルで、削除される件数を確かめてから削除する）
