@@ -17,7 +17,7 @@
 | `development/workflow.md` | 体制、タスクの流れ、レビュー、計画書、Git、資料の書き方、roadmapの更新 |
 | `development/testing.md` | pytest、検査の道具（ruff・ESLint・migrationのずれ）、CI、E2E（Playwright）、画面の確認 |
 | `development/database.md` | migrationの作成と適用、実データのDBの扱い（バックアップ・戻し方）、デモ用の架空のデータ |
-| `decisions/` | 重要な決定の記録（ADR）。`0001`：開発体制と今後の計画 |
+| `decisions/` | 重要な決定の記録（ADR）。`0001`：開発体制と今後の計画。`0002`：セキュリティの土台のタスクを、ログインの前に入れる |
 | `roadmap.md` | 現在地、段階とタスク、未解決の持ち越し |
 | `tasks/` | 計画書（Task 022から） |
 | `archive/` | 過去の資料（Task 001〜021の計画書、Task 021までのroadmap、済んだ移行の手順）。今の仕様ではない。検索から外している |

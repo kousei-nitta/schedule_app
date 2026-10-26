@@ -24,7 +24,7 @@ python run.py                # http://127.0.0.1:5001 を開く
 ```
 
 - 起動のとき、使っているDBを表示し、`instance/app.db` の、その日のバックアップを `instance/backups/` に自動で作る（新しい30個を残す）
-- 手動のバックアップ：`flask --app app backup-db --label before-024`。新しいmigrationを適用する前などに取る（`docs/development/database.md`）
+- 手動のバックアップ：`flask --app app backup-db --label before-025`（ラベルは英数字・`-`・`_`）。新しいmigrationを適用する前などに取る（`docs/development/database.md`）
 
 デモ用の架空のデータで試すとき（使うDBは、環境変数 `DATABASE_URL` で切り替える）：
 ```sh
