@@ -167,7 +167,16 @@ def check_demo_target(app: Flask, replace: bool) -> Path:
             f"DBのファイルが、すでにあります：{database_path}"
             "（作り直すときは、--replace を付けてください）"
         )
-    if database_path.exists() and not is_demo_database_file(database_path):
+    # 0バイトのファイルは、中身がないので、作り直してよい（デモのDBを作る
+    # 前に、そのDBでサーバーを起動すると、SQLiteが空のファイルを作るため）
+    is_empty_file = (
+        database_path.exists() and database_path.stat().st_size == 0
+    )
+    if (
+        database_path.exists()
+        and not is_empty_file
+        and not is_demo_database_file(database_path)
+    ):
         raise DemoDataError(
             f"このファイルは、create-demo-db で作ったデモのDBではないため、"
             f"作り直せません：{database_path}（消してよいファイルなら、"

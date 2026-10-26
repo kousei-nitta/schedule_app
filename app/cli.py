@@ -21,7 +21,7 @@ from app.demo_data import DemoDataError, create_demo_database
     "--label",
     default="manual",
     show_default=True,
-    help="バックアップの名前に入れる言葉（英数字・-・_）。例：before-024",
+    help="バックアップの名前に入れる言葉（英数字・-・_）。例：before-025",
 )
 @with_appcontext
 def backup_db_command(label: str) -> None:
@@ -50,7 +50,10 @@ def backup_db_command(label: str) -> None:
 @click.option(
     "--replace",
     is_flag=True,
-    help="DBのファイルがすでにあれば、消して作り直す（実データのDBは不可）",
+    help=(
+        "このコマンドで作ったデモのDBがすでにあれば、消して作り直す"
+        "（ほかのDB・実データのDB・バックアップは、作り直さない）"
+    ),
 )
 @with_appcontext
 def create_demo_db_command(replace: bool) -> None:

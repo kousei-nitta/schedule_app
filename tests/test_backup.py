@@ -262,8 +262,9 @@ def test_backup_fails_with_hot_journal_and_changes_nothing(
     ) as error:
         create_backup(hot_path, tmp_path / "hot" / "backups" / "copy.db")
 
-    # バックアップから戻す作業の途中なら、起動しないように、と添える
-    assert "起動しないでください" in str(error.value)
+    # バックアップから戻す作業の途中なら、画面を開かずに止めるように、と添える
+    assert "画面を開かないでください" in str(error.value)
+    assert "Ctrl+C" in str(error.value)
 
     # 読み取り専用で開くため、DBも -journal も変えない
     assert (file_hash(hot_path), file_hash(hot_journal)) == hashes_before
@@ -501,6 +502,18 @@ def test_startup_backup_skips_other_database(tmp_path, capsys):
 
     assert not (tmp_path / "backups").exists()
     assert "実データのDBではない" in capsys.readouterr().out
+
+
+def test_startup_backup_skips_non_file_database(tmp_path, capsys):
+    bare_app = make_bare_app(
+        tmp_path, "postgresql://user:secret@localhost/schedule"
+    )
+
+    backup_real_database_on_startup(bare_app, TODAY)
+
+    output = capsys.readouterr().out
+    assert "SQLiteのファイルではないため、作りません" in output
+    assert not (tmp_path / "backups").exists()
 
 
 def test_startup_backup_skips_missing_real_database(tmp_path, capsys):

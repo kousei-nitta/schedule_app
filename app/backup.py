@@ -65,7 +65,7 @@ def manual_backup_path(
 ) -> Path:
     """手動のバックアップのパス。
 
-    例：backups/app-20261025-153012-before-024.db
+    例：backups/app-20261025-153012-before-025.db
     """
     if LABEL_PATTERN.fullmatch(label) is None:
         raise BackupError(
@@ -171,9 +171,11 @@ def failure_message(database_path: Path, error: Exception) -> str:
             "もう一度バックアップを取ってください"
             "（docs/development/database.md の「実データのDBの扱い」）。"
             "ただし、バックアップから戻す作業の途中（cp で戻したあと）なら、"
-            "起動しないでください。記録は戻す前のDBのもので、起動すると、"
-            "戻したDBに書き戻されます。記録を instance/backups/ へ移し、"
-            "戻すところからやり直します（同じ資料の「バックアップから戻す」）"
+            "画面を開かないでください（起動のときにこの表示が出たら、画面を"
+            "開かずに Ctrl+C でサーバーを止める）。記録は戻す前のDBのもので、"
+            "画面を開くと、戻したDBに書き戻されます。記録を instance/backups/"
+            " へ移し、戻すところからやり直します（同じ資料の"
+            "「バックアップから戻す」）"
         )
     return message
 
@@ -296,7 +298,10 @@ def backup_real_database_on_startup(app: Flask, today: date) -> None:
     アプリを使えなくしないため。警告を見て、手動で取り直す）。
     """
     database_path = database_file_path(app)
-    if database_path is None or not is_real_database(database_path, app):
+    if database_path is None:
+        print("自動のバックアップ：SQLiteのファイルではないため、作りません")
+        return
+    if not is_real_database(database_path, app):
         print("自動のバックアップ：実データのDBではないため、作りません")
         return
     if not database_path.exists():

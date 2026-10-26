@@ -225,6 +225,24 @@ def test_command_refuses_to_replace_other_files(
     assert file_hash(database_path) == hash_before
 
 
+def test_command_replaces_empty_file(demo_app, tmp_path):
+    # デモのDBを作る前に、そのDBでサーバーを起動すると、SQLiteが0バイトの
+    # ファイルを作る。中身がないので、--replace で作り直せる
+    (tmp_path / "demo.db").write_bytes(b"")
+
+    without_replace = demo_app.test_cli_runner().invoke(
+        args=["create-demo-db"]
+    )
+    with_replace = demo_app.test_cli_runner().invoke(
+        args=["create-demo-db", "--replace"]
+    )
+
+    assert without_replace.exit_code == 1
+    assert "すでにあります" in without_replace.output
+    assert with_replace.exit_code == 0, with_replace.output
+    assert application_id(tmp_path / "demo.db") == DEMO_APPLICATION_ID
+
+
 def test_failure_on_the_way_leaves_no_half_database(
     demo_app, tmp_path, monkeypatch
 ):

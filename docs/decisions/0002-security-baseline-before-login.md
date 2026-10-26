@@ -22,7 +22,7 @@
    - `debug` を、指定したときだけ有効にする
    - ESLintの規則（`innerHTML`・`eval` などの禁止）
    - CI：アクションのコミットのSHAでの固定、全部のジョブの時間の上限、pip の更新、`.npmrc`（`ignore-scripts=true`）
-   - Dependabot（公開から14日待つ設定）、`SECURITY.md`、`.gitignore` の追加
+   - Dependabot（公開から14日待つ設定）、`SECURITY.md`、`.gitignore` の追加（`.env`・`.DS_Store`・`playwright-report/` など。DBのファイルは、Task 023で足した）
    - Playwright の更新（1.64.1。2026-11-05 から、2週間の規則に合う）
    - 開発の環境の Python の方針（3.11 の最新の版を入れる方法、または新しい版へ移るか）
    - 設計資料 `docs/architecture/security.md`（守るもの、想定する攻撃、ローカルと公開の違い、公開の前の点検の一覧）
