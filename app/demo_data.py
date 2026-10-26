@@ -145,6 +145,17 @@ def check_demo_target(app: Flask, replace: bool) -> Path:
             "環境変数 DATABASE_URL で、別のファイルを指定してください"
             "（例：DATABASE_URL=sqlite:///demo.db）"
         )
+    if database_path.name.casefold().endswith(("-journal", "-wal", "-shm")):
+        # SQLiteが、DBの横に作るファイルの名前（実データのDBの横に作ると、
+        # 実データのDBの書きかけの記録と取り違えられるため）
+        raise DemoDataError(
+            "名前が -journal・-wal・-shm で終わるファイルには、デモデータを"
+            f"作れません（SQLiteが使う名前のため）：{database_path}"
+        )
+    if database_path.exists() and not database_path.is_file():
+        raise DemoDataError(
+            f"ファイルでないもの（フォルダなど）があります：{database_path}"
+        )
     if is_in_real_backup_directory(database_path, app):
         # バックアップは、実データを守る最後の手段のため、置き換えない
         raise DemoDataError(

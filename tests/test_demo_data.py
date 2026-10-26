@@ -324,6 +324,29 @@ def test_refuses_new_file_in_real_backup_directory(tmp_path):
     assert list((tmp_path / "backups").iterdir()) == []
 
 
+@pytest.mark.parametrize(
+    "name", ["app.db-journal", "APP.DB-JOURNAL", "demo.db-wal", "x-shm"]
+)
+def test_refuses_sqlite_companion_names(tmp_path, name):
+    # SQLiteが、DBの横に作るファイルの名前には、デモのDBを作らない
+    bare_app = make_bare_app(tmp_path, f"sqlite:///{name}")
+
+    with pytest.raises(DemoDataError, match="SQLiteが使う名前"):
+        create_demo_database(bare_app, TODAY)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_refuses_directory_even_with_replace(tmp_path):
+    (tmp_path / "somedir").mkdir()
+    bare_app = make_bare_app(tmp_path, "sqlite:///somedir")
+
+    with pytest.raises(DemoDataError, match="ファイルでないもの"):
+        create_demo_database(bare_app, TODAY, replace=True)
+
+    assert (tmp_path / "somedir").is_dir()
+
+
 def test_refuses_non_file_database(tmp_path):
     bare_app = make_bare_app(tmp_path, "sqlite://")
 

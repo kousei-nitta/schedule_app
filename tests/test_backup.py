@@ -140,11 +140,53 @@ def test_create_daily_backup_made_meanwhile_is_not_an_error(
 ):
     # 同時に起動したほかの処理が、その日の分を先に作った場合は、作成済み
     def other_process_made_it(database_path, backup_path):
+        backup_path.parent.mkdir(exist_ok=True)
+        backup_path.write_bytes(b"made by other process")
         raise BackupExistsError("同じ名前のバックアップが、すでにあります")
 
     monkeypatch.setattr(backup, "create_backup", other_process_made_it)
 
     assert create_daily_backup(source_db, TODAY) is None
+
+
+def test_create_daily_backup_exists_error_without_file_is_raised(
+    source_db, tmp_path, monkeypatch
+):
+    # 「すでにある」と言われても、ファイルがなければ、作成済みとしない
+    def exists_error_without_file(database_path, backup_path):
+        raise BackupExistsError("同じ名前のバックアップが、すでにあります")
+
+    monkeypatch.setattr(backup, "create_backup", exists_error_without_file)
+
+    with pytest.raises(BackupExistsError):
+        create_daily_backup(source_db, TODAY)
+
+
+def test_create_backup_when_backup_directory_is_broken_link(
+    source_db, tmp_path
+):
+    # backups が、リンク先のないシンボリックリンク（外部のディスクを
+    # 外した、など）のときは、「すでにある」ではなく、失敗にする
+    (tmp_path / "backups").symlink_to(tmp_path / "missing-disk")
+    backup_path = tmp_path / "backups" / "app-copy.db"
+
+    with pytest.raises(BackupError, match="リンク先がありません") as error:
+        create_backup(source_db, backup_path)
+
+    assert not isinstance(error.value, BackupExistsError)
+
+
+def test_startup_backup_warns_when_backup_directory_is_broken_link(
+    source_db, tmp_path, capsys
+):
+    (tmp_path / "backups").symlink_to(tmp_path / "missing-disk")
+    bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
+
+    backup_real_database_on_startup(bare_app, TODAY)
+
+    output = capsys.readouterr().out
+    assert "警告：自動のバックアップを作れませんでした" in output
+    assert "作成済み" not in output
 
 
 def test_create_backup_removes_partial_companions_on_failure(
@@ -215,8 +257,13 @@ def test_backup_fails_with_hot_journal_and_changes_nothing(
     hot_journal = hot_path.with_name("app.db-journal")
     hashes_before = (file_hash(hot_path), file_hash(hot_journal))
 
-    with pytest.raises(BackupError, match="書きかけの記録（app.db-journal）"):
+    with pytest.raises(
+        BackupError, match="書きかけの記録（app.db-journal）"
+    ) as error:
         create_backup(hot_path, tmp_path / "hot" / "backups" / "copy.db")
+
+    # バックアップから戻す作業の途中なら、起動しないように、と添える
+    assert "起動しないでください" in str(error.value)
 
     # 読み取り専用で開くため、DBも -journal も変えない
     assert (file_hash(hot_path), file_hash(hot_journal)) == hashes_before

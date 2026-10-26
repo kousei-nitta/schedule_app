@@ -169,7 +169,11 @@ def failure_message(database_path: Path, error: Exception) -> str:
             "書き込みの途中で止まった可能性があります。アプリを起動して"
             "画面を一度開くと、SQLiteが書きかけを取り消します。そのあとで、"
             "もう一度バックアップを取ってください"
-            "（docs/development/database.md の「実データのDBの扱い」）"
+            "（docs/development/database.md の「実データのDBの扱い」）。"
+            "ただし、バックアップから戻す作業の途中（cp で戻したあと）なら、"
+            "起動しないでください。記録は戻す前のDBのもので、起動すると、"
+            "戻したDBに書き戻されます。記録を instance/backups/ へ移し、"
+            "戻すところからやり直します（同じ資料の「バックアップから戻す」）"
         )
     return message
 
@@ -190,6 +194,11 @@ def create_backup(database_path: Path, backup_path: Path) -> dict[str, int]:
             f"同じ名前のバックアップが、すでにあります：{backup_path}"
         )
     directory = backup_path.parent
+    if directory.is_symlink() and not directory.exists():
+        raise BackupError(
+            "バックアップのフォルダはリンクですが、リンク先がありません"
+            f"（外部のディスクを外している、など）：{directory}"
+        )
     if directory.exists() and not directory.is_dir():
         raise BackupError(
             f"バックアップのフォルダの場所に、フォルダでないものがあります："
@@ -208,11 +217,14 @@ def create_backup(database_path: Path, backup_path: Path) -> dict[str, int]:
         # （rename は黙って上書きするため使わない。確かめたバックアップを、
         # ほかの処理が作ったファイルで上書きしないように）。途中のファイルは、
         # 下の finally で消す（正式な名前のファイルは残る）
-        os.link(partial_path, backup_path)
-    except FileExistsError as error:
-        raise BackupExistsError(
-            f"同じ名前のバックアップが、すでにあります：{backup_path}"
-        ) from error
+        try:
+            os.link(partial_path, backup_path)
+        except FileExistsError as error:
+            # この1行の FileExistsError だけを「すでにある」とする（フォルダ
+            # を作るときなど、ほかの FileExistsError と取り違えないため）
+            raise BackupExistsError(
+                f"同じ名前のバックアップが、すでにあります：{backup_path}"
+            ) from error
     except (sqlite3.Error, OSError) as error:
         raise BackupError(failure_message(database_path, error)) from error
     finally:
@@ -232,7 +244,11 @@ def create_daily_backup(database_path: Path, today: date) -> Path | None:
     try:
         create_backup(database_path, backup_path)
     except BackupExistsError:
-        return None
+        # 本当にあるときだけ、作成済みとする（ないのに「作成済み」と
+        # 表示して、バックアップが黙って作られなくなるのを防ぐため）
+        if backup_path.is_file():
+            return None
+        raise
     return backup_path
 
 
