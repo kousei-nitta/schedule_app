@@ -12,10 +12,27 @@ from sqlalchemy.engine import make_url
 # DEFAULT_DATABASE_URI（sqlite:///app.db）が指すファイル。
 REAL_DATABASE_FILE_NAME = "app.db"
 
+# バックアップを置くフォルダの名前（DBのファイルと同じフォルダの中）
+BACKUP_DIRECTORY_NAME = "backups"
+
 
 def real_database_path(app: Flask) -> Path:
     """実データのDB（instance/app.db）のパスを返す。"""
     return Path(app.instance_path) / REAL_DATABASE_FILE_NAME
+
+
+def real_backup_directory(app: Flask) -> Path:
+    """実データのDBのバックアップのフォルダ（instance/backups/）を返す。"""
+    return real_database_path(app).parent / BACKUP_DIRECTORY_NAME
+
+
+def is_same_existing_directory(first: Path, second: Path) -> bool:
+    """2つのフォルダが、どちらもあり、同じフォルダかを返す。
+
+    パスの文字が違っても（大文字・小文字の違い、別の場所へのマウント）、
+    同じフォルダなら True（samefile で、フォルダそのものを比べる）。
+    """
+    return first.is_dir() and second.is_dir() and first.samefile(second)
 
 
 def database_file_path(app: Flask) -> Path | None:
@@ -53,8 +70,32 @@ def is_real_database(path: Path, app: Flask) -> bool:
     # ファイルシステムは大文字・小文字を区別しない（APP.db も app.db）。
     # ハードリンクや、別の場所にマウントしたフォルダも同じ。両方の
     # ファイルがあれば、ファイルそのもの（samefile）で比べる。
-    if path.exists() and real_path.exists():
-        return path.samefile(real_path)
+    if path.exists() and real_path.exists() and path.samefile(real_path):
+        return True
+    # 実データのDBがまだないときは、ファイルで比べられない。同じフォルダの、
+    # 大文字・小文字だけが違う名前（APP.db など）は、macOSでは同じファイル
+    # になるため、実データのDBとして扱う（安全のため、ほかの環境でも同じ）
+    same_name = path.name.casefold() == real_path.name.casefold()
+    if same_name and is_same_existing_directory(
+        path.resolve().parent, real_path.parent
+    ):
+        return True
+    return False
+
+
+def is_in_real_backup_directory(path: Path, app: Flask) -> bool:
+    """path が、実データのDBのバックアップのフォルダの中かを返す。
+
+    instance/backups/ の下のフォルダの中も含む。大文字・小文字の違いや、
+    別の場所にマウントしたフォルダでも、同じフォルダなら True。
+    """
+    backups = real_backup_directory(app)
+    resolved_path = path.resolve()
+    if resolved_path.is_relative_to(backups.resolve()):
+        return True
+    for parent in resolved_path.parents:
+        if is_same_existing_directory(parent, backups):
+            return True
     return False
 
 

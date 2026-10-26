@@ -17,7 +17,11 @@ from flask import Flask
 from flask.testing import FlaskClient
 from flask_migrate import upgrade
 
-from app.database_files import database_file_path, is_real_database
+from app.database_files import (
+    database_file_path,
+    is_in_real_backup_directory,
+    is_real_database,
+)
 from app.extensions import db
 from app.models import Closure, Event, Semester, Subject, Task
 
@@ -103,7 +107,8 @@ def semester_period(today: date) -> tuple[date, date]:
 def check_demo_target(app: Flask, replace: bool) -> Path:
     """デモデータを作るDBのファイルを確かめ、そのパスを返す。
 
-    実データのDB、SQLite以外のDB、すでにあるファイル（replace でないとき）
+    実データのDB、実データのDBのバックアップのフォルダ（instance/backups/）
+    の中のファイル、SQLite以外のDB、すでにあるファイル（replace でないとき）
     では、DemoDataError（何も変えない）。
     """
     database_path = database_file_path(app)
@@ -116,6 +121,12 @@ def check_demo_target(app: Flask, replace: bool) -> Path:
             "実データのDB（instance/app.db）には、デモデータを作れません。"
             "環境変数 DATABASE_URL で、別のファイルを指定してください"
             "（例：DATABASE_URL=sqlite:///demo.db）"
+        )
+    if is_in_real_backup_directory(database_path, app):
+        # バックアップは、実データを守る最後の手段のため、置き換えない
+        raise DemoDataError(
+            "実データのDBのバックアップのフォルダ（instance/backups/）の"
+            "中には、デモデータを作れません。別のファイルを指定してください"
         )
     if database_path.exists() and not replace:
         raise DemoDataError(

@@ -15,6 +15,7 @@ from app.config import DEFAULT_DATABASE_URI, database_uri
 from app.database_files import (
     database_file_path,
     describe_database,
+    is_in_real_backup_directory,
     is_real_database,
     real_database_path,
 )
@@ -117,6 +118,57 @@ def test_other_case_name_is_real_database(tmp_path):
     bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
 
     assert is_real_database(tmp_path / "APP.db", bare_app)
+
+
+def test_other_case_name_is_real_database_before_it_exists(tmp_path):
+    # 実データのDBがまだなく、ファイルで比べられないときも、同じフォルダの、
+    # 大文字・小文字だけが違う名前は、実データのDBとして扱う（どの環境でも）
+    bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
+
+    assert is_real_database(tmp_path / "APP.db", bare_app)
+    assert is_real_database(tmp_path / "App.DB", bare_app)
+    # ほかのフォルダの app.db や、名前が違うものは、実データのDBではない
+    assert not is_real_database(tmp_path / "backups" / "APP.db", bare_app)
+    assert not is_real_database(tmp_path / "app2.db", bare_app)
+
+
+def test_in_real_backup_directory(tmp_path):
+    backups = tmp_path / "backups"
+    (backups / "old").mkdir(parents=True)
+    bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
+
+    assert is_in_real_backup_directory(backups / "x.db", bare_app)
+    assert is_in_real_backup_directory(backups / "old" / "x.db", bare_app)
+    assert is_in_real_backup_directory(
+        tmp_path / "sub" / ".." / "backups" / "x.db", bare_app
+    )
+    assert not is_in_real_backup_directory(tmp_path / "x.db", bare_app)
+    assert not is_in_real_backup_directory(tmp_path / "app.db", bare_app)
+    assert not is_in_real_backup_directory(
+        tmp_path / "other" / "backups" / "x.db", bare_app
+    )
+
+
+def test_in_real_backup_directory_through_link(tmp_path):
+    # 別の名前（シンボリックリンク）で、同じフォルダを指していても、中と扱う
+    instance_path = tmp_path / "instance"
+    (instance_path / "backups").mkdir(parents=True)
+    link_path = tmp_path / "link"
+    os.symlink(instance_path / "backups", link_path)
+    bare_app = make_bare_app(instance_path, DEFAULT_DATABASE_URI)
+
+    assert is_in_real_backup_directory(link_path / "x.db", bare_app)
+
+
+def test_other_case_backup_directory_is_real_backup_directory(tmp_path):
+    # 大文字・小文字を区別しないファイルシステム（macOSの既定）でだけ動く
+    (tmp_path / "probe").write_bytes(b"")
+    if not (tmp_path / "PROBE").exists():
+        pytest.skip("大文字・小文字を区別するファイルシステム")
+    (tmp_path / "backups").mkdir()
+    bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
+
+    assert is_in_real_backup_directory(tmp_path / "BACKUPS" / "x.db", bare_app)
 
 
 def test_describe_real_database(tmp_path):

@@ -220,6 +220,34 @@ def test_refuses_real_database_with_same_file_other_name(tmp_path):
     assert file_hash(real_path) == hash_before
 
 
+def test_refuses_real_backup_directory_even_with_replace(tmp_path):
+    # 実データのDBのバックアップは、--replace でも置き換えない
+    backup_path = tmp_path / "backups" / "app-20261021-auto.db"
+    backup_path.parent.mkdir()
+    backup_path.write_bytes(b"backup data")
+    hash_before = file_hash(backup_path)
+    bare_app = make_bare_app(tmp_path, f"sqlite:///{backup_path}")
+
+    with pytest.raises(DemoDataError, match="バックアップのフォルダ"):
+        create_demo_database(bare_app, TODAY, replace=True)
+
+    assert file_hash(backup_path) == hash_before
+    assert sorted(path.name for path in backup_path.parent.iterdir()) == [
+        "app-20261021-auto.db"
+    ]
+
+
+def test_refuses_new_file_in_real_backup_directory(tmp_path):
+    # まだないファイルでも、バックアップのフォルダの中には作らない
+    (tmp_path / "backups").mkdir()
+    bare_app = make_bare_app(tmp_path, "sqlite:///backups/demo.db")
+
+    with pytest.raises(DemoDataError, match="バックアップのフォルダ"):
+        create_demo_database(bare_app, TODAY)
+
+    assert list((tmp_path / "backups").iterdir()) == []
+
+
 def test_refuses_non_file_database(tmp_path):
     bare_app = make_bare_app(tmp_path, "sqlite://")
 

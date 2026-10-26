@@ -15,10 +15,11 @@ from pathlib import Path
 
 from flask import Flask
 
-from app.database_files import database_file_path, is_real_database
-
-# バックアップを置くフォルダの名前（DBのファイルと同じフォルダの中）
-BACKUP_DIRECTORY_NAME = "backups"
+from app.database_files import (
+    BACKUP_DIRECTORY_NAME,
+    database_file_path,
+    is_real_database,
+)
 
 # 自動のバックアップを残す数（新しいものから）。手動のものは数えず、消さない
 AUTO_BACKUP_KEEP_COUNT = 30

@@ -54,7 +54,8 @@
 - SQLiteの相対パスは、`instance/` からのパスになる（Flask-SQLAlchemyの扱い）。例：`DATABASE_URL=sqlite:///demo.db python run.py` は、`instance/demo.db` を使う
 - `python run.py`・`flask --app app db …`・自作のコマンドの、すべてに効く（テストは、`create_app` に渡す設定でDBを決めるため、影響しない）
 - `run.py` は、起動のとき、使っているDBと、実データのDBかどうかを表示する（例：「DB：…/instance/app.db（実データのDB）」）。URLにパスワードがあれば、隠す
-- 実データのDBかどうかは、ファイルが `instance/app.db` と同じかで決める（`app/database_files.py`。別の書き方のパスでも、同じファイルなら実データのDB。パスの文字が違っても、両方のファイルがあれば、ファイルそのもので比べる。macOSの既定のファイルシステムは大文字・小文字を区別しないため、`APP.db` も実データのDB）
+- 実データのDBかどうかは、ファイルが `instance/app.db` と同じかで決める（`app/database_files.py`。別の書き方のパスでも、同じファイルなら実データのDB。パスの文字が違っても、両方のファイルがあれば、ファイルそのもので比べる。macOSの既定のファイルシステムは大文字・小文字を区別しないため、`APP.db` も実データのDB。実データのDBがまだなく、ファイルで比べられないときも、`instance/` の中の、大文字・小文字だけが違う名前は、実データのDBとして扱う）
+- 実データのDBのバックアップのフォルダ（`instance/backups/`。下のフォルダを含む）の中かどうかも、同じように、フォルダそのもので比べて決める（デモデータを、その中に作らないため）
 
 ## データの保護（バックアップ）
 DB（SQLiteのファイル）のバックアップ。処理は `app/backup.py`、手動のコマンドは `app/cli.py`。使い方（migrationの適用の前、戻し方）は、`docs/development/database.md` の「実データのDBの扱い」。

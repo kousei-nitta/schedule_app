@@ -38,6 +38,7 @@ Komaの承認（2026-10-25）。
 | DBの切り替え（B） | 環境変数 `DATABASE_URL`（SQLAlchemyの形のURL）。設定がない・空のときは、これまでどおり `sqlite:///app.db`（`instance/app.db`）。`flask --app app db …` にも効く。`run.py` は、起動のとき、使っているDBと、実データのDBかどうかを表示する（URLのパスワードは隠す） | `architecture/overview.md` の「DBの切り替え（環境変数）」 |
 | コマンドの形（C） | 手動のバックアップとデモデータは、Flaskのコマンド（`app/cli.py`。`create_app` で登録する） | `architecture/overview.md` |
 | デモデータ（C） | `flask --app app create-demo-db [--replace]`。使っているDBに作る。実データのDB（`instance/app.db`）には作らない。SQLiteのファイルだけ。ファイルがあれば止まる（`--replace` で作り直す）。migrationで空のDBを作り、アプリのAPIを（Flaskの `test_client` で）呼んで登録する。中身は、今日を含む学期1つと、架空の授業・休講日・予定・課題。日付は今日からの相対 | `development/database.md` の「デモ用の架空のデータ」 |
+| デモデータの守り（レビューの023-L2。Komaの承認、2026-10-26） | 実データのDBのバックアップのフォルダ（`instance/backups/`。下のフォルダを含む）の中にも、デモデータを作らない（`--replace` でも）。フォルダは、パスの文字でなく、フォルダそのもので比べる | `development/database.md` の「デモ用の架空のデータ」、`architecture/overview.md` の「DBの切り替え（環境変数）」 |
 | E2Eの置き方（D） | `tests/e2e/`。印 `e2e` を付け、ふだんの `python -m pytest` からは外す（`pytest.ini`）。`python -m pytest -m e2e` で動かす | `development/testing.md` の「E2Eテスト」 |
 | E2Eのアプリ（D） | テストごとに、一時ディレクトリのDB（migrationで作った雛形のコピー）で、アプリを別のスレッドで起動する（実データのDBに触れない） | 同上 |
 | CDNの代用（D） | 環境変数 `E2E_CDN_FROM_NPM=1` のときだけ、CDN（jsDelivr）への読み込みに、`node_modules` の同じ版のファイルで答える（Claudeの作業環境用。CIはCDNを読む）。ブラウザがSRIを確かめる | 同上 |
