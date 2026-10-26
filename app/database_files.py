@@ -106,7 +106,11 @@ def describe_database(app: Flask) -> str:
         # URLにパスワードが含まれていても、表示しない
         url = make_url(app.config["SQLALCHEMY_DATABASE_URI"])
         location = url.render_as_string(hide_password=True)
-        return f"DB：{location}（実データのDBではありません）"
+        return (
+            f"DB：{location}"
+            "（SQLiteのファイルではないため、実データのDBかどうかは"
+            "判定しません。自動のバックアップは作りません）"
+        )
     if is_real_database(path, app):
         return f"DB：{path}（実データのDB）"
     return f"DB：{path}（実データのDBではありません。DATABASE_URL で指定）"

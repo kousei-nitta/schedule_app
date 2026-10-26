@@ -9,16 +9,15 @@
 - 授業A：水曜日（今週の水曜日は休講日のため、予定がない）
 - 授業B：木曜日（今週の予定があることで、今週の予定の読み込みが
   終わったことを確かめてから、授業Aの予定がないことを確かめる）
+
+印 e2e は、tests/e2e/conftest.py が自動で付ける。
 """
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
-import pytest
 from playwright.sync_api import Page, expect
 
 from app.demo_data import semester_name
-
-pytestmark = pytest.mark.e2e
 
 SUBJECT_A = "E2Eテストの授業A"
 SUBJECT_B = "E2Eテストの授業B"
@@ -84,6 +83,9 @@ def test_main_flow(page: Page, app_url: str, page_errors: list[str]):
     this_thursday = this_sunday + timedelta(days=4)
     next_wednesday = this_wednesday + timedelta(weeks=1)
 
+    # ブラウザの「今」を、テストの「今日」の正午に固定する（テストの途中で
+    # 日付をまたいでも、Pythonとブラウザの「今日」がずれないように）
+    page.clock.set_fixed_time(datetime.combine(today, time(12, 0)))
     page.goto(app_url + "/")
 
     # 1. 学期を登録する

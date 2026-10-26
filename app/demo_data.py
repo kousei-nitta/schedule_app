@@ -25,6 +25,12 @@ from app.database_files import (
 from app.extensions import db
 from app.models import Closure, Event, Semester, Subject, Task
 
+# デモのDBの印。SQLiteのファイルの見出しの application_id（ファイルの
+# 69〜72バイト目。アプリは使わない欄）に書く値。「DEMO」の4文字を、
+# 数にしたもの。--replace は、この印のあるファイル（このコマンドで
+# 作ったデモのDB）だけを作り直す（ほかのDBを、うっかり消さないため）
+DEMO_APPLICATION_ID = 0x44454D4F
+
 # migrationのフォルダ（リポジトリの migrations/）。コマンドを動かした
 # 場所によらず、同じフォルダを使うため、このファイルからの位置で決める
 MIGRATIONS_DIRECTORY = Path(__file__).resolve().parents[1] / "migrations"
@@ -89,11 +95,11 @@ def monday_of(day: date) -> date:
 def semester_name(today: date) -> str:
     """今日を含む学期の名前（例：2026年度 後期）。
 
-    年度は4月始まり（1〜3月は前年度）。4〜9月を前期、それ以外を後期にする
-    （デモのための区切り）。
+    年度は4月始まり（1〜3月は前年度）。4〜8月を前期、9〜3月を後期にする
+    （画面の学期の登録の初期値と同じ区切り。docs/ui_ux.md の「学期」）。
     """
     fiscal_year = today.year if today.month >= 4 else today.year - 1
-    term = "前期" if 4 <= today.month <= 9 else "後期"
+    term = "前期" if 4 <= today.month <= 8 else "後期"
     return f"{fiscal_year}年度 {term}"
 
 
@@ -104,12 +110,29 @@ def semester_period(today: date) -> tuple[date, date]:
     return start_date, end_date
 
 
+def is_demo_database_file(path: Path) -> bool:
+    """path が、このコマンドで作ったデモのDB（印のあるSQLiteのファイル）か。
+
+    SQLiteのファイルの先頭100バイト（見出し）を読んで確かめる。DBとして
+    開かないので、ファイルを変えない。見出しの形は、SQLiteの資料の
+    「Database File Format」のとおり（先頭16バイトが決まった文字、
+    69〜72バイト目が application_id）。
+    """
+    with path.open("rb") as file:
+        header = file.read(100)
+    if len(header) < 100 or not header.startswith(b"SQLite format 3\x00"):
+        return False
+    application_id = int.from_bytes(header[68:72], "big")
+    return application_id == DEMO_APPLICATION_ID
+
+
 def check_demo_target(app: Flask, replace: bool) -> Path:
     """デモデータを作るDBのファイルを確かめ、そのパスを返す。
 
     実データのDB、実データのDBのバックアップのフォルダ（instance/backups/）
     の中のファイル、SQLite以外のDB、すでにあるファイル（replace でないとき）
-    では、DemoDataError（何も変えない）。
+    、このコマンドで作ったデモのDBでないファイル（replace のとき）では、
+    DemoDataError（何も変えない）。
     """
     database_path = database_file_path(app)
     if database_path is None:
@@ -132,6 +155,12 @@ def check_demo_target(app: Flask, replace: bool) -> Path:
         raise DemoDataError(
             f"DBのファイルが、すでにあります：{database_path}"
             "（作り直すときは、--replace を付けてください）"
+        )
+    if database_path.exists() and not is_demo_database_file(database_path):
+        raise DemoDataError(
+            f"このファイルは、create-demo-db で作ったデモのDBではないため、"
+            f"作り直せません：{database_path}（消してよいファイルなら、"
+            "自分で消してから、もう一度実行してください）"
         )
     return database_path
 
@@ -312,6 +341,17 @@ def register_demo_data(client: FlaskClient, today: date) -> None:
     )
 
 
+def remove_database_files(database_path: Path) -> None:
+    """DBのファイルと、SQLiteがその横に作るファイル（-journal など）を消す。
+
+    前に途中で止まったときの、書きかけの記録も残さないため。
+    """
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        database_path.with_name(database_path.name + suffix).unlink(
+            missing_ok=True
+        )
+
+
 def count_rows(model) -> int:
     """テーブルの件数を返す。"""
     return db.session.scalar(db.select(db.func.count()).select_from(model))
@@ -322,26 +362,32 @@ def create_demo_database(
 ) -> dict[str, int]:
     """使っているDBのファイルに、デモデータのDBを作る。各件数を返す。
 
-    replace が True なら、すでにあるファイルを消して、作り直す
-    （実データのDBは、check_demo_target で断る）。
+    replace が True なら、すでにあるデモのDBを消して、作り直す
+    （消してよいかは、check_demo_target で確かめる）。途中で失敗したら、
+    作りかけのDBを消してから、例外を出し直す（半端なデモのDBを残さない）。
     """
     database_path = check_demo_target(app, replace)
 
     with app.app_context():
         # 開いている接続を閉じてから、ファイルを消す
         db.engine.dispose()
-        if database_path.exists():
-            database_path.unlink()
-            # 前に途中で止まったときの、SQLiteの書きかけの記録も消す
-            journal_path = database_path.with_name(
-                database_path.name + "-journal"
-            )
-            journal_path.unlink(missing_ok=True)
+        remove_database_files(database_path)
         database_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # 空のDBに、migrationで、テーブルを作る
-        upgrade(directory=str(MIGRATIONS_DIRECTORY))
-        register_demo_data(app.test_client(), today)
+        try:
+            # 最初に印を書く（途中で失敗して残っても、デモのDBと分かる）
+            with db.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    f"PRAGMA application_id = {DEMO_APPLICATION_ID}"
+                )
+            # 空のDBに、migrationで、テーブルを作る
+            upgrade(directory=str(MIGRATIONS_DIRECTORY))
+            register_demo_data(app.test_client(), today)
+        except BaseException:
+            db.session.remove()
+            db.engine.dispose()
+            remove_database_files(database_path)
+            raise
 
         return {
             "学期": count_rows(Semester),

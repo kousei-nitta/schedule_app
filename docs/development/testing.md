@@ -13,7 +13,7 @@
 
 ### 配置と実行
 - テストは `tests/` に置く。ファイル名は `test_*.py`。共通の準備は `tests/conftest.py`
-- 設定は、リポジトリ直下の `pytest.ini`（テストの場所と、`import app` のための `pythonpath`）
+- 設定は、リポジトリ直下の `pytest.ini`（テストの場所、`import app` のための `pythonpath`、印 `e2e` の宣言と、E2Eテストをふだんの実行から外す `addopts`）
 - 実行：リポジトリのルートで、`.venv` を有効にして、`python -m pytest`。1つのファイルだけ：`python -m pytest tests/test_subjects_api.py`
 - `pytest` は、`requirements-dev.txt` に、バージョンを固定して書く（依存するライブラリも、ファイルの形式に合わせる。`requirements.txt` には、アプリを動かすものだけを書く）
 
@@ -81,17 +81,18 @@
 - E2Eテストは、主な流れと、新しい画面の重要な操作に絞る。細かな入力の検査は、APIのテスト（pytest）で確かめる
 
 ### 配置と実行
-- `tests/e2e/` に置き、ファイルの先頭に `pytestmark = pytest.mark.e2e` を書く。`pytest.ini` の設定で、印 `e2e` のテストは、ふだんの `python -m pytest` からは外れる（ブラウザの準備が要り、時間もかかるため）
-- 実行：`python -m pytest -m e2e`。ファイルを指定するときも、`-m e2e` を付ける（例：`python -m pytest -m e2e tests/e2e/test_main_flow.py`。付けないと、外されて何も動かない）。初めて動かす前に、一度だけ、ブラウザを入れる：`python -m playwright install chromium`
+- `tests/e2e/` に置く。この中のテストには、`tests/e2e/conftest.py` が、印 `e2e` を自動で付ける（付け忘れると、ブラウザのない環境（CIのジョブ `python`）で失敗するため）。`pytest.ini` の設定で、印 `e2e` のテストは、ふだんの `python -m pytest` からは外れる（ブラウザの準備が要り、時間もかかるため）
+- 実行：`python -m pytest -m e2e`。ファイルを指定するときも、`-m e2e` を付ける（例：`python -m pytest -m e2e tests/e2e/test_main_flow.py`。付けないと、外されて何も動かない）。初めて動かす前と、Playwright の版を上げたときに、ブラウザを入れる：`python -m playwright install chromium`
 - 操作を目で見るとき：`python -m pytest -m e2e --headed --slowmo 500`（ブラウザの画面を出し、1つの操作ごとに0.5秒待つ）
 - Claudeの作業環境：`E2E_CDN_FROM_NPM=1 python -m pytest -m e2e`。CDN（jsDelivr）に届かないため、この環境変数があるときだけ、CDNへの読み込みに、`node_modules` の同じ版のファイル（`npm ci` で入る）で答える（`tests/e2e/conftest.py`）。ブラウザが `integrity`（SRI）を確かめるので、違うファイルなら読み込まれない。CIとKomaのMacでは、付けない（CDNから読む）
 
 ### 仕組み（`tests/e2e/conftest.py`）
 - テストごとに、migrationで作った雛形のDB（`tests/conftest.py` の `template_db`）を一時ディレクトリにコピーし、そのDBで、アプリを別のスレッドで起動する（空いているポート）。実データのDBに触れない（「開発用DB（`instance/app.db`）を触らない仕組み」も、そのまま効く）
+- アプリは、ふだんと同じく、サーバーの中の例外を外へ出さない設定（`PROPAGATE_EXCEPTIONS` を `False`）で動かす（APIの500を、JSONで返すため）
 - ページで起きたJavaScriptの例外を、fixture `page_errors` に集める。テストの最後に、空であることを確かめる
 
 ### 書き方
-- 日付は、今日からの相対で決める（下の「画面の確認」）。週表示は日曜始まり
+- 日付は、今日からの相対で決める（下の「画面の確認」）。週表示は日曜始まり。ブラウザの「今」は、`page.clock.set_fixed_time` で、テストの「今日」の正午に固定する（テストの途中で日付をまたいでも、Pythonとブラウザの「今日」がずれないように）
 - 「ないこと」を確かめる前に、同じ画面で「あること」を確かめて、読み込みが終わったことを確かめる（読み込みの前に「ない」と判定されて、確認が空振りになるのを防ぐ）。例：主な流れでは、同じ週の木曜日の授業の予定が出てから、休講日の水曜日に授業の予定がないことを確かめる
 - 要素は、`id` か、読み上げの名前（`get_by_role` の `name`）で探す。見た目のための class には、なるべく頼らない（FullCalendarの日付の列など、ほかに手がかりがない場合を除く）
 

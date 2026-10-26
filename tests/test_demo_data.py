@@ -5,6 +5,9 @@ instance/ を一時ディレクトリにした空のFlaskアプリで行う。
 """
 import hashlib
 import os
+import shutil
+import sqlite3
+from contextlib import closing
 from datetime import date
 from pathlib import Path
 
@@ -13,7 +16,9 @@ from flask import Flask
 
 from app import create_app
 from app.config import DEFAULT_DATABASE_URI
+from app import demo_data
 from app.demo_data import (
+    DEMO_APPLICATION_ID,
     DemoDataError,
     create_demo_database,
     semester_name,
@@ -50,7 +55,9 @@ def file_hash(path: Path) -> str:
     ("today", "expected"),
     [
         (date(2026, 4, 1), "2026年度 前期"),
-        (date(2026, 9, 30), "2026年度 前期"),
+        (date(2026, 8, 31), "2026年度 前期"),
+        (date(2026, 9, 1), "2026年度 後期"),
+        (date(2026, 9, 30), "2026年度 後期"),
         (date(2026, 10, 1), "2026年度 後期"),
         (date(2027, 1, 10), "2026年度 後期"),
         (date(2027, 3, 31), "2026年度 後期"),
@@ -159,9 +166,30 @@ def test_command_refuses_existing_file(demo_app, tmp_path):
     assert database_path.read_bytes() == b"existing"
 
 
-def test_command_replaces_existing_file(demo_app, tmp_path):
-    database_path = tmp_path / "demo.db"
-    database_path.write_bytes(b"not a database")
+def application_id(path: Path) -> int:
+    with closing(sqlite3.connect(path)) as connection:
+        return connection.execute("PRAGMA application_id").fetchone()[0]
+
+
+def test_demo_database_has_marker(demo_app, tmp_path):
+    create_demo_database(demo_app, TODAY)
+
+    assert application_id(tmp_path / "demo.db") == DEMO_APPLICATION_ID
+
+
+def test_command_replaces_demo_database(demo_app, tmp_path):
+    create_demo_database(demo_app, TODAY)
+    # 作り直しで消えることを確かめるため、デモのDBに、予定を1件足す
+    demo_app.test_client().post(
+        "/api/events",
+        json={
+            "category": "other",
+            "title": "作り直しで消える予定",
+            "date": "2026-10-22",
+            "start_time": "10:00",
+            "end_time": "11:00",
+        },
+    )
 
     result = demo_app.test_cli_runner().invoke(
         args=["create-demo-db", "--replace"]
@@ -170,6 +198,54 @@ def test_command_replaces_existing_file(demo_app, tmp_path):
     assert result.exit_code == 0, result.output
     response = demo_app.test_client().get("/api/subjects")
     assert len(response.get_json()) == 6
+    with demo_app.app_context():
+        titles = db.session.scalars(db.select(Event.title)).all()
+    assert "作り直しで消える予定" not in titles
+
+
+@pytest.mark.parametrize("kind", ["not_sqlite", "sqlite_without_marker"])
+def test_command_refuses_to_replace_other_files(
+    demo_app, tmp_path, template_db, kind
+):
+    # --replace でも、このコマンドで作ったデモのDBでなければ、消さない
+    # （手で作った実データの写しなどを、うっかり消さないため）
+    database_path = tmp_path / "demo.db"
+    if kind == "not_sqlite":
+        database_path.write_bytes(b"not a database" * 10)
+    else:
+        shutil.copy2(template_db, database_path)
+    hash_before = file_hash(database_path)
+
+    result = demo_app.test_cli_runner().invoke(
+        args=["create-demo-db", "--replace"]
+    )
+
+    assert result.exit_code == 1
+    assert "デモのDBではない" in result.output
+    assert file_hash(database_path) == hash_before
+
+
+def test_failure_on_the_way_leaves_no_half_database(
+    demo_app, tmp_path, monkeypatch
+):
+    # 登録の途中で失敗したら、作りかけのDBを残さない
+    def fail_on_the_way(client, today):
+        client.post(
+            "/api/semesters",
+            json={
+                "name": "2026年度 後期",
+                "start_date": "2026-09-14",
+                "end_date": "2026-12-27",
+            },
+        )
+        raise DemoDataError("POST /api/subjects が失敗しました")
+
+    monkeypatch.setattr(demo_data, "register_demo_data", fail_on_the_way)
+
+    with pytest.raises(DemoDataError, match="失敗しました"):
+        create_demo_database(demo_app, TODAY)
+
+    assert list(tmp_path.iterdir()) == []
 
 
 def make_bare_app(instance_path: Path, uri: str) -> Flask:

@@ -39,6 +39,8 @@ Komaの承認（2026-10-25）。
 | コマンドの形（C） | 手動のバックアップとデモデータは、Flaskのコマンド（`app/cli.py`。`create_app` で登録する） | `architecture/overview.md` |
 | デモデータ（C） | `flask --app app create-demo-db [--replace]`。使っているDBに作る。実データのDB（`instance/app.db`）には作らない。SQLiteのファイルだけ。ファイルがあれば止まる（`--replace` で作り直す）。migrationで空のDBを作り、アプリのAPIを（Flaskの `test_client` で）呼んで登録する。中身は、今日を含む学期1つと、架空の授業・休講日・予定・課題。日付は今日からの相対 | `development/database.md` の「デモ用の架空のデータ」 |
 | デモデータの守り（レビューの023-L2。Komaの承認、2026-10-26） | 実データのDBのバックアップのフォルダ（`instance/backups/`。下のフォルダを含む）の中にも、デモデータを作らない（`--replace` でも）。フォルダは、パスの文字でなく、フォルダそのもので比べる | `development/database.md` の「デモ用の架空のデータ」、`architecture/overview.md` の「DBの切り替え（環境変数）」 |
+| デモデータの作り直し（2026-10-26の精査） | `--replace` は、このコマンドで作ったデモのDB（SQLiteの見出しの `application_id` に印のあるもの）だけを作り直す。途中で失敗したら、作りかけのDBを消す。学期名の前期・後期の区切りは、画面の初期値（`ui_ux.md`）と同じ4〜8月・9〜3月 | `development/database.md` の「デモ用の架空のデータ」 |
+| E2Eの印と時計（2026-10-26の精査） | `tests/e2e/` の中のテストには、`conftest.py` が印 `e2e` を自動で付ける。ブラウザの「今」を、テストの「今日」の正午に固定する | `development/testing.md` の「E2Eテスト」 |
 | E2Eの置き方（D） | `tests/e2e/`。印 `e2e` を付け、ふだんの `python -m pytest` からは外す（`pytest.ini`）。`python -m pytest -m e2e` で動かす | `development/testing.md` の「E2Eテスト」 |
 | E2Eのアプリ（D） | テストごとに、一時ディレクトリのDB（migrationで作った雛形のコピー）で、アプリを別のスレッドで起動する（実データのDBに触れない） | 同上 |
 | CDNの代用（D） | 環境変数 `E2E_CDN_FROM_NPM=1` のときだけ、CDN（jsDelivr）への読み込みに、`node_modules` の同じ版のファイルで答える（Claudeの作業環境用。CIはCDNを読む）。ブラウザがSRIを確かめる | 同上 |

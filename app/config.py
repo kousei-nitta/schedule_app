@@ -12,9 +12,12 @@ def database_uri(environment: Mapping[str, str] = os.environ) -> str:
 
     環境変数 DATABASE_URL があれば、その値を使う（デモのDBや、将来の
     クラウドのDBに切り替えるため）。ない・空のときは、実データのDB。
-    テストで環境変数を差し替えられるように、引数で受け取れるようにする。
+    前後の空白は取り除く（コピーのときに入りやすく、空白つきの名前の
+    ファイルができてしまうため）。テストで環境変数を差し替えられるように、
+    引数で受け取れるようにする。
     """
-    return environment.get("DATABASE_URL") or DEFAULT_DATABASE_URI
+    value = environment.get("DATABASE_URL", "").strip()
+    return value or DEFAULT_DATABASE_URI
 
 
 class Config:

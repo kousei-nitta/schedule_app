@@ -50,10 +50,10 @@
 - 独自のスタイル（`app/static/css/style.css`）は、`base.html` の `<head>` で、BootstrapのCSSのあとに読み込む（Bootstrapの指定を、上書きできるようにするため）。
 
 ## DBの切り替え（環境変数）
-- 使うDBは、環境変数 `DATABASE_URL`（SQLAlchemyの形のURL）で決める。設定がない・空のときは、`sqlite:///app.db`（`instance/app.db`。KomaのMacでは、実データのDB）。値は `app/config.py` の `database_uri()` で読む
+- 使うDBは、環境変数 `DATABASE_URL`（SQLAlchemyの形のURL）で決める。設定がない・空のときは、`sqlite:///app.db`（`instance/app.db`。KomaのMacでは、実データのDB）。値は `app/config.py` の `database_uri()` で読む（前後の空白は取り除く）
 - SQLiteの相対パスは、`instance/` からのパスになる（Flask-SQLAlchemyの扱い）。例：`DATABASE_URL=sqlite:///demo.db python run.py` は、`instance/demo.db` を使う
 - `python run.py`・`flask --app app db …`・自作のコマンドの、すべてに効く（テストは、`create_app` に渡す設定でDBを決めるため、影響しない）
-- `run.py` は、起動のとき、使っているDBと、実データのDBかどうかを表示する（例：「DB：…/instance/app.db（実データのDB）」）。URLにパスワードがあれば、隠す
+- `run.py` は、起動のとき、使っているDBと、実データのDBかどうかを表示する（例：「DB：…/instance/app.db（実データのDB）」）。URLにパスワードがあれば、隠す。SQLiteのファイルでないDB（`file:` の形のURL、将来のPostgreSQLなど）は、実データのDBかどうかを判定しない（そう表示し、自動のバックアップも作らない）
 - 実データのDBかどうかは、ファイルが `instance/app.db` と同じかで決める（`app/database_files.py`。別の書き方のパスでも、同じファイルなら実データのDB。パスの文字が違っても、両方のファイルがあれば、ファイルそのもので比べる。macOSの既定のファイルシステムは大文字・小文字を区別しないため、`APP.db` も実データのDB。実データのDBがまだなく、ファイルで比べられないときも、`instance/` の中の、大文字・小文字だけが違う名前は、実データのDBとして扱う）
 - 実データのDBのバックアップのフォルダ（`instance/backups/`。下のフォルダを含む）の中かどうかも、同じように、フォルダそのもので比べて決める（デモデータを、その中に作らないため）
 

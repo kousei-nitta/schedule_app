@@ -43,6 +43,14 @@ def test_database_uri_uses_environment_variable():
     assert database_uri(environment) == "sqlite:///demo.db"
 
 
+def test_database_uri_strips_spaces():
+    # コピーのときに入りやすい前後の空白は、取り除く。空白だけなら既定のDB
+    assert database_uri({"DATABASE_URL": " sqlite:///demo.db \n"}) == (
+        "sqlite:///demo.db"
+    )
+    assert database_uri({"DATABASE_URL": "   "}) == DEFAULT_DATABASE_URI
+
+
 def test_relative_sqlite_path_is_in_instance_directory(tmp_path):
     bare_app = make_bare_app(tmp_path, "sqlite:///demo.db")
 
@@ -199,5 +207,6 @@ def test_describe_hides_password(tmp_path):
     assert "secret" not in message
     assert message == (
         "DB：postgresql://user:***@localhost/schedule"
-        "（実データのDBではありません）"
+        "（SQLiteのファイルではないため、実データのDBかどうかは判定しません。"
+        "自動のバックアップは作りません）"
     )

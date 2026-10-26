@@ -8,6 +8,9 @@
   CDNから読む）。ブラウザが integrity（SRI）を確かめるので、違う
   ファイルなら読み込まれない
 - page_errors：ページで起きたJavaScriptの例外の一覧
+- このフォルダの中のテストには、印 e2e を自動で付ける（ふだんの
+  python -m pytest から外すため。付け忘れると、ブラウザのない環境
+  （CIのジョブ python）で失敗する）
 
 page（ブラウザのページ）は、pytest-playwright のfixture。
 実行のしかたは docs/development/testing.md の「E2Eテスト」。
@@ -30,6 +33,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 NODE_MODULES = PROJECT_ROOT / "node_modules"
 CDN_PREFIX = "https://cdn.jsdelivr.net/npm/"
 CONTENT_TYPES = {".css": "text/css", ".js": "text/javascript"}
+E2E_DIRECTORY = Path(__file__).resolve().parent
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items):
+    # tryfirst：pytest が、印でテストを選ぶ（-m）より先に、印を付ける
+    for item in items:
+        if item.path.resolve().is_relative_to(E2E_DIRECTORY):
+            item.add_marker(pytest.mark.e2e)
 
 
 @pytest.fixture
@@ -39,6 +51,9 @@ def live_server(template_db: Path, tmp_path: Path):
     server_app = create_app(
         {
             "TESTING": True,
+            # TESTING では、サーバーの中の例外が、そのまま外へ出る。ふだんと
+            # 同じく、APIの500をJSONで返すように、外へ出さない設定にする
+            "PROPAGATE_EXCEPTIONS": False,
             "SQLALCHEMY_DATABASE_URI": f"sqlite:///{database_path}",
         }
     )
