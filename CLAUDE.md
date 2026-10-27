@@ -6,7 +6,7 @@
 ## コマンド
 | 目的 | コマンド |
 |---|---|
-| 準備 | `python3.11 -m venv .venv`、`source .venv/bin/activate`、`pip install -r requirements-dev.txt`、`npm ci` |
+| 準備 | `python3.11 -m venv .venv`、`source .venv/bin/activate`、`pip install -r requirements-dev.txt`、`npm ci`（Node.js があるときだけ。KomaのMacには入れていない：ESLintはCIが確かめ、MacのE2EはCDNから読むため、要らない） |
 | テスト | `python -m pytest`（E2Eを除く。1つのファイル：`python -m pytest tests/test_subjects_api.py`） |
 | E2Eテスト | `E2E_CDN_FROM_NPM=1 python -m pytest -m e2e`（Claudeの作業環境。CDNの代わりに `node_modules` のファイルを使う）。KomaのMacとCIでは、環境変数を付けない（初回だけ `python -m playwright install chromium`） |
 | Pythonの検査 | `ruff check .` |
