@@ -59,26 +59,29 @@
 | 確認 | 道具と設定 | 実行 |
 |---|---|---|
 | Pythonの書き方 | ruff。`ruff.toml`：PEP8の主な規則（E・F・W）、1行79文字（全角の文字は2文字に数える）。`migrations/versions/` は対象から外す（自動生成で、確かめてマージしたファイルのため）。`docs/archive/` も、`.ignore` に従って外れる | `ruff check .` |
-| JavaScriptの書き方 | ESLint。`eslint.config.js`：推奨の規則（定義していない変数など）に、`no-var`・`prefer-const`・`eqeqeq`・`max-len`（80文字）・`quotes`（二重引用符）を足す。中に `"` を含む文字列だけ、単引用符を許す（`avoidEscape`）。対象は `app/static/js/` | `npm run lint` |
+| JavaScriptの書き方 | ESLint。`eslint.config.js`：推奨の規則（定義していない変数など）に、`no-var`・`prefer-const`・`eqeqeq`・`max-len`（80文字）・`quotes`（二重引用符）を足す。中に `"` を含む文字列だけ、単引用符を許す（`avoidEscape`）。セキュリティのための禁止（`innerHTML` などHTMLとして解釈される書き方、`eval` の類、`style` の操作、`setAttribute` での `on…`・`style`。`architecture/security.md` の「依存とCI」）も確かめる。対象は `app/static/js/` | `npm run lint` |
+| テンプレートの書き方 | pytestのテスト（`tests/test_security.py`）。インラインの `<script>`・`<style>`・`style` 属性・`onclick` などがないこと、CDNのURLがCSPで許されていること | `python -m pytest` |
 | モデルとmigrationのずれ | pytestのテスト（`tests/test_setup.py` の `test_models_and_migrations_have_no_differences`）。migrationで作った一時的なDBと、モデルを比べる（`flask db check` と同じ確認）。ずれがあると、差の内容を出して失敗する | `python -m pytest` |
 
-- ESLintを手元で動かすには、Node.js が要る（`npm ci` → `npm run lint`）。KomaのMacには入れていない（CIのジョブ `javascript` が、PRごとに確かめるため）。入れるかは、Task 024（開発の環境の方針）で決める
+- ESLintを手元で動かすには、Node.js が要る（`npm ci` → `npm run lint`）。KomaのMacには入れない（CIのジョブ `javascript` が、PRごとに確かめるため。`architecture/security.md` の「開発の環境」）
 - 検査の例外は、理由をコメントに書いて、その行だけに付ける。今の例外：`app/__init__.py` の `from app import models  # noqa: F401`（モデルの登録のための読み込みで、名前は使わない）
 - コードの自動整形（ruff format）は使わない（変更と関係のない差分が大きくなるため。ADR 0001）
 - `flask db check` は、ふだん直接は実行しない（Macでは、実データのDBと比べることになるため）。pytestで確かめる
 
 ## CI
 - `.github/workflows/ci.yml`（GitHub Actions）。PRと、`main` へのpushのときに動く
-- ジョブ `python`（Python 3.11）：`pip install -r requirements-dev.txt` → `ruff check .` → `python -m pytest`
-- ジョブ `javascript`（Node.js 22）：`npm ci` → `npm run lint`
-- ジョブ `e2e`（Python 3.11。15分で打ち切る）：`pip install -r requirements-dev.txt` → `python -m playwright install --with-deps chromium` → `python -m pytest -m e2e`（Bootstrap・FullCalendarは、CDNから読む）
+- ジョブ `python`（Python 3.14。10分で打ち切る）：pip を決めた版（26.2.2）にする → `pip install -r requirements-dev.txt` → `ruff check .` → `python -m pytest`
+- ジョブ `javascript`（Node.js 22。10分で打ち切る）：`npm ci`（`.npmrc` で、インストールのときのスクリプトは動かさない）→ `npm run lint`
+- ジョブ `e2e`（Python 3.14。15分で打ち切る）：pip を決めた版にする → `pip install -r requirements-dev.txt` → `python -m playwright install --with-deps chromium` → `python -m pytest -m e2e`（Bootstrap・FullCalendarは、CDNから読む）
+- Python・Node.js は、その系列の最新の修正版を使う（`check-latest`）
+- アクション（`actions/checkout` など）は、コミットのSHAで固定し、版を行の末尾のコメントに書く。更新は Dependabot のPR（`workflow.md` の「依存の更新（Dependabot）」）。理由は `architecture/security.md` の「依存とCI」
 - 通らないPRは、マージしない。`main` のルールセットで、3つのジョブの合格を必須にする（設定はKoma）
 
 ## E2Eテスト
 画面を、ブラウザ（Chromium）で、利用者と同じように操作して確かめる。道具は Playwright（pytest-playwright。pytestから動かす）。手動の確認を、すべて置き換えるものではない（ADR 0001 の「自動の確認」）。
 
 ### 対象
-- 主な流れ（`tests/e2e/test_main_flow.py`）：学期の登録 → 休講日の追加 → 授業の登録（休講日を除いて予定ができる）→ カレンダーの週表示（休講日に授業の予定がなく、次の週にはある）→ 課題の登録（「直近の締切」欄に出る）→ 完了（完了の一覧に移り、「直近の締切」欄から消える）。流れの全体で、JavaScriptの例外が起きていないこと
+- 主な流れ（`tests/e2e/test_main_flow.py`）：学期の登録 → 休講日の追加 → 授業の登録（休講日を除いて予定ができる）→ カレンダーの週表示（休講日に授業の予定がなく、次の週にはある）→ 課題の登録（「直近の締切」欄に出る）→ 完了（完了の一覧に移り、「直近の締切」欄から消える）。流れの全体で、JavaScriptの例外と、CSPの違反（ブラウザが、CSPに反するとして止めた読み込み・実行）が起きていないこと
 - E2Eテストは、主な流れと、新しい画面の重要な操作に絞る。細かな入力の検査は、APIのテスト（pytest）で確かめる
 
 ### 配置と実行
@@ -90,7 +93,7 @@
 ### 仕組み（`tests/e2e/conftest.py`）
 - テストごとに、migrationで作った雛形のDB（`tests/conftest.py` の `template_db`）を一時ディレクトリにコピーし、そのDBで、アプリを別のスレッドで起動する（空いているポート）。実データのDBに触れない（「開発用DB（`instance/app.db`）を触らない仕組み」も、そのまま効く）
 - アプリは、ふだんと同じく、サーバーの中の例外を外へ出さない設定（`PROPAGATE_EXCEPTIONS` を `False`）で動かす（APIの500を、JSONで返すため）
-- ページで起きたJavaScriptの例外を、fixture `page_errors` に集める。テストの最後に、空であることを確かめる
+- ページで起きたJavaScriptの例外を、fixture `page_errors` に集める。CSPの違反（Chromiumが、コンソールに「Content Security Policy」を含むエラーとして記録するもの）を、fixture `csp_violations` に集める。テストの最後に、どちらも空であることを確かめる
 
 ### 書き方
 - 日付は、今日からの相対で決める（下の「画面の確認」）。週表示は日曜始まり。ブラウザの「今」は、`page.clock.set_fixed_time` で、テストの「今日」の正午に固定する（テストの途中で日付をまたいでも、Pythonとブラウザの「今日」がずれないように）

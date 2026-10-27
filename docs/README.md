@@ -13,11 +13,12 @@
 | `architecture/api.md` | API共通ルール（URL・JSON・日付・エラー）、`app/api_helpers.py` |
 | `architecture/api_endpoints.md` | 各API（学期・授業・休講日・予定・課題・タスク） |
 | `architecture/frontend.md` | JavaScriptの構成、FullCalendarの使い方、モード間の連携、`api.js` |
+| `architecture/security.md` | セキュリティ：守るもの、想定する攻撃、対策（Hostの検査・ヘッダーとCSP・依存とCI・開発の環境）、公開の前の点検 |
 | `open_questions.md` | 未決定事項と、将来の検討事項 |
-| `development/workflow.md` | 体制、タスクの流れ、レビュー、計画書、Git、資料の書き方、roadmapの更新 |
+| `development/workflow.md` | 体制、タスクの流れ、レビュー、計画書、Git、資料の書き方、roadmapの更新、依存の更新（Dependabot）、公開のリポジトリで守ること（外の文の扱い） |
 | `development/testing.md` | pytest、検査の道具（ruff・ESLint・migrationのずれ）、CI、E2E（Playwright）、画面の確認 |
 | `development/database.md` | migrationの作成と適用、実データのDBの扱い（バックアップ・戻し方）、デモ用の架空のデータ |
-| `decisions/` | 重要な決定の記録（ADR）。`0001`：開発体制と今後の計画。`0002`：セキュリティの土台のタスクを、ログインの前に入れる |
+| `decisions/` | 重要な決定の記録（ADR）。`0001`：開発体制と今後の計画。`0002`：セキュリティの土台のタスクを、ログインの前に入れる。`0003`：Pythonを3.14へ移す |
 | `roadmap.md` | 現在地、段階とタスク、未解決の持ち越し |
 | `tasks/` | 計画書（Task 022から） |
 | `archive/` | 過去の資料（Task 001〜021の計画書、Task 021までのroadmap、済んだ移行の手順）。今の仕様ではない。検索から外している |
@@ -29,8 +30,9 @@
 | APIを作る・変える | `architecture/api.md`、`architecture/api_endpoints.md` の該当するAPI、`architecture/data_model.md`、`development/testing.md` の「自動テスト（pytest）」 |
 | DBの構造を変える | `architecture/data_model.md`、`development/database.md` |
 | 授業の予定の作成・同期に関わる | `architecture/class_events.md` |
-| 画面を作る・変える | `ui_ux.md` の該当する節、`architecture/frontend.md`、`development/testing.md` の「E2Eテスト」「画面の確認」 |
-| ライブラリ・検査の道具・CIを変える | `architecture/overview.md`、`development/testing.md` |
+| 画面を作る・変える | `ui_ux.md` の該当する節、`architecture/frontend.md`、`development/testing.md` の「E2Eテスト」「画面の確認」、`architecture/security.md` の「セキュリティのヘッダー」（CSP） |
+| ライブラリ・検査の道具・CIを変える | `architecture/overview.md`、`development/testing.md`、`architecture/security.md` の「依存とCI」 |
+| セキュリティに関わる（ヘッダー・CSP・Host・ログイン・公開・開発の環境） | `architecture/security.md`、`decisions/0002-security-baseline-before-login.md` |
 | バックアップ・DBの切り替え・デモデータを変える | `architecture/overview.md` の「DBの切り替え（環境変数）」「データの保護（バックアップ）」、`development/database.md` |
 | 仕様を決める | `open_questions.md`、`decisions/`、`requirements.md` |
 
@@ -45,5 +47,6 @@
 | `architecture/api.md` | API共通ルール、URLとメソッド、リクエストとレスポンス（JSON）、日付・時刻・日時、エラー、404の使い分け、エラーをJSONにする範囲、API共通処理の補助モジュール |
 | `architecture/api_endpoints.md` | 学期API、授業API、休講日API、予定API、課題・タスクAPI |
 | `architecture/frontend.md` | JavaScriptの構成、FullCalendarの使い方、モード間の連携、`api.js` の仕様 |
+| `architecture/security.md` | 守るもの、想定する攻撃（今の形：ローカル）、対策（Hostヘッダーの検査、セキュリティのヘッダー、入力、debug（デバッグモード）、依存とCI、リポジトリ、開発の環境）、ローカルと公開の違い、公開の前の点検 |
 | `development/database.md` | DBスキーマ変更の方式、Flask-Migrateの操作の意味、migrationの作成と適用、実データのDBの扱い、バックアップから戻す、開発中の注意、デモ用の架空のデータ |
 | `development/testing.md` | 自動テスト（pytest）（対象と方針、配置と実行、アプリの生成、テスト用DB、開発用DBを触らない仕組み、テストの書き方）、検査の道具、CI、E2Eテスト（対象、配置と実行、仕組み、書き方）、画面の確認 |

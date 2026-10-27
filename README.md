@@ -10,18 +10,20 @@
 - **課題・タスクモード**：課題と、締切だけのタスクを登録し、完了を管理する。カレンダーにも「直近の締切」を表示する
 
 ## 技術
-- Python 3.11、Flask、SQLite（Flask-SQLAlchemy・Flask-Migrate）
+- Python 3.14、Flask、SQLite（Flask-SQLAlchemy・Flask-Migrate）
 - 画面：Jinja2、バニラJavaScript（ES modules）、FullCalendar 6、Bootstrap 5
 - テストと検査：pytest、Playwright（E2E）、ruff、ESLint、GitHub Actions
 
 ## 起動方法
 ```sh
-python3.11 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 flask --app app db upgrade   # DB（instance/app.db）を作る
 python run.py                # http://127.0.0.1:5001 を開く
 ```
+
+- デバッグモード（コードを変えると自動で起動し直す）は、開発のときだけ：`FLASK_DEBUG=1 python run.py`
 
 - 起動のとき、使っているDBを表示し、`instance/app.db` の、その日のバックアップを `instance/backups/` に自動で作る（新しい30個を残す）
 - 手動のバックアップ：`flask --app app backup-db --label before-025`（ラベルは英数字・`-`・`_`）。新しいmigrationを適用する前などに取る（`docs/development/database.md`）
@@ -48,4 +50,5 @@ AI（Claude）が設計の案を出し、開発者が承認したあと、Claude
 - 資料の索引：`docs/README.md`
 - 開発の進め方：`docs/development/workflow.md`
 - 決定の記録：`docs/decisions/`
+- セキュリティ：`docs/architecture/security.md`。脆弱性の報告は `SECURITY.md`
 - 計画と進み具合：`docs/roadmap.md`
