@@ -37,7 +37,7 @@ DATABASE_URL=sqlite:///demo.db python run.py
 pip install -r requirements-dev.txt
 python -m pytest
 ruff check .
-npm ci && npm run lint       # Node.js が必要
+npm ci && npm run lint       # Node.js があるときだけ（なくても、CIが検査する）
 python -m playwright install chromium   # E2Eテストのブラウザ（初回だけ）
 python -m pytest -m e2e      # E2Eテスト（画面の主な流れ）
 ```

@@ -218,34 +218,79 @@ def test_create_backup_when_backup_directory_is_a_file(source_db, tmp_path):
     assert (tmp_path / "backups").read_bytes() == b"not a folder"
 
 
+# 書きかけの記録（-journal）の見出しの先頭の8バイト（印）と、続く4バイト
+# （記録の数）。SQLiteは、DBのファイルを書き換える前に（commit のときと、
+# 大きな書き込みでキャッシュが溢れたとき）、見出しにこの印を書く。印の
+# ある記録が「書きかけ」（hot journal）で、DBを開くときに取り消しが要る。
+# 印が 0 の記録は、書きかけではない（DBのファイルは、まだ書き換えられて
+# いない）。記録の数の 0xFFFFFFFF は「ファイルの終わりまで」で、同期しない
+# モード（synchronous = OFF）で SQLite が書くのと同じ見出しになる。形は、
+# SQLiteの資料「Database File Format」の「The Rollback Journal」のとおり
+JOURNAL_MAGIC = bytes.fromhex("d9d505f920a163d7")
+RECORDS_TO_END = (0xFFFFFFFF).to_bytes(4, "big")
+
+
 def make_hot_journal(database_path: Path, target_path: Path) -> None:
     """書きかけの記録（hot journal）が残ったDBを、target_path に作る。
 
-    アプリが書き込みの途中で止まった状態と同じ。DBのファイルを書き換え
-    始めた（-journal に元の内容を控えた）瞬間の、DBと -journal を写し、
-    元のDBの書き込みは取り消す。
+    アプリが、DBのファイルを書き換える直前（記録に印を書いたあと）で
+    止まった状態と同じ。書き込みの途中の、DBと -journal を写し、写した
+    記録の見出しに、印を書く。元のDBの書き込みは取り消す。
+
+    KomaのMac（SQLite 3.54.0）では、cache_size を小さくしても、commit の
+    前にDBを書き換えず、印は 0 のままだった（理由は確かめていない）。
+    どの環境でも同じ状態を作るため、印は、ここで書く。
     """
     journal_path = database_path.with_name(database_path.name + "-journal")
+    target_journal = target_path.with_name(target_path.name + "-journal")
     with closing(sqlite3.connect(database_path)) as connection:
-        # 書き込みを、すぐDBのファイルへ書き出させる（キャッシュを小さく）
-        connection.execute("PRAGMA cache_size = 1")
         connection.execute("BEGIN IMMEDIATE")
+        # 今ある行を変えて、記録に、元のページの中身を控えさせる
+        connection.execute("UPDATE semesters SET name = name || '+'")
         connection.execute(
-            "INSERT INTO semesters (name, start_date, end_date)"
-            " SELECT name || '+', start_date, end_date FROM semesters"
+            "INSERT INTO closures (semester_id, date, name)"
+            " VALUES (1, '2026-10-01', '書きかけの休講日')"
         )
-        for number in range(300):
-            connection.execute(
-                "INSERT INTO closures (semester_id, date, name)"
-                " VALUES (1, '2026-10-01', ?)",
-                (f"休講日{number}" * 20,),
-            )
         shutil.copy2(database_path, target_path)
-        shutil.copy2(
-            journal_path,
-            target_path.with_name(target_path.name + "-journal"),
-        )
+        shutil.copy2(journal_path, target_journal)
         connection.rollback()
+
+    journal = bytearray(target_journal.read_bytes())
+    journal[0:12] = JOURNAL_MAGIC + RECORDS_TO_END
+    target_journal.write_bytes(bytes(journal))
+
+
+def test_journal_header_matches_what_sqlite_writes(source_db):
+    # 上の準備で書く見出しが、この環境の SQLite が自分で書く見出し
+    # （同期しないモード）と同じこと（Macの SQLite でも、ここで確かめる）
+    journal_path = source_db.with_name(source_db.name + "-journal")
+    with closing(sqlite3.connect(source_db)) as connection:
+        connection.execute("PRAGMA synchronous = OFF")
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("UPDATE semesters SET name = name || '+'")
+        header = journal_path.read_bytes()[:12]
+        connection.rollback()
+
+    assert header == JOURNAL_MAGIC + RECORDS_TO_END
+
+
+def test_hot_journal_helper_makes_a_real_hot_journal(source_db, tmp_path):
+    # 上の準備が、本物の書きかけの記録を作ること（テストの空振りを防ぐ）：
+    # 読み書きで開くと、SQLiteが書きかけとして扱い、記録を当てて消す
+    # （書きかけでない記録は、読むだけでは消えない）。写したDBは、
+    # commit 済みの中身のまま
+    hot_path = tmp_path / "hot" / "app.db"
+    hot_path.parent.mkdir()
+    make_hot_journal(source_db, hot_path)
+    hot_journal = hot_path.with_name("app.db-journal")
+
+    with closing(sqlite3.connect(hot_path)) as connection:
+        names = connection.execute("SELECT name FROM semesters").fetchall()
+        check = connection.execute("PRAGMA integrity_check").fetchone()[0]
+
+    assert not hot_journal.exists()
+    assert names == [("2026年度 後期",)]
+    assert check == "ok"
 
 
 def test_backup_fails_with_hot_journal_and_changes_nothing(
@@ -262,6 +307,9 @@ def test_backup_fails_with_hot_journal_and_changes_nothing(
     ) as error:
         create_backup(hot_path, tmp_path / "hot" / "backups" / "copy.db")
 
+    # 失敗の理由が、書きかけの記録を取り消せないことであること
+    sqlite_error = error.value.__cause__
+    assert sqlite_error.sqlite_errorname == "SQLITE_READONLY_ROLLBACK"
     # バックアップから戻す作業の途中なら、画面を開かずに止めるように、と添える
     assert "画面を開かないでください" in str(error.value)
     assert "Ctrl+C" in str(error.value)
@@ -269,6 +317,24 @@ def test_backup_fails_with_hot_journal_and_changes_nothing(
     # 読み取り専用で開くため、DBも -journal も変えない
     assert (file_hash(hot_path), file_hash(hot_journal)) == hashes_before
     assert list((tmp_path / "hot" / "backups").iterdir()) == []
+
+
+def test_no_hot_journal_hint_for_other_failures(
+    source_db, tmp_path, monkeypatch
+):
+    # -journal があっても（書き込み中のアプリ、取り消しの要らない古い記録）、
+    # 別の理由で失敗したときは、書きかけの記録の案内をしない
+    source_db.with_name("app.db-journal").write_bytes(b"\0" * 512)
+
+    def fail_with_disk_full(database_path, copy_path):
+        raise sqlite3.OperationalError("database or disk is full")
+
+    monkeypatch.setattr(backup, "copy_and_verify", fail_with_disk_full)
+
+    with pytest.raises(BackupError, match="disk is full") as error:
+        create_backup(source_db, tmp_path / "backups" / "copy.db")
+
+    assert "書きかけの記録" not in str(error.value)
 
 
 def test_backup_copies_only_committed_rows_while_app_writes(

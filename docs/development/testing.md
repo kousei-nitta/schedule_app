@@ -62,6 +62,7 @@
 | JavaScriptの書き方 | ESLint。`eslint.config.js`：推奨の規則（定義していない変数など）に、`no-var`・`prefer-const`・`eqeqeq`・`max-len`（80文字）・`quotes`（二重引用符）を足す。中に `"` を含む文字列だけ、単引用符を許す（`avoidEscape`）。対象は `app/static/js/` | `npm run lint` |
 | モデルとmigrationのずれ | pytestのテスト（`tests/test_setup.py` の `test_models_and_migrations_have_no_differences`）。migrationで作った一時的なDBと、モデルを比べる（`flask db check` と同じ確認）。ずれがあると、差の内容を出して失敗する | `python -m pytest` |
 
+- ESLintを手元で動かすには、Node.js が要る（`npm ci` → `npm run lint`）。KomaのMacには入れていない（CIのジョブ `javascript` が、PRごとに確かめるため）。入れるかは、Task 024（開発の環境の方針）で決める
 - 検査の例外は、理由をコメントに書いて、その行だけに付ける。今の例外：`app/__init__.py` の `from app import models  # noqa: F401`（モデルの登録のための読み込みで、名前は使わない）
 - コードの自動整形（ruff format）は使わない（変更と関係のない差分が大きくなるため。ADR 0001）
 - `flask db check` は、ふだん直接は実行しない（Macでは、実データのDBと比べることになるため）。pytestで確かめる
