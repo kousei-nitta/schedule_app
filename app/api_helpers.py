@@ -444,16 +444,22 @@ def parse_datetime(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
 
-    # fromisoformatは秒や別の書式も受理するため、先に厳密な形式を確認する。
+    # 先に、Tでつないだ形であることを確かめる（空白でつないだ形などを断る）。
     if (
         re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}", value)
         is None
     ):
         return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
+
+    # 日付と時刻を、それぞれの厳密な変換で確かめてから、組み合わせる。
+    # datetime.fromisoformat は、Python 3.14 から「24:00」を翌日の0時として
+    # 受け付けるため使わない（時刻は 00:00〜23:59 だけ。API共通ルール）。
+    date_text, time_text = value.split("T")
+    parsed_date = parse_date(date_text)
+    parsed_time = parse_time(time_text)
+    if parsed_date is None or parsed_time is None:
         return None
+    return datetime.combine(parsed_date, parsed_time)
 
 
 def format_datetime(value: datetime) -> str:

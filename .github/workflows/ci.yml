@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           # その系列の、最新の修正版を使う（ランナーに入っている版が古い
           # ことがあるため）
           check-latest: true
@@ -72,7 +72,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           check-latest: true
           cache: pip
           cache-dependency-path: |
