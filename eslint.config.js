@@ -13,6 +13,8 @@ const htmlMessage =
 // （CLAUDE.md。style 属性は、CSPでも止まりうる）
 const styleMessage =
   "style を直接変えない。見た目は CSS の class（style.css）で変える";
+// HTMLの onclick などの属性（CSPでも止まる）
+const eventMessage = "on… の属性は使わない。addEventListener を使う";
 
 export default [
   // 推奨の規則（定義していない変数、使わない変数など）
@@ -44,23 +46,39 @@ export default [
         { property: "innerHTML", message: htmlMessage },
         { property: "outerHTML", message: htmlMessage },
         { property: "insertAdjacentHTML", message: htmlMessage },
+        { property: "setHTMLUnsafe", message: htmlMessage },
+        { property: "createContextualFragment", message: htmlMessage },
         { object: "document", property: "write", message: htmlMessage },
         { object: "document", property: "writeln", message: htmlMessage },
         { property: "style", message: styleMessage },
       ],
+      // setAttribute("onclick", …) など。属性の名前は、"…" の文字列と、
+      // `…` の形（テンプレートリテラル）の、両方を確かめる
       "no-restricted-syntax": [
         "error",
         {
-          // setAttribute("onclick", …) など。イベントは addEventListener
+          // イベントは addEventListener で付ける
           selector:
             "CallExpression[callee.property.name='setAttribute']" +
             "[arguments.0.value=/^on/i]",
-          message: "on… の属性は使わない。addEventListener を使う",
+          message: eventMessage,
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='setAttribute']" +
+            "[arguments.0.quasis.0.value.raw=/^on/i]",
+          message: eventMessage,
         },
         {
           selector:
             "CallExpression[callee.property.name='setAttribute']" +
             "[arguments.0.value=/^style$/i]",
+          message: styleMessage,
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='setAttribute']" +
+            "[arguments.0.quasis.0.value.raw=/^style/i]",
           message: styleMessage,
         },
       ],

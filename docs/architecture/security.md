@@ -39,7 +39,7 @@
 |---|---|---|
 | `X-Content-Type-Options` | `nosniff` | 宣言した種類（`Content-Type`）と違うものとして、ブラウザに読ませない |
 | `X-Frame-Options` | `DENY` | ほかのサイトの枠の中に表示させない（古いブラウザのため。CSPの `frame-ancestors` と同じ） |
-| `Referrer-Policy` | `same-origin` | ほかのサイト（CDNを含む）へ、URLを送らない。`no-referrer` にしないのは、同じサイトへの `POST` の `Origin` ヘッダーが `null` になり、Task 025の `Origin` の検査に使えなくなるため |
+| `Referrer-Policy` | `same-origin` | ほかのサイト（CDNを含む）へ、URLを送らない。`no-referrer` にしないのは、フォームの送信（ログインの画面など）の `Origin` ヘッダーが `null` になり、Task 025の `Origin` の検査に使えなくなるため（`fetch` の送信は、`no-referrer` でも `Origin` を送る） |
 | `Content-Security-Policy` | 下の表 | ページが読み込んでよいもの・実行してよいものを、ブラウザに伝える |
 
 **CSP（Content-Security-Policy）**
@@ -69,13 +69,13 @@
 - DBは、SQLAlchemy（ORM）だけで読み書きする（SQLの文字列を、入力から組み立てない）
 
 ### debug（デバッグモード）
-- `python run.py` は、デバッグモードで動かさない。環境変数 `FLASK_DEBUG=1`（Flaskの決まり）のときだけ、デバッグモードにする（例：`FLASK_DEBUG=1 python run.py`。起動のときに表示する）
+- `python run.py` は、デバッグモードで動かさない。環境変数 `FLASK_DEBUG` が `1` のときだけ、デバッグモードにする（例：`FLASK_DEBUG=1 python run.py`。起動のときに表示する）。Flaskの決まり（`0`・`false`・`no` 以外はオン）より厳しくし、`FLASK_DEBUG=off` のような書き方でオンにならないようにする
 - デバッグモードでは、コードを変えると自動で起動し直し、エラーの画面にデバッガー（サーバーの中でコードを実行できる道具）が出る。開発のときだけ使い、実データで使うときは使わない
 - 待ち受けは `127.0.0.1` だけ（`run.py`）。`0.0.0.0` などに変えない（同じネットワークのほかの機器から届くようになる）
 
 ### 依存とCI
 - **版の規則**：ライブラリ・道具は、版を固定し、公開から2週間以上たった版を選ぶ（`CLAUDE.md` の「仕様と範囲」）
-- **Dependabot**（`.github/dependabot.yml`）：pip・npm・GitHub Actions の新しい版を、毎週、PRで知らせる。公開から14日たった版だけ（`cooldown`）。セキュリティの修正のPR（Dependabot security updates）は、待たずに出る。npm の `bootstrap`・`fullcalendar`・`@fullcalendar/*` は対象外（画面がCDNから読む版と、そろえる必要があるため）。扱い方は `development/workflow.md` の「依存の更新（Dependabot）」
+- **Dependabot**（`.github/dependabot.yml`）：pip・npm・GitHub Actions の新しい版を、毎週、PRで知らせる。公開から14日たった版だけ（`cooldown`）。ただし、待つのは更新する依存の版だけで、そのとき一緒に変わる間接の依存（npm の lockfile の中など）は、新しすぎる版になりうる。そのため、マージの前に差分で確かめる。セキュリティの修正のPR（Dependabot security updates）は、待たずに出る。npm の `bootstrap`・`fullcalendar`・`@fullcalendar/*` は対象外（画面がCDNから読む版と、そろえる必要があるため。対象外にすると、セキュリティの修正のPRも出ない。Dependabot alerts で知り、タスクとして上げる）。扱い方は `development/workflow.md` の「依存の更新（Dependabot）」
 - **npm**：`npm ci`（lockfile のとおりに入れる。`integrity` を確かめる）。`.npmrc` の `ignore-scripts=true` で、インストールのときのスクリプトを動かさない
 - **CDN**：Bootstrap・FullCalendarは、版を固定し、`integrity`（SRI）を付ける（`architecture/overview.md`）。ファイルが変えられていれば、ブラウザが読み込まない
 - **CI**（`.github/workflows/ci.yml`）
@@ -83,7 +83,7 @@
   - 権限は、読み取りだけ（`permissions: contents: read`）。`checkout` は、認証の情報を残さない（`persist-credentials: false`）。`pull_request` で動く（ほかの人のPRは、秘密や書き込みの権限なしで動く）
   - 全部のジョブに、時間の上限（`timeout-minutes`）
   - Python・Node.js は、その系列の最新の修正版（`check-latest`）。pip は、決めた版にしてから使う
-- **ESLint**（`eslint.config.js`）：`innerHTML`・`outerHTML`・`insertAdjacentHTML`・`document.write`・`eval` の類（`setTimeout` に文字列、`new Function`）・`style` の操作・`setAttribute` での `on…`・`style` を禁止する
+- **ESLint**（`eslint.config.js`）：`innerHTML`・`outerHTML`・`insertAdjacentHTML`・`setHTMLUnsafe`・`createContextualFragment`・`document.write`・`eval` の類（`setTimeout` に文字列、`new Function`）・`style` の操作・`setAttribute` での `on…`・`style`（文字列と、テンプレートリテラルの形）を禁止する。書き方をすべて機械で見つけられるわけではない（例：`window.document.write`）ため、CSPと、レビューでも守る
 
 ### リポジトリ
 - GitHubの設定（Komaが行う）：secret scanning・push protection（秘密の文字列を見つけ、pushを止める）、Dependabot alerts・security updates、Private vulnerability reporting（脆弱性の非公開の報告）。`main` のルールセット（`development/workflow.md` の「Git」）
@@ -102,7 +102,7 @@ KomaのMacの方針。
 | Node.js | 入れない（ESLintはCIが確かめ、MacのE2EはCDNから読むため、要らない。更新するものを減らす） |
 | ブラウザ | 最新にする（アプリを開くブラウザが、ほかのサイトからの攻撃を止める仕組みを持つため） |
 
-Python の修正版を上げるときの手順（例：3.14.10 → 3.14.11）：サーバーを止める → `pyenv install 3.14.11` → プロジェクトのフォルダで `.venv` を消して作り直す（`"$(pyenv root)/versions/3.14.11/bin/python3.14" -m venv .venv`）→ `source .venv/bin/activate` → `pip install -r requirements-dev.txt` → `python -m playwright install chromium` → `python -m pytest`。`.venv` には、入れたライブラリだけがあり、データ（`instance/`）は別の場所なので、消してよい。
+Python の修正版を上げるときの手順（例：3.14.10 → 3.14.11）：サーバーを止める → `pyenv install 3.14.11` → プロジェクトのフォルダで `.venv` を消して作り直す（`"$(pyenv root)/versions/3.14.11/bin/python3.14" -m venv .venv`）→ `source .venv/bin/activate` → `pip --version` で、pip が上の表の版以降かを確かめる（古ければ `python -m pip install pip==26.2.2`。CIと同じ版）→ `pip install -r requirements-dev.txt` → `python -m playwright install chromium` → `python -m pytest`。`.venv` には、入れたライブラリだけがあり、データ（`instance/`）は別の場所なので、消してよい。
 
 ## ローカルと公開の違い
 | 項目 | 今（ローカル） | 公開のとき（Task 025・026） |

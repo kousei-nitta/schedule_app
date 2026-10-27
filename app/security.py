@@ -29,8 +29,8 @@ SECURITY_HEADERS = {
     # の対策。CSPの frame-ancestors と同じ。古いブラウザのため両方付ける）
     "X-Frame-Options": "DENY",
     # ほかのサイトへ、URL（Referer）を送らない。no-referrer にしないのは、
-    # 同じサイトへの POST の Origin ヘッダーが null になり、ログインの
-    # タスク（Task 025）で、Origin の検査に使えなくなるため
+    # フォームの送信（ログインの画面など）の Origin ヘッダーが null になり、
+    # ログインのタスク（Task 025）で、Origin の検査に使えなくなるため
     "Referrer-Policy": "same-origin",
 }
 
@@ -65,20 +65,33 @@ def content_security_policy(nonce: str) -> str:
     return "; ".join(directives)
 
 
+def current_csp_nonce() -> str:
+    """この要求のnonceを返す。まだなければ作る。
+
+    ふつうは、下の before_request が、要求の始めに作る。ほかの
+    before_request が先に応答を返した場合など、作られていないときも、
+    ここで作る（ヘッダーが付かない・500になる、ということがないように）。
+    """
+    if "csp_nonce" not in g:
+        g.csp_nonce = secrets.token_urlsafe(16)
+    return g.csp_nonce
+
+
 def register_security_headers(app: Flask) -> None:
     """要求ごとのnonceを作り、すべての応答にヘッダーを付ける処理を登録する。"""
 
     @app.before_request
     def create_csp_nonce() -> None:
         # 要求ごとに、新しい値を作る（ほかの要求と同じ値を使わないため）。
-        # before_request は、URLが見つからない・Hostを断る場合も含めて、
-        # after_request より先に必ず動く
+        # g は、アプリのコンテキストに属するため、デモデータのように、1つの
+        # コンテキストの中で何度も要求を送る場合は、前の要求の値が残って
+        # いる。そのため、あるかどうかに関係なく、ここで作り直す
         g.csp_nonce = secrets.token_urlsafe(16)
 
     @app.context_processor
     def provide_csp_nonce() -> dict[str, str]:
         # テンプレートで {{ csp_nonce }} として使う（base.html）
-        return {"csp_nonce": g.csp_nonce}
+        return {"csp_nonce": current_csp_nonce()}
 
     @app.after_request
     def add_security_headers(response: Response) -> Response:
@@ -86,6 +99,6 @@ def register_security_headers(app: Flask) -> None:
         for name, value in SECURITY_HEADERS.items():
             response.headers[name] = value
         response.headers["Content-Security-Policy"] = (
-            content_security_policy(g.csp_nonce)
+            content_security_policy(current_csp_nonce())
         )
         return response

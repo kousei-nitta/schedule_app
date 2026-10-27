@@ -119,19 +119,38 @@ def page_errors(page: Page) -> list[str]:
     return errors
 
 
+# ページの中で、CSPの違反のイベント（securitypolicyviolation）を受け、
+# Pythonの関数（下の fixture で登録する）に知らせるスクリプト。
+# add_init_script で、ページを開くたびに、ページのスクリプトより先に動く
+REPORT_CSP_VIOLATIONS = """
+document.addEventListener("securitypolicyviolation", (event) => {
+  window.reportCspViolation(
+    `${event.violatedDirective} ${event.blockedURI}`
+  );
+});
+"""
+
+
 @pytest.fixture
 def csp_violations(page: Page) -> list[str]:
-    # Chromiumは、CSPで止めたものを、コンソールのエラーとして記録する
-    # （例：Refused to apply inline style because it violates the
-    # following Content Security Policy directive: …）
+    # CSPの違反を、2つの方法で集める（どちらかが空振りしても気づけるように）
+    # 1. ブラウザの決まったイベント（securitypolicyviolation）
+    # 2. Chromiumのコンソールのエラー（例：Applying inline style violates
+    #    the following Content Security Policy directive …）
     violations = []
+
+    page.expose_function(
+        "reportCspViolation",
+        lambda text: violations.append(f"イベント：{text}"),
+    )
+    page.add_init_script(REPORT_CSP_VIOLATIONS)
 
     def record(message: ConsoleMessage) -> None:
         if (
             message.type == "error"
             and "Content Security Policy" in message.text
         ):
-            violations.append(message.text)
+            violations.append(f"コンソール：{message.text}")
 
     page.on("console", record)
     return violations

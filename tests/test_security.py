@@ -169,6 +169,25 @@ def test_security_headers_are_on_server_error(app, client):
     assert "Content-Security-Policy" in response.headers
 
 
+def test_security_headers_are_on_response_from_earlier_before_request(app):
+    # nonce を作る before_request より先に、ほかの before_request が応答を
+    # 返した場合（ログインのタスクで足す検査など）も、500にならず、
+    # ヘッダーが付く
+    def refuse_early():
+        return "先に断る", 403
+
+    app.before_request_funcs.setdefault(None, []).insert(0, refuse_early)
+
+    response = app.test_client().get("/")
+
+    assert response.status_code == 403
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert re.fullmatch(
+        r"[A-Za-z0-9_-]{22}",
+        nonce_in_policy(response.headers["Content-Security-Policy"]),
+    )
+
+
 def test_content_security_policy_directives(client):
     response = client.get("/")
     policy = response.headers["Content-Security-Policy"]
@@ -301,13 +320,14 @@ def template_texts() -> dict[str, str]:
     除く（説明の中の「<style>」などの文字を、書き方の誤りと見ないため）。
     """
     texts = {
-        path.name: re.sub(
+        str(path.relative_to(TEMPLATE_DIRECTORY)): re.sub(
             r"\{#.*?#\}|<!--.*?-->",
             "",
             path.read_text(encoding="utf-8"),
             flags=re.DOTALL,
         )
-        for path in sorted(TEMPLATE_DIRECTORY.glob("*.html"))
+        # フォルダの中に置いたテンプレートも含める
+        for path in sorted(TEMPLATE_DIRECTORY.rglob("*.html"))
     }
     assert texts  # テンプレートが見つからないまま、空振りしないように
     return texts
@@ -339,9 +359,10 @@ def test_cdn_files_in_templates_are_allowed_by_policy(client):
             match = re.search(r'(?:src|href)="(https://[^"]+)"', tag)
             if match is None:
                 continue
-            directive = "script-src" if tag.startswith("<script") else (
-                "style-src"
-            )
+            if tag.startswith("<script"):
+                directive = "script-src"
+            else:
+                directive = "style-src"
             cdn_urls.append(match.group(1))
             assert match.group(1) in allowed[directive], tag
 

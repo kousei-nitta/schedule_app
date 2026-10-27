@@ -58,8 +58,8 @@
 
 | 確認 | 道具と設定 | 実行 |
 |---|---|---|
-| Pythonの書き方 | ruff。`ruff.toml`：PEP8の主な規則（E・F・W）、1行79文字（全角の文字は2文字に数える）。`migrations/versions/` は対象から外す（自動生成で、確かめてマージしたファイルのため）。`docs/archive/` も、`.ignore` に従って外れる | `ruff check .` |
-| JavaScriptの書き方 | ESLint。`eslint.config.js`：推奨の規則（定義していない変数など）に、`no-var`・`prefer-const`・`eqeqeq`・`max-len`（80文字）・`quotes`（二重引用符）を足す。中に `"` を含む文字列だけ、単引用符を許す（`avoidEscape`）。セキュリティのための禁止（`innerHTML` などHTMLとして解釈される書き方、`eval` の類、`style` の操作、`setAttribute` での `on…`・`style`。`architecture/security.md` の「依存とCI」）も確かめる。対象は `app/static/js/` | `npm run lint` |
+| Pythonの書き方 | ruff。`ruff.toml`：PEP8の主な規則（E・F・W）、1行79文字（全角の文字は2文字に数える）、Python 3.14 の書き方（`target-version`）。`migrations/versions/` は対象から外す（自動生成で、確かめてマージしたファイルのため）。`docs/archive/` も、`.ignore` に従って外れる | `ruff check .` |
+| JavaScriptの書き方 | ESLint。`eslint.config.js`：推奨の規則（定義していない変数など）に、`no-var`・`prefer-const`・`eqeqeq`・`max-len`（80文字）・`quotes`（二重引用符）を足す。中に `"` を含む文字列だけ、単引用符を許す（`avoidEscape`）。セキュリティのための禁止（`innerHTML`・`setHTMLUnsafe` などHTMLとして解釈される書き方、`eval` の類、`style` の操作、`setAttribute` での `on…`・`style`。`architecture/security.md` の「依存とCI」）も確かめる。対象は `app/static/js/` | `npm run lint` |
 | テンプレートの書き方 | pytestのテスト（`tests/test_security.py`）。インラインの `<script>`・`<style>`・`style` 属性・`onclick` などがないこと、CDNのURLがCSPで許されていること | `python -m pytest` |
 | モデルとmigrationのずれ | pytestのテスト（`tests/test_setup.py` の `test_models_and_migrations_have_no_differences`）。migrationで作った一時的なDBと、モデルを比べる（`flask db check` と同じ確認）。ずれがあると、差の内容を出して失敗する | `python -m pytest` |
 
@@ -93,7 +93,7 @@
 ### 仕組み（`tests/e2e/conftest.py`）
 - テストごとに、migrationで作った雛形のDB（`tests/conftest.py` の `template_db`）を一時ディレクトリにコピーし、そのDBで、アプリを別のスレッドで起動する（空いているポート）。実データのDBに触れない（「開発用DB（`instance/app.db`）を触らない仕組み」も、そのまま効く）
 - アプリは、ふだんと同じく、サーバーの中の例外を外へ出さない設定（`PROPAGATE_EXCEPTIONS` を `False`）で動かす（APIの500を、JSONで返すため）
-- ページで起きたJavaScriptの例外を、fixture `page_errors` に集める。CSPの違反（Chromiumが、コンソールに「Content Security Policy」を含むエラーとして記録するもの）を、fixture `csp_violations` に集める。テストの最後に、どちらも空であることを確かめる
+- ページで起きたJavaScriptの例外を、fixture `page_errors` に集める。CSPの違反を、fixture `csp_violations` に集める（ブラウザの `securitypolicyviolation` のイベントと、Chromiumがコンソールに記録する「Content Security Policy」を含むエラーの、両方。片方の仕組みが変わっても、空振りしないように）。テストの最後に、どちらも空であることを確かめる
 
 ### 書き方
 - 日付は、今日からの相対で決める（下の「画面の確認」）。週表示は日曜始まり。ブラウザの「今」は、`page.clock.set_fixed_time` で、テストの「今日」の正午に固定する（テストの途中で日付をまたいでも、Pythonとブラウザの「今日」がずれないように）

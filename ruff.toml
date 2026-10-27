@@ -1,6 +1,6 @@
 # ruff（Pythonの書き方の検査）の設定。docs/development/testing.md の「検査の道具」
 line-length = 79
-target-version = "py311"
+target-version = "py314"
 # 自動生成で、確かめてマージしたmigrationのファイルは、検査しない
 extend-exclude = ["migrations/versions"]
 

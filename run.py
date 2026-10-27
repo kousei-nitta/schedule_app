@@ -1,8 +1,6 @@
 import os
 from datetime import date
 
-from flask.helpers import get_debug_flag
-
 from app import create_app
 from app.backup import backup_real_database_on_startup
 from app.database_files import describe_database
@@ -12,12 +10,14 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    # デバッグモードは、環境変数 FLASK_DEBUG=1 のときだけ使う
+    # デバッグモードは、環境変数 FLASK_DEBUG が 1 のときだけ使う
     # （例：FLASK_DEBUG=1 python run.py）。デバッグモードでは、エラーの
     # 画面から、サーバーの中でコードを実行できる道具（デバッガー）が動く
-    # ため、ふだん（実データで使うとき）はオフにする。
+    # ため、ふだん（実データで使うとき）はオフにする。1 だけにするのは、
+    # Flaskの決まり（0・false・no 以外はオン）では、FLASK_DEBUG=off の
+    # ような書き方でもオンになってしまうため。
     # docs/architecture/security.md の「debug（デバッグモード）」。
-    debug = get_debug_flag()
+    debug = os.environ.get("FLASK_DEBUG") == "1"
 
     # デバッグモードでは、Flaskが、コードの変更を見張るプロセスと、アプリを
     # 動かすプロセス（コードを変えるたびに起動し直す）の2つで動く。
