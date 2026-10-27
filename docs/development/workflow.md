@@ -38,7 +38,7 @@
 - コードの全文は書かない（100〜300行が目安）
 
 ## Git
-- `main` は、ルールセットで保護している（PR必須、削除とforce pushの禁止、Bypassなし。マージしたブランチは自動で削除）。CIの2つのジョブの合格も、必須にする
+- `main` は、ルールセットで保護している（PR必須、削除とforce pushの禁止、Bypassなし。マージしたブランチは自動で削除）。CIの3つのジョブ（`python`・`javascript`・`e2e`）の合格も、必須にする
 - 1タスク＝1ブランチ＝1PR。ブランチ名は `feature/NNN-説明`（タスクでない資料の変更は `docs/説明`）
 - Claudeは、featureブランチで、commit・push・PRの作成を行う。commitの作者は「Claude」。push・PRは、Komaのアカウント（`kousei-nitta`）で行われる
 - Claudeは、マージ、`main` への直接のpush、force push、リポジトリの設定の変更をしない（Komaが行う）

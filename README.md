@@ -12,7 +12,7 @@
 ## 技術
 - Python 3.11、Flask、SQLite（Flask-SQLAlchemy・Flask-Migrate）
 - 画面：Jinja2、バニラJavaScript（ES modules）、FullCalendar 6、Bootstrap 5
-- テストと検査：pytest、ruff、ESLint、GitHub Actions
+- テストと検査：pytest、Playwright（E2E）、ruff、ESLint、GitHub Actions
 
 ## 起動方法
 ```sh
@@ -23,7 +23,14 @@ flask --app app db upgrade   # DB（instance/app.db）を作る
 python run.py                # http://127.0.0.1:5001 を開く
 ```
 
-すでにDBがある環境で、新しいmigrationを適用するときは、先にバックアップを取る（`docs/development/database.md` の「migrationの作成と適用」）。
+- 起動のとき、使っているDBを表示し、`instance/app.db` の、その日のバックアップを `instance/backups/` に自動で作る（新しい30個を残す）
+- 手動のバックアップ：`flask --app app backup-db --label before-025`（ラベルは英数字・`-`・`_`）。新しいmigrationを適用する前などに取る（`docs/development/database.md`）
+
+デモ用の架空のデータで試すとき（使うDBは、環境変数 `DATABASE_URL` で切り替える）：
+```sh
+DATABASE_URL=sqlite:///demo.db flask --app app create-demo-db   # instance/demo.db を作る
+DATABASE_URL=sqlite:///demo.db python run.py
+```
 
 開発のとき（テストと検査）：
 ```sh
@@ -31,6 +38,8 @@ pip install -r requirements-dev.txt
 python -m pytest
 ruff check .
 npm ci && npm run lint       # Node.js が必要
+python -m playwright install chromium   # E2Eテストのブラウザ（初回だけ）
+python -m pytest -m e2e      # E2Eテスト（画面の主な流れ）
 ```
 
 ## 開発の進め方

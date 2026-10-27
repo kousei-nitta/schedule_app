@@ -7,16 +7,20 @@
 | 目的 | コマンド |
 |---|---|
 | 準備 | `python3.11 -m venv .venv`、`source .venv/bin/activate`、`pip install -r requirements-dev.txt`、`npm ci` |
-| テスト | `python -m pytest`（1つのファイル：`python -m pytest tests/test_subjects_api.py`） |
+| テスト | `python -m pytest`（E2Eを除く。1つのファイル：`python -m pytest tests/test_subjects_api.py`） |
+| E2Eテスト | `E2E_CDN_FROM_NPM=1 python -m pytest -m e2e`（Claudeの作業環境。CDNの代わりに `node_modules` のファイルを使う）。KomaのMacとCIでは、環境変数を付けない（初回だけ `python -m playwright install chromium`） |
 | Pythonの検査 | `ruff check .` |
 | JavaScriptの検査 | `npm run lint` |
-| 起動 | `python run.py`（`http://127.0.0.1:5001`。`instance/app.db` を使う） |
+| 起動 | `python run.py`（`http://127.0.0.1:5001`。`instance/app.db` を使う。環境変数 `DATABASE_URL` で切り替える） |
+| デモのDB | `DATABASE_URL=sqlite:///demo.db flask --app app create-demo-db`（`instance/demo.db` を作る） |
+| 手動のバックアップ | `flask --app app backup-db --label <ラベル>` |
 
-PRを作る前に、テストと2つの検査が、すべて通ることを確かめる（CIも、同じことを確かめる）。
+PRを作る前に、テスト・E2Eテスト・2つの検査が、すべて通ることを確かめる（CIも、同じことを確かめる）。
 
 ## データを守る（最も重要）
 - KomaのMacの `instance/app.db` は、実データ。Claudeは触れない。リンクしたMacのファイルは、Komaに頼まれたときだけ扱う
-- テストは、pytestの一時ディレクトリのDBだけを使う。テストで `create_app()` を引数なしで呼ばない（`SQLALCHEMY_DATABASE_URI` を、一時ディレクトリのDBにして渡す）
+- テストは、pytestの一時ディレクトリのDBだけを使う。テストで `create_app()` を引数なしで呼ばない（`SQLALCHEMY_DATABASE_URI` を、一時ディレクトリのDBにして渡す）。テストで、`instance/` の中にファイルを作らない
+- バックアップ・デモデータ・DBの切り替えの処理を変えるときは、実データのDB（`instance/app.db`）を変えない・消さないことを、テストで確かめる。バックアップから戻すコマンドは作らない（手順は `docs/development/database.md`）
 - DBの構造の変更は、migrationで行う。`db.create_all()` は使わない。migrationは、一時的なDBと比べて生成する。手順は `docs/development/database.md`
 - `upgrade()` に削除（drop）・変更（alter）を含むmigrationや、設計資料にない構造の変更は、PRにする前に、Komaに確かめる
 - `migrations/` の削除・作り直しをしない。マージしたmigrationファイルを変えない
@@ -28,6 +32,8 @@ PRを作る前に、テストと2つの検査が、すべて通ることを確�
 - 設計資料の問題（矛盾・抜け・実現が難しい）や、設計資料にない判断が要る場面に当たったら、止まってKomaに伝える：問題点・理由・変えた場合の影響・推奨案
 - 小さな問題（書き間違い、明らかな抜け）は、止まらずに、その場で直して進める
 - ライブラリの追加は、設計の段階でKomaに確かめる（開発のときだけ使う無料の道具は、方針として認めている）。費用をかけない
+- ライブラリ・道具の版は、公開から2週間以上たったものを選ぶ（公開の直後の不具合や、乗っ取られて公開された版を避けるため）。依存して入るものの版も、同じ（`requirements.txt`・`requirements-dev.txt` に固定する。npmは、必要なら `overrides` でそろえる）。セキュリティの修正などで新しい版が要るときは、Komaに確かめる
+  - CIの GitHub Actions（`actions/*`）は、メジャーの版のタグで指定する（Task 024で、SHAでの固定を検討する）。CIのランナー（`ubuntu-latest`）と、CIの Python 3.11・Node.js 22 の最新の修正版は、この規則の対象外
 
 ## コーディング
 - 読んで理解しやすい書き方を優先する（Komaが、自分で読んで理解・修正できることが目的）。凝った書き方をしない
@@ -49,6 +55,7 @@ PRを作る前に、テストと2つの検査が、すべて通ることを確�
 - テスト専用のコード（テスト用のルートなど）を、`app/` に入れない
 - 通らないテストを残したまま、PRにしない
 - 画面が変わるタスクでは、Komaが、Macで触って確かめる。確認の手順を書くときは、`docs/development/testing.md` の「画面の確認」の知見を使う
+- 画面の主な流れや、重要な操作を足す・変えるタスクでは、E2Eテスト（`tests/e2e/`）も、同じタスクで足す・直す。書き方は `docs/development/testing.md` の「E2Eテスト」
 
 ## Git・PR
 - ブランチは `feature/NNN-説明`（タスクでない資料の変更は `docs/説明`）。1タスク＝1ブランチ＝1PR。段階ごとにcommitする

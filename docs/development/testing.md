@@ -1,19 +1,19 @@
 # テストと確認
 
-自動テスト（pytest）、検査の道具、CI、画面の確認。コマンドの一覧は、リポジトリ直下の `CLAUDE.md`。
+自動テスト（pytest）、検査の道具、CI、E2Eテスト、画面の確認。コマンドの一覧は、リポジトリ直下の `CLAUDE.md`。
 
 ## 自動テスト（pytest）
 **pytest** を採用する。APIの入力検証は項目が多く、`curl` での確認は手間がかかり、見落としも起きやすいため。
 
 ### 対象と方針
-- 対象は、PythonのAPI（Flaskの `test_client` で呼ぶ）。JavaScriptの自動テストは、導入しない（画面は、ブラウザでの確認で行う）
+- 対象は、PythonのAPI（Flaskの `test_client` で呼ぶ）と、PythonのAPI以外の処理（バックアップ・デモデータ・コマンドなど）。JavaScriptの単体テストは、導入しない（画面は、E2Eテストの主な流れと、ブラウザでの確認で確かめる。下の「E2Eテスト」）
 - APIを実装するタスクでは、そのAPIのテストを、同じタスクで作る。完了の条件に、テストの合格を含める
 - `curl` での確認は、補助として、実際に起動したサーバーの読み取りの確認に使う
 - テストの期待値は、設計資料から決める。テストを通すために、期待値を設計資料に反して変えない
 
 ### 配置と実行
 - テストは `tests/` に置く。ファイル名は `test_*.py`。共通の準備は `tests/conftest.py`
-- 設定は、リポジトリ直下の `pytest.ini`（テストの場所と、`import app` のための `pythonpath`）
+- 設定は、リポジトリ直下の `pytest.ini`（テストの場所、`import app` のための `pythonpath`、印 `e2e` の宣言と、E2Eテストをふだんの実行から外す `addopts`）
 - 実行：リポジトリのルートで、`.venv` を有効にして、`python -m pytest`。1つのファイルだけ：`python -m pytest tests/test_subjects_api.py`
 - `pytest` は、`requirements-dev.txt` に、バージョンを固定して書く（依存するライブラリも、ファイルの形式に合わせる。`requirements.txt` には、アプリを動かすものだけを書く）
 
@@ -32,7 +32,8 @@
 1. テストは、`create_app({...})` に、一時ディレクトリのDBのURIを渡してアプリを作る。`create_app()` を、引数なしで呼ばない
 2. `test_config` に `SQLALCHEMY_DATABASE_URI` がなければ、`create_app` が `ValueError` にする
 3. `conftest.py` のfixtureが、DBのパスが、pytestの一時ディレクトリの中であることを確認する（外なら、テストを失敗させる）
-4. セッション全体で、`instance/app.db` の内容（ハッシュ）が、テストの前後で変わっていないことを確認する（変わっていれば、失敗させる）
+4. セッション全体で、`instance/app.db` の内容（ハッシュ）と、`instance/` の有無と、その中のすべてのファイル・フォルダ（バックアップなど）が、テストの前後で、作られず・変わらず・消えていないことを確認する（違えば、失敗させる）。テストの間に、アプリを使った・起動した（その日のバックアップができる）・`backup-db` を実行した場合も、この確認で失敗する（テストの不具合ではない）。テストの間は、アプリを使わない
+5. バックアップは、DBのファイルと同じフォルダの `backups/` にできるため、テストのバックアップは、一時ディレクトリの中にだけできる。実データのDBかどうか（`instance/app.db` か）の判定を確かめるテストは、`instance/` を一時ディレクトリにした空のFlaskアプリ（`Flask(__name__, instance_path=…)`）で行う（`tests/test_database_files.py`・`tests/test_backup.py`・`tests/test_demo_data.py`）
 
 ### テストの書き方
 - APIは、`app.test_client()` で呼ぶ。JSONの本文は `client.post(url, json=...)`。JSONでない本文や、`Content-Type` の違いは、`data=` と `content_type=` で指定する
@@ -53,7 +54,7 @@
 - 各テストは独立させる（実行順に依存しない）。1つのテストで確認することは、1つにする
 
 ## 検査の道具
-道具は、開発のときだけ使う（`requirements-dev.txt`・`package.json`）。版は固定する。
+道具は、開発のときだけ使う（`requirements-dev.txt`・`package.json`）。版は固定する（版の選び方は、`CLAUDE.md` の「仕様と範囲」）。
 
 | 確認 | 道具と設定 | 実行 |
 |---|---|---|
@@ -69,16 +70,36 @@
 - `.github/workflows/ci.yml`（GitHub Actions）。PRと、`main` へのpushのときに動く
 - ジョブ `python`（Python 3.11）：`pip install -r requirements-dev.txt` → `ruff check .` → `python -m pytest`
 - ジョブ `javascript`（Node.js 22）：`npm ci` → `npm run lint`
-- 通らないPRは、マージしない。`main` のルールセットで、2つのジョブの合格を必須にする（設定はKoma）
+- ジョブ `e2e`（Python 3.11。15分で打ち切る）：`pip install -r requirements-dev.txt` → `python -m playwright install --with-deps chromium` → `python -m pytest -m e2e`（Bootstrap・FullCalendarは、CDNから読む）
+- 通らないPRは、マージしない。`main` のルールセットで、3つのジョブの合格を必須にする（設定はKoma）
 
 ## E2Eテスト
-- Task 023で、Playwright（pytestから動かす）の基盤と、主な流れ（学期 → 休講日 → 授業 → カレンダー → 課題 → 完了）を作り、CIに足す（ADR 0001 の「自動の確認」）。手動の確認を、すべて置き換えるものではない
-- Claudeの作業環境からは、CDN（jsDelivr）に届かない。そこでは、SRIが一致するnpmのファイルで代用する（CIからは、CDNを読む）
+画面を、ブラウザ（Chromium）で、利用者と同じように操作して確かめる。道具は Playwright（pytest-playwright。pytestから動かす）。手動の確認を、すべて置き換えるものではない（ADR 0001 の「自動の確認」）。
+
+### 対象
+- 主な流れ（`tests/e2e/test_main_flow.py`）：学期の登録 → 休講日の追加 → 授業の登録（休講日を除いて予定ができる）→ カレンダーの週表示（休講日に授業の予定がなく、次の週にはある）→ 課題の登録（「直近の締切」欄に出る）→ 完了（完了の一覧に移り、「直近の締切」欄から消える）。流れの全体で、JavaScriptの例外が起きていないこと
+- E2Eテストは、主な流れと、新しい画面の重要な操作に絞る。細かな入力の検査は、APIのテスト（pytest）で確かめる
+
+### 配置と実行
+- `tests/e2e/` に置く。この中のテストには、`tests/e2e/conftest.py` が、印 `e2e` を自動で付ける（付け忘れると、ブラウザのない環境（CIのジョブ `python`）で失敗するため）。`pytest.ini` の設定で、印 `e2e` のテストは、ふだんの `python -m pytest` からは外れる（ブラウザの準備が要り、時間もかかるため）
+- 実行：`python -m pytest -m e2e`。ファイルを指定するときも、`-m e2e` を付ける（例：`python -m pytest -m e2e tests/e2e/test_main_flow.py`。付けないと、外されて何も動かない）。初めて動かす前と、Playwright の版を上げたときに、ブラウザを入れる：`python -m playwright install chromium`
+- 操作を目で見るとき：`python -m pytest -m e2e --headed --slowmo 500`（ブラウザの画面を出し、1つの操作ごとに0.5秒待つ）
+- Claudeの作業環境：`E2E_CDN_FROM_NPM=1 python -m pytest -m e2e`。CDN（jsDelivr）に届かないため、この環境変数があるときだけ、CDNへの読み込みに、`node_modules` の同じ版のファイル（`npm ci` で入る）で答える（`tests/e2e/conftest.py`）。ブラウザが `integrity`（SRI）を確かめるので、違うファイルなら読み込まれない。CIとKomaのMacでは、付けない（CDNから読む）
+
+### 仕組み（`tests/e2e/conftest.py`）
+- テストごとに、migrationで作った雛形のDB（`tests/conftest.py` の `template_db`）を一時ディレクトリにコピーし、そのDBで、アプリを別のスレッドで起動する（空いているポート）。実データのDBに触れない（「開発用DB（`instance/app.db`）を触らない仕組み」も、そのまま効く）
+- アプリは、ふだんと同じく、サーバーの中の例外を外へ出さない設定（`PROPAGATE_EXCEPTIONS` を `False`）で動かす（APIの500を、JSONで返すため）
+- ページで起きたJavaScriptの例外を、fixture `page_errors` に集める。テストの最後に、空であることを確かめる
+
+### 書き方
+- 日付は、今日からの相対で決める（下の「画面の確認」）。週表示は日曜始まり。ブラウザの「今」は、`page.clock.set_fixed_time` で、テストの「今日」の正午に固定する（テストの途中で日付をまたいでも、Pythonとブラウザの「今日」がずれないように）
+- 「ないこと」を確かめる前に、同じ画面で「あること」を確かめて、読み込みが終わったことを確かめる（読み込みの前に「ない」と判定されて、確認が空振りになるのを防ぐ）。例：主な流れでは、同じ週の木曜日の授業の予定が出てから、休講日の水曜日に授業の予定がないことを確かめる
+- 要素は、`id` か、読み上げの名前（`get_by_role` の `name`）で探す。見た目のための class には、なるべく頼らない（FullCalendarの日付の列など、ほかに手がかりがない場合を除く）
 
 ## 画面の確認
 画面が変わるタスクでは、Komaが、Macで触って確かめる。Claudeがブラウザで確かめるときも含めて、次の知見を使う（Task 008〜021で分かったこと）。
 
-- データ：確認用の架空のデータで確かめる。実データのDBで確かめるときは、データを変える操作の前に、Komaがバックアップを取る（`database.md` の「実データのDBの扱い」）
+- データ：デモのDB（`database.md` の「デモ用の架空のデータ」）か、確認用の架空のデータで確かめる。実データのDBで確かめるときは、データを変える操作の前に、Komaがバックアップを取る（`database.md` の「実データのDBの扱い」）
 - 日付：確認用のデータは、確認する日からの相対の日付で作り、日付をまたがずに確かめる（「直近の締切」欄や期限切れの表示は、今日によって変わるため）
 - 取得：FullCalendarは、取得済みの範囲を取得し直さない（`lazyFetching`）。取得を確かめる手順には、取得を起こす操作（取得済みの範囲の外へ移る、絞り込みやモードを切り替える）を書く
 - 再読み込みは、ページを開き直して行う。スクリーンショットは古いことがあるため、表示は、DOMで確かめる

@@ -10,7 +10,8 @@ from app.extensions import db
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEV_DB_PATH = PROJECT_ROOT / "instance" / "app.db"
+INSTANCE_PATH = PROJECT_ROOT / "instance"
+DEV_DB_PATH = INSTANCE_PATH / "app.db"
 
 
 def file_hash(path: Path) -> str | None:
@@ -19,13 +20,41 @@ def file_hash(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def instance_entries() -> dict[str, str | None] | None:
+    """instance/ の中の、すべてのファイルの内容（ハッシュ）とフォルダを返す。
+
+    実データのDB（app.db）と、そのバックアップ（backups/）を含む。
+    instance/ がなければ None（空の instance/ と区別するため）。
+    """
+    if not INSTANCE_PATH.exists():
+        return None
+    return {
+        str(path.relative_to(INSTANCE_PATH)): (
+            file_hash(path) if path.is_file() else "フォルダ"
+        )
+        for path in sorted(INSTANCE_PATH.rglob("*"))
+    }
+
+
 @pytest.fixture(scope="session", autouse=True)
 def protect_dev_db():
+    # テストの前後で、実データのDBと、instance/ の中のファイル・フォルダ
+    # （バックアップなど）が、作られず・変わらず・消えていないこと
     existed_before = DEV_DB_PATH.exists()
     hash_before = file_hash(DEV_DB_PATH)
+    entries_before = instance_entries()
     yield
-    assert DEV_DB_PATH.exists() is existed_before
-    assert file_hash(DEV_DB_PATH) == hash_before
+    # テストの間に、アプリを使った・起動した（その日のバックアップが
+    # できる）・backup-db を実行した場合も、ここで失敗する
+    message = (
+        "テストの前後で、instance/ の中（実データのDB・バックアップ）が"
+        "変わりました。テストの間に、アプリを使った・起動した・backup-db を"
+        "実行した場合も、こうなります。どれもしていなければ、テストが"
+        "instance/ に触れています（docs/development/testing.md）"
+    )
+    assert DEV_DB_PATH.exists() is existed_before, message
+    assert file_hash(DEV_DB_PATH) == hash_before, message
+    assert instance_entries() == entries_before, message
 
 
 @pytest.fixture(scope="session")
