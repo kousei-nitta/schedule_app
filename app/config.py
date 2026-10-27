@@ -25,3 +25,9 @@ class Config:
     # 環境変数は、このモジュールを読み込んだ時点の値を使う。
     SQLALCHEMY_DATABASE_URI = database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # 受け付ける Host ヘッダー（ポートは見ない）。ほかの名前の要求は、
+    # 400 にする。悪意のあるサイトが、自分の名前を 127.0.0.1 に向け直して
+    # （DNSリバインディング）、このアプリのAPIを操作するのを防ぐため。
+    # localhost は、テストの test_client の既定の名前でもある。
+    # docs/architecture/security.md の「Hostヘッダーの検査」。
+    TRUSTED_HOSTS = ["127.0.0.1", "localhost"]

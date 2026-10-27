@@ -5,7 +5,7 @@
 ## 技術スタック
 | 項目 | 採用 | 備考 |
 |---|---|---|
-| 言語 | Python 3.11 | プロジェクト専用の仮想環境 `.venv` を使用 |
+| 言語 | Python 3.14 | プロジェクト専用の仮想環境 `.venv` を使用。版を選んだ理由は `docs/decisions/0003-python-3-14.md`、開発の環境の方針は `architecture/security.md` の「開発の環境」 |
 | バックエンド | Flask | |
 | DB | SQLite | 単一ユーザー・ローカル1ファイル。同時アクセスの考慮は不要。使うDBは、環境変数で切り替えられる（「DBの切り替え（環境変数）」）。実データのDBは、自動でバックアップする（「データの保護（バックアップ）」） |
 | ORM | Flask-SQLAlchemy | |
@@ -14,11 +14,12 @@
 | フロントエンドJS | バニラJavaScript（ES modules） | `fetch` でFlaskのAPIを呼ぶ。構成と規則は「JavaScriptの構成」、APIの規則は「API共通ルール」を参照 |
 | カレンダー描画 | FullCalendar 6.1.21 | MIT・無料の標準のバンドル（週／月／一覧表示）だけを使う。リソース／タイムライン表示などの有料機能は使わない。CDN（jsDelivr）から、バージョンを固定して読み込む（「FullCalendarの読み込み」を参照） |
 | CSS（UI部品） | Bootstrap 5.3.8 | CDN（jsDelivr）から、バージョンを固定して読み込む（「Bootstrapの読み込み」を参照）。タブ（モード切り替え）、モーダル（詳細パネル）、バッジ（カテゴリ表示）などに利用 |
-| 認証 | なし | ログイン機能は実装しない |
+| 認証 | なし | ログイン機能は実装しない（Task 025で作る予定。`docs/roadmap.md`） |
+| セキュリティ | Hostヘッダーの検査、セキュリティのヘッダー（CSP）、依存とCIの守り | `architecture/security.md`。ヘッダーは `app/security.py` |
 | 自動テスト | pytest | APIのテストに使う。配置・DB・実行方法は「自動テスト（pytest）」を参照 |
 | 検査・CI | ruff・ESLint・GitHub Actions | 開発のときだけ使う（`requirements-dev.txt`・`package.json`）。設定と実行は `docs/development/testing.md` の「検査の道具」「CI」 |
 | E2Eテスト | Playwright（pytest-playwright。ブラウザは Chromium） | 開発のときだけ使う（`requirements-dev.txt`。CDNの代用のファイルは `package.json`）。画面の主な流れを確かめる。`docs/development/testing.md` の「E2Eテスト」 |
-| 起動 | `run.py` | 開発用サーバーを `127.0.0.1:5001`（`debug=True`）で起動する。5001番を使うのは、macOSではAirPlayレシーバーが5000番を使うことがあるため。起動のとき、使っているDBを表示し、実データのDBの自動バックアップを作る（「データの保護（バックアップ）」） |
+| 起動 | `run.py` | 開発用サーバーを `127.0.0.1:5001` で起動する。デバッグモードは、環境変数 `FLASK_DEBUG=1` のときだけ（`architecture/security.md` の「debug（デバッグモード）」）。5001番を使うのは、macOSではAirPlayレシーバーが5000番を使うことがあるため。起動のとき、使っているDBを表示し、実データのDBの自動バックアップを作る（「データの保護（バックアップ）」） |
 | 自作のコマンド | Flaskのコマンド（`app/cli.py`） | `flask --app app backup-db`（手動のバックアップ）、`flask --app app create-demo-db`（デモ用の架空のデータ。`docs/development/database.md` の「デモ用の架空のデータ」）。`create_app` で登録する |
 
 制約：費用をかけない（大学の授業の一環のため）。
@@ -27,7 +28,7 @@
 - **CDN（jsDelivr）から読み込み、バージョンを固定する。** 固定するバージョンは **5.3.8**（2026年10月時点の最新の安定版）。`latest` など、バージョンを固定しないURLは使わない。
 - 読み込むのは2つ。CSS（`bootstrap.min.css`）を `<head>` 内に、JavaScript（`bootstrap.bundle.min.js`。Popperを含む）を `</body>` の直前に置く。
 - 改ざんの検出用に `integrity`（ハッシュ値）と `crossorigin="anonymous"` を付ける。
-- バージョンを変えるときは、この資料、計画書、タグの `integrity` を、そろえて更新する（開発者の承認を得る）。`integrity` の値は、公式サイトの掲載値を使う。E2Eの作業環境での代用のファイル（`package.json` の `bootstrap`）の版も、そろえる。
+- バージョンを変えるときは、この資料、計画書、タグの `integrity`、CSPのURL（`app/security.py`。`architecture/security.md` の「セキュリティのヘッダー」）を、そろえて更新する（開発者の承認を得る）。`integrity` の値は、公式サイトの掲載値を使う。E2Eの作業環境での代用のファイル（`package.json` の `bootstrap`）の版も、そろえる（Dependabotは、この版を上げない）。
 
 ```html
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
@@ -37,14 +38,14 @@
 ### FullCalendarの読み込み（確定）
 - **CDN（jsDelivr）から読み込み、バージョンを固定する。** 固定するバージョンは **6.1.21**（v6系の最終版。2026年6月）。`latest` など、バージョンを固定しないURLは使わない。
 - v7（2026年6月に公開）は使わない。CSSが本体に含まれず、テーマのファイルを別に読み込む必要があること、npmの公開パッケージに圧縮した版がないこと、ボタンの文言（`buttonText`）など多くの設定の名前が変わったことから、v6のほうが、このアプリの用途（読み込むファイルが少なく、設定の書き方が広く知られている）に合うため。v7へ移るときは、別のタスクとして設計する。
-- 読み込むのは、標準のバンドル `index.global.min.js` の1つだけ（週・月・一覧などの表示と、操作の部品を含む。有料の機能は含まない）。CSSも、このファイルに含まれる（FullCalendarが、ページに自動で入れる）。`base.html` の `</body>` の直前、Bootstrapの `<script>` のあと、`{% block scripts %}` の前に置く（通常のスクリプトのため、`type="module"` の `main.js` より先に実行され、`window.FullCalendar` として使える）。
+- 読み込むのは、標準のバンドル `index.global.min.js` の1つだけ（週・月・一覧などの表示と、操作の部品を含む。有料の機能は含まない）。CSSも、このファイルに含まれる（FullCalendarが、ページに `<style>` として自動で入れる。CSPで許すため、この `<script>` に、要求ごとの `nonce` を付ける。`architecture/security.md` の「セキュリティのヘッダー」）。`base.html` の `</body>` の直前、Bootstrapの `<script>` のあと、`{% block scripts %}` の前に置く（通常のスクリプトのため、`type="module"` の `main.js` より先に実行され、`window.FullCalendar` として使える）。
 - 日本語の文言のファイル（`locales/ja`）は読み込まない。日付の表示は `locale: "ja"` で日本語になり、ボタンなどの文言は、`calendar.js` の設定で指定する（「＋N件」など、このアプリの文言に合わせるため。読み込むファイルを1つにするため）。
 - 改ざんの検出用に `integrity`（ハッシュ値）と `crossorigin="anonymous"` を付ける。FullCalendarの公式サイトには `integrity` の値が掲載されていないため、npmの公開パッケージ（`fullcalendar@6.1.21`）の `index.global.min.js` から計算したSHA-384を使う。その値が、jsDelivrの掲載値（`data.jsdelivr.com` のファイル一覧のハッシュ）と一致することを確かめた（2026-10-13）。
-- バージョンを変えるときは、この資料、計画書、タグの `integrity` を、そろえて更新する（開発者の承認を得る）。`integrity` の値は、上と同じ方法で求め、jsDelivrの掲載値と照らす。E2Eの作業環境での代用のファイル（`package.json` の `fullcalendar` と、`overrides` の `@fullcalendar/…`）の版も、そろえる。
+- バージョンを変えるときは、この資料、計画書、タグの `integrity`、CSPのURL（`app/security.py`）を、そろえて更新する（開発者の承認を得る）。`integrity` の値は、上と同じ方法で求め、jsDelivrの掲載値と照らす。E2Eの作業環境での代用のファイル（`package.json` の `fullcalendar` と、`overrides` の `@fullcalendar/…`）の版も、そろえる（Dependabotは、この版を上げない）。
 - Bootstrapは、`<a>` の文字を、青い下線つきにする。FullCalendarは、日付の見出しなどに `<a>` を使うため、`style.css` で、FullCalendarの中の `<a>` を、FullCalendarの本来の見た目（通常の文字）に戻す。
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.21/index.global.min.js" integrity="sha384-WDvnzcla8X1CQM97EnYyl4OoTCvmMFp5lBiVNO3IjVdvLMOUjwt+iuYb/Mru5A9v" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.21/index.global.min.js" integrity="sha384-WDvnzcla8X1CQM97EnYyl4OoTCvmMFp5lBiVNO3IjVdvLMOUjwt+iuYb/Mru5A9v" crossorigin="anonymous" nonce="{{ csp_nonce }}"></script>
 ```
 
 - 独自のスタイル（`app/static/css/style.css`）は、`base.html` の `<head>` で、BootstrapのCSSのあとに読み込む（Bootstrapの指定を、上書きできるようにするため）。
@@ -68,7 +69,7 @@ DB（SQLiteのファイル）のバックアップ。処理は `app/backup.py`�
 - **名前**：同じ名前のファイルがあれば、作らない（上書きしない）。`backups` の場所にフォルダでないもの（ファイル）や、リンク先のないシンボリックリンクがあれば、失敗する（「作成済み」とは扱わない）
   - 自動：`<DBの名前>-YYYYMMDD-auto.db`（例：`app-20261025-auto.db`）
   - 手動：`<DBの名前>-YYYYMMDD-HHMMSS-<ラベル>.db`（例：`app-20261025-153012-before-025.db`）。ラベルは、英数字・`-`・`_` で1〜40文字。初期値は `manual`
-- **自動**：`python run.py` の起動のとき（`debug=True` の自動の再起動では、行わない。`flask --app app run` で起動したときも、行わない）。対象は、実データのDBだけ（デモのDBなどは対象にしない）。その日の分があれば（ほかの処理が同時に作った場合を含む）、作らない。実データのDBのファイルがまだなければ、作らない
+- **自動**：`python run.py` の起動のとき（デバッグモードの自動の再起動では、行わない。`flask --app app run` で起動したときも、行わない）。対象は、実データのDBだけ（デモのDBなどは対象にしない）。その日の分があれば（ほかの処理が同時に作った場合を含む）、作らない。実データのDBのファイルがまだなければ、作らない
   - 自動のものは、新しいものから30個を残し、それより古い自動のものを消す（名前が上の自動の形のファイルだけ。手動のものと、ほかのファイルは消さない）。名前の日付が今日より後のもの（時計がずれていた場合など）は、数えず、消さない（今日作ったものが、古いものとして消えないため）
   - 失敗しても、警告を表示して、起動を続ける（アプリを使えなくしないため。警告を見たら、手動で取る）
   - 起動したまま日をまたいでも、次の起動まで作らない（必要なら、手動で取る）
@@ -82,7 +83,8 @@ DB（SQLiteのファイル）のバックアップ。処理は `app/backup.py`�
 schedule_app/
 ├── app/
 │   ├── __init__.py          # Flaskアプリの作成（`create_app(test_config=None)`）
-│   ├── config.py            # 設定（使うDB：環境変数 DATABASE_URL。「DBの切り替え（環境変数）」）
+│   ├── config.py            # 設定（使うDB：環境変数 DATABASE_URL。「DBの切り替え（環境変数）」。受け付ける Host：TRUSTED_HOSTS）
+│   ├── security.py          # セキュリティのヘッダー（CSPと、要求ごとのnonce。architecture/security.md）
 │   ├── database_files.py    # 使っているDBのファイルの場所と、実データのDBかどうかの判定
 │   ├── backup.py            # DBのバックアップ（「データの保護（バックアップ）」）
 │   ├── demo_data.py         # デモ用の架空のデータ（docs/development/database.md の「デモ用の架空のデータ」）
@@ -107,7 +109,7 @@ schedule_app/
 │   │   ├── events.py        # 予定（Event）のAPI（期間を指定した一覧・1件取得・派遣会社の候補と、単発の予定の登録・編集・削除）
 │   │   └── tasks.py         # 課題・タスクのAPI（一覧（完了の状態の絞り込み）・1件取得・登録・編集（完了の切り替えを含む）・削除）
 │   ├── templates/
-│   │   ├── base.html        # 共通の骨組み。Bootstrap・FullCalendar・style.css の読み込みと、JavaScript用の scripts ブロック
+│   │   ├── base.html        # 共通の骨組み。Bootstrap・FullCalendar・style.css の読み込み（FullCalendarに、CSPのnonceを渡す）と、JavaScript用の scripts ブロック
 │   │   └── index.html
 │   └── static/
 │       ├── css/style.css    # カテゴリの色・独自スタイル
@@ -133,7 +135,9 @@ schedule_app/
 │   ├── backups/             # DBのバックアップ（自動・手動。「データの保護（バックアップ）」）
 │   └── demo.db              # デモのDB（例。create-demo-db で作る）
 ├── docs/                    # 資料（何がどこにあるかは docs/README.md）
-├── .github/workflows/ci.yml # CI（GitHub Actions。docs/development/testing.md の「CI」）
+├── .github/
+│   ├── workflows/ci.yml     # CI（GitHub Actions。docs/development/testing.md の「CI」）
+│   └── dependabot.yml       # 依存とアクションの更新のPR（docs/development/workflow.md の「依存の更新（Dependabot）」）
 ├── node_modules/            # npmのパッケージ（Git管理対象外。npm ci で作る）
 ├── tests/                   # pytestのテスト（「自動テスト（pytest）」を参照）
 │   ├── conftest.py          # 共通のfixture（テスト用DB・アプリ・クライアント・開発用DBの保護）
@@ -143,16 +147,18 @@ schedule_app/
 │   ├── test_database_files.py # DBの切り替えと、DBのファイルの場所の確認
 │   ├── test_backup.py       # バックアップと、コマンド backup-db の確認
 │   ├── test_demo_data.py    # デモデータと、コマンド create-demo-db の確認
+│   ├── test_security.py     # Hostの検査・セキュリティのヘッダー（CSP）・深い入れ子のJSON・テンプレートの書き方の確認
 │   ├── test_<リソース名>_api.py  # APIのテスト（リソースごと）
 │   ├── test_subjects_update_delete_api.py  # 授業の編集・削除と、1件取得の件数のAPIのテスト（授業のテストが大きくなるため、分けた）
 │   ├── test_events_create_update_delete_api.py  # 予定の登録・編集・削除のAPIのテスト（予定の一覧・1件取得・派遣会社の候補は test_events_api.py）
 │   ├── test_semesters_update_delete_api.py  # 学期の編集・削除（期間の変更の、予定・休講日への反映を含む）と、1件取得の件数のAPIのテスト（学期の登録・一覧と、405の Allow などのAPI共通の確認は test_semesters_api.py）
 │   └── e2e/                 # E2Eテスト（Playwright。docs/development/testing.md の「E2Eテスト」）
-│       ├── conftest.py      # E2Eの共通のfixture（一時ディレクトリのDBでのアプリの起動、CDNの代用、JavaScriptの例外の記録）
+│       ├── conftest.py      # E2Eの共通のfixture（一時ディレクトリのDBでのアプリの起動、CDNの代用、JavaScriptの例外とCSPの違反の記録）
 │       └── test_main_flow.py # 主な流れ（学期 → 休講日 → 授業 → カレンダー → 課題 → 完了）
 ├── pytest.ini               # pytestの設定（E2Eテストを、ふだんの実行から外す設定を含む）
 ├── ruff.toml                # ruff（Pythonの検査）の設定
-├── eslint.config.js         # ESLint（JavaScriptの検査）の設定
+├── eslint.config.js         # ESLint（JavaScriptの検査）の設定（セキュリティのための禁止の規則を含む）
+├── .npmrc                   # npm の設定（インストールのときのスクリプトを動かさない）
 ├── package.json             # ESLintと、E2Eの作業環境でのCDNの代用のファイル（Bootstrap・FullCalendar）と、その版（package-lock.json も同じ）。開発のときだけ使う
 ├── package-lock.json
 ├── requirements.txt
@@ -160,6 +166,7 @@ schedule_app/
 ├── .ignore                  # 検索から外すフォルダ（docs/archive/）
 ├── CLAUDE.md                # 実装の規則（Claudeが作業の始めに読む）
 ├── README.md                # リポジトリの表紙（概要・機能・技術・起動方法・開発体制）
+├── SECURITY.md              # 脆弱性の報告のしかた
 └── run.py                   # 起動スクリプト（127.0.0.1:5001。使っているDBの表示と、実データのDBの自動バックアップ）
 ```
 

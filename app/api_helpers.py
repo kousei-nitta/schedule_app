@@ -17,6 +17,7 @@ from werkzeug.exceptions import (
 MAX_ID = 2**63 - 1
 
 ERROR_STATUS_CODES = {
+    "bad_request": 400,
     "invalid_json": 400,
     "validation_error": 400,
     "not_found": 404,
@@ -59,7 +60,19 @@ def is_api_path(path: str) -> bool:
 
 
 def register_api_error_handlers(app: Flask) -> None:
-    """APIの404・405・500をJSON形式で返すハンドラーを登録する。"""
+    """APIの400・404・405・500をJSON形式で返すハンドラーを登録する。"""
+
+    @app.errorhandler(400)
+    def handle_bad_request(error: BadRequest):
+        # 各routeが返す400（入力の誤りなど）は、ここを通らない。ここに
+        # 来るのは、Flaskが要求そのものを受け付けなかった場合（信頼しない
+        # Host ヘッダー。docs/architecture/security.md）。
+        if not is_api_path(request.path):
+            return error
+        return api_error_response(
+            "bad_request",
+            "リクエストを受け付けられません",
+        )
 
     @app.errorhandler(404)
     def handle_not_found(error: HTTPException):
@@ -109,6 +122,11 @@ def read_json_object() -> tuple[
         # 例外で判別する。
         payload = request.get_json()
     except BadRequest:
+        return None, api_error_response("invalid_json", INVALID_JSON_MESSAGE)
+    except RecursionError:
+        # 入れ子が深すぎるJSON（[[[[…]]]] など）は、Pythonのjsonが
+        # RecursionError にする（BadRequest にならない）。500にせず、
+        # 読めないJSONとして扱う。
         return None, api_error_response("invalid_json", INVALID_JSON_MESSAGE)
 
     if not isinstance(payload, dict):
@@ -426,16 +444,22 @@ def parse_datetime(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
 
-    # fromisoformatは秒や別の書式も受理するため、先に厳密な形式を確認する。
+    # 先に、Tでつないだ形であることを確かめる（空白でつないだ形などを断る）。
     if (
         re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}", value)
         is None
     ):
         return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
+
+    # 日付と時刻を、それぞれの厳密な変換で確かめてから、組み合わせる。
+    # datetime.fromisoformat は、Python 3.14 から「24:00」を翌日の0時として
+    # 受け付けるため使わない（時刻は 00:00〜23:59 だけ。API共通ルール）。
+    date_text, time_text = value.split("T")
+    parsed_date = parse_date(date_text)
+    parsed_time = parse_time(time_text)
+    if parsed_date is None or parsed_time is None:
         return None
+    return datetime.combine(parsed_date, parsed_time)
 
 
 def format_datetime(value: datetime) -> str:

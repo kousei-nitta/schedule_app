@@ -51,7 +51,7 @@ DBの構造の変え方（migration）と、実データのDBの扱い（バッ�
 - マージしたmigrationファイルは、変更しない。直す必要が出たら、新しいmigrationを作り、もう一度PRで確かめる
 - `migrations/` の削除・作り直しは、Komaの確認なしに行わない
 - 実データのDBへの適用の手順（Koma）
-  1. サーバー（`run.py`）を止める。`git pull` やブランチの切り替えより**前に**止める（`debug=True` では、コードが変わるとすぐ起動し直し、まだmigrationを適用していないDBで、新しいコードが動いてしまうため）
+  1. サーバー（`run.py`）を止める。`git pull` やブランチの切り替えより**前に**止める（動いているサーバーは、JavaScriptなどのファイルを要求のたびに読むため、新しい画面と、古いサーバー・まだmigrationを適用していないDBが組み合わさりうる。デバッグモード（`FLASK_DEBUG=1`）では、コードが変わるとすぐ起動し直し、新しいコードがそのDBで動いてしまう）
   2. コードを新しくする（`git pull` など）
   3. バックアップ：`flask --app app backup-db --label before-NNN`（NNNは、そのタスクの番号）。`instance/backups/app-YYYYMMDD-HHMMSS-before-NNN.db` ができる。コピーが壊れていないことと、各テーブルの件数が元と同じことは、コマンドが確かめる（エラーで終わったら、適用しない）。`instance/` は `.gitignore` の対象なので、Gitには入らない
   4. 適用の前の記録：`flask --app app db current` の版、スキーマ（`sqlite3 -readonly instance/app.db .schema`）、各テーブルの件数（手順3のコマンドが表示した件数を使ってよい）

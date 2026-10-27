@@ -6,6 +6,7 @@ from flask import Flask
 from app.api_helpers import register_api_error_handlers
 from app.config import Config
 from app.extensions import db, migrate
+from app.security import register_security_headers
 
 
 def create_app(test_config: dict[str, Any] | None = None):
@@ -37,6 +38,9 @@ def create_app(test_config: dict[str, Any] | None = None):
     app.register_blueprint(main_blueprint)
 
     register_api_error_handlers(app)
+
+    # すべての応答に、セキュリティのヘッダー（CSPを含む）を付ける
+    register_security_headers(app)
 
     from app.routes.semesters import semesters_bp
 

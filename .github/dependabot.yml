@@ -1,0 +1,63 @@
+# Dependabot：依存のライブラリと、CIのアクションの新しい版を、PRで知らせる。
+# 扱い方は docs/development/workflow.md の「依存の更新（Dependabot）」。
+#
+# - 公開から14日たった版だけを出す（cooldown。公開の直後の不具合や、
+#   乗っ取られて公開された版を避けるため。CLAUDE.md の版の規則と同じ）。
+#   セキュリティの修正のPR（Dependabot security updates）は、待たずに出る
+# - 小さな更新（minor・patch）は、種類ごとに1つのPRにまとめる。大きな
+#   更新（major）は、1つずつのPRになる（タスクとして扱う）
+version: 2
+updates:
+  # Python（requirements.txt・requirements-dev.txt）
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:47"
+      timezone: Asia/Tokyo
+    cooldown:
+      default-days: 14
+    groups:
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # npm（package.json・package-lock.json。ESLint と、E2EでのCDNの代用）
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:47"
+      timezone: Asia/Tokyo
+    cooldown:
+      default-days: 14
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # 画面が CDN から読む版（templates/base.html の integrity・CSP）と
+      # そろえる必要があるため、ここでは上げない。版を変えるときは、
+      # タスクとして、資料・integrity・CSPと一緒に上げる
+      # （docs/architecture/overview.md の「Bootstrapの読み込み」
+      # 「FullCalendarの読み込み」）
+      - dependency-name: bootstrap
+      - dependency-name: fullcalendar
+      - dependency-name: "@fullcalendar/*"
+
+  # CIのアクション（.github/workflows/ci.yml。SHAと、版のコメントを直す）
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:47"
+      timezone: Asia/Tokyo
+    cooldown:
+      default-days: 14
+    groups:
+      actions-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
