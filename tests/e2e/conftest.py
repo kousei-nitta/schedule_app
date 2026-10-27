@@ -8,6 +8,8 @@
   CDNから読む）。ブラウザが integrity（SRI）を確かめるので、違う
   ファイルなら読み込まれない
 - page_errors：ページで起きたJavaScriptの例外の一覧
+- csp_violations：ブラウザが、CSP（app/security.py）に反するとして
+  止めた読み込み・実行の一覧
 - このフォルダの中のテストには、印 e2e を自動で付ける（ふだんの
   python -m pytest から外すため。付け忘れると、ブラウザのない環境
   （CIのジョブ python）で失敗する）
@@ -22,7 +24,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page, Route
+from playwright.sync_api import ConsoleMessage, Page, Route
 from werkzeug.serving import make_server
 
 from app import create_app
@@ -115,3 +117,21 @@ def page_errors(page: Page) -> list[str]:
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     return errors
+
+
+@pytest.fixture
+def csp_violations(page: Page) -> list[str]:
+    # Chromiumは、CSPで止めたものを、コンソールのエラーとして記録する
+    # （例：Refused to apply inline style because it violates the
+    # following Content Security Policy directive: …）
+    violations = []
+
+    def record(message: ConsoleMessage) -> None:
+        if (
+            message.type == "error"
+            and "Content Security Policy" in message.text
+        ):
+            violations.append(message.text)
+
+    page.on("console", record)
+    return violations

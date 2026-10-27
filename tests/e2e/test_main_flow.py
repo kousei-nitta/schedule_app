@@ -74,7 +74,12 @@ def register_subject(
     page.locator("#subject-submit-button").click()
 
 
-def test_main_flow(page: Page, app_url: str, page_errors: list[str]):
+def test_main_flow(
+    page: Page,
+    app_url: str,
+    page_errors: list[str],
+    csp_violations: list[str],
+):
     today = date.today()
     this_sunday = sunday_of(today)
     semester_start = this_sunday - timedelta(weeks=1)
@@ -155,3 +160,6 @@ def test_main_flow(page: Page, app_url: str, page_errors: list[str]):
 
     # 流れの全体で、JavaScriptの例外が起きていない
     assert page_errors == []
+    # CSP（app/security.py）で、BootstrapやFullCalendar（差し込む <style>
+    # を含む）の読み込み・実行が止められていない
+    assert csp_violations == []
