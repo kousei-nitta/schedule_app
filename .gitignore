@@ -229,3 +229,10 @@ test-results/
 *.db-wal
 *.db-shm
 *.partial
+# macOS の Finder が作るファイル
+.DS_Store
+# Playwright の報告（HTML）。pytest-playwright では作らないが、念のため
+playwright-report/
+# 秘密の鍵・証明書（誤ってリポジトリに入れないため。リポジトリは公開）
+*.pem
+*.key
