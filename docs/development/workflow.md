@@ -59,7 +59,7 @@
 
 - 公開から14日たった版だけが出る。小さな更新（minor・patch）は、種類ごとに1つのPRにまとまる。大きな更新（major）は、1つずつのPRになる
 - **小さな更新**：CIの3つのジョブが合格し、下の「差分の確認」で問題がなければ、Komaがマージしてよい。Pythonのライブラリの更新をマージしたら、Macで `pip install -r requirements-dev.txt`（Playwright の更新のときは、続けて `python -m playwright install chromium`）
-- **差分の確認**（npm・pip のPR）：Dependabot が14日待つのは、PRの題名にある依存の版だけ。一緒に変わる間接の依存（`package-lock.json` の中や、新しい版が新たに要る Python のライブラリ）は、公開の直後の版になりうる（`CLAUDE.md` の版の規則は、間接の依存にも当てはまる）。マージの前に、PRの差分で、題名にない依存の版が変わった・増えたかを見る。あれば、Claudeに、その版の公開日を調べてもらう（`npm view <名前> time`・PyPI）。14日に満たないときは、待つか（翌週のPRで解消することが多い）、Komaが例外として判断する
+- **差分の確認**（npm・pip のPR）：Dependabot が14日待つのは、PRの題名にある依存の版だけ。一緒に変わる間接の依存（`package-lock.json` の中や、新しい版が新たに要る Python のライブラリ）は、公開の直後の版になりうる（`CLAUDE.md` の版の規則は、間接の依存にも当てはまる）。マージの前に、確かめる。npm：PRの差分で、題名にない依存の版が変わった・増えたかを見る。pip：新たに要る依存は、差分に出ない（requirements に書かれていないため）。Claudeに頼み、そのブランチで `.venv` を作って `pip install -r requirements-dev.txt` のあと、`pip freeze` を requirements と比べ、書かれていない依存が増えていないかを確かめてもらう。どちらも、変わった・増えた依存があれば、Claudeに、その版の公開日を調べてもらう（`npm view <名前> time`・PyPI）。14日に満たないときは、待つか（翌週のPRで解消することが多い）、Komaが例外として判断する。pip で増えた依存は、requirements に足す（そのPRで足すか、別のPRにする）
 - **大きな更新・CIが通らない更新**：マージせず、タスクとして扱う（Claudeが、変更点を調べて、設計の案を出す）
 - **セキュリティの修正のPR**（Dependabot security updates）：14日を待たずに出る。マージは、版の規則（公開から2週間）の例外になるため、Komaが判断する（迷ったら、Claudeに内容を調べてもらう）
 - npm の `bootstrap`・`fullcalendar`・`@fullcalendar/*` は、Dependabotの対象外（画面がCDNから読む版と、そろえる必要があるため。`architecture/overview.md` の「Bootstrapの読み込み」「FullCalendarの読み込み」）。対象外にすると、セキュリティの修正のPRも出ない。GitHub の Dependabot alerts（Security タブ・通知）に出たら、タスクとして上げる
