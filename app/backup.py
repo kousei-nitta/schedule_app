@@ -161,9 +161,13 @@ def failure_message(database_path: Path, error: Exception) -> str:
     """バックアップを作れなかったときの、日本語の説明を返す。"""
     message = f"バックアップを作れませんでした：{error}"
     journal_path = database_path.with_name(database_path.name + "-journal")
-    if journal_path.exists():
-        # 書きかけの記録があると、読み取り専用では開けない（SQLiteが、
-        # 書きかけを取り消すために、DBに書き込む必要があるため）
+    # 書きかけの記録（印のある -journal）があると、読み取り専用では開けず、
+    # SQLiteは SQLITE_READONLY_ROLLBACK で失敗する（取り消すために、DBに
+    # 書き込む必要があるため）。そのときだけ、次の操作を案内する（-journal
+    # は、書き込み中のアプリや、取り消しの要らない古い記録でもあるため、
+    # ファイルがあるだけでは、書きかけとは限らない）
+    error_name = getattr(error, "sqlite_errorname", None)
+    if error_name == "SQLITE_READONLY_ROLLBACK":
         message += (
             f"。書きかけの記録（{journal_path.name}）があります。アプリが"
             "書き込みの途中で止まった可能性があります。アプリを起動して"
