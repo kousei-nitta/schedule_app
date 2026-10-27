@@ -218,34 +218,67 @@ def test_create_backup_when_backup_directory_is_a_file(source_db, tmp_path):
     assert (tmp_path / "backups").read_bytes() == b"not a folder"
 
 
+# 書きかけの記録（-journal）の見出しの先頭の8バイト。SQLiteは、commit の
+# とき、DBのファイルを書き換える前に、記録を確実に書き出し（同期）、この
+# 印を書く。印のある記録が「書きかけ」（hot journal）で、DBを開くときに
+# 取り消しが要る。印が 0 の記録は、書きかけではない（DBのファイルは、まだ
+# 書き換えられていない）。形は、SQLiteの資料「Database File Format」の
+# 「Rollback Journals」のとおり
+JOURNAL_MAGIC = bytes.fromhex("d9d505f920a163d7")
+
+
 def make_hot_journal(database_path: Path, target_path: Path) -> None:
     """書きかけの記録（hot journal）が残ったDBを、target_path に作る。
 
-    アプリが書き込みの途中で止まった状態と同じ。DBのファイルを書き換え
-    始めた（-journal に元の内容を控えた）瞬間の、DBと -journal を写し、
-    元のDBの書き込みは取り消す。
+    アプリが commit の途中（記録を同期したあと、DBのファイルを書き換える
+    前）で止まった状態と同じ。書き込みの途中の、DBと -journal を写し、
+    写した記録の見出しに、同期のときの印を書く。元のDBの書き込みは
+    取り消す。
+
+    commit の前に、DBのファイルを書き換え始めるか（記録に印を書くか）は、
+    SQLiteの作り方で違う（Macの SQLite は書き換えず、印は 0 のまま）。
+    どの環境でも同じ状態を作るため、印は、ここで書く。
     """
     journal_path = database_path.with_name(database_path.name + "-journal")
+    target_journal = target_path.with_name(target_path.name + "-journal")
     with closing(sqlite3.connect(database_path)) as connection:
-        # 書き込みを、すぐDBのファイルへ書き出させる（キャッシュを小さく）
-        connection.execute("PRAGMA cache_size = 1")
         connection.execute("BEGIN IMMEDIATE")
+        # 今ある行を変えて、記録に、元のページの中身を控えさせる
+        connection.execute("UPDATE semesters SET name = name || '+'")
         connection.execute(
-            "INSERT INTO semesters (name, start_date, end_date)"
-            " SELECT name || '+', start_date, end_date FROM semesters"
+            "INSERT INTO closures (semester_id, date, name)"
+            " VALUES (1, '2026-10-01', '書きかけの休講日')"
         )
-        for number in range(300):
-            connection.execute(
-                "INSERT INTO closures (semester_id, date, name)"
-                " VALUES (1, '2026-10-01', ?)",
-                (f"休講日{number}" * 20,),
-            )
         shutil.copy2(database_path, target_path)
-        shutil.copy2(
-            journal_path,
-            target_path.with_name(target_path.name + "-journal"),
-        )
+        shutil.copy2(journal_path, target_journal)
         connection.rollback()
+
+    journal = bytearray(target_journal.read_bytes())
+    journal[0:8] = JOURNAL_MAGIC
+    # 続く4バイトは、記録の数。0xFFFFFFFF は「ファイルの終わりまで」
+    journal[8:12] = (0xFFFFFFFF).to_bytes(4, "big")
+    target_journal.write_bytes(bytes(journal))
+
+
+def test_hot_journal_helper_makes_a_real_hot_journal(source_db, tmp_path):
+    # 上の準備が、本物の書きかけの記録を作ること（テストの空振りを防ぐ）：
+    # 読み書きで開くと、SQLiteが記録を取り消し、記録が消え、元の中身に戻る
+    hot_path = tmp_path / "hot" / "app.db"
+    hot_path.parent.mkdir()
+    make_hot_journal(source_db, hot_path)
+    hot_journal = hot_path.with_name("app.db-journal")
+
+    with closing(sqlite3.connect(hot_path)) as connection:
+        names = connection.execute("SELECT name FROM semesters").fetchall()
+        closure_count = connection.execute(
+            "SELECT COUNT(*) FROM closures"
+        ).fetchone()[0]
+        check = connection.execute("PRAGMA integrity_check").fetchone()[0]
+
+    assert not hot_journal.exists()
+    assert names == [("2026年度 後期",)]
+    assert closure_count == 0
+    assert check == "ok"
 
 
 def test_backup_fails_with_hot_journal_and_changes_nothing(
