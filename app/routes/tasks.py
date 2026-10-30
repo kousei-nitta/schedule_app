@@ -17,9 +17,11 @@ from app.api_helpers import (
     validate_required_string,
 )
 from app.categories import TASK_CATEGORIES, TASK_CATEGORY_OTHER
+from app.auth import current_user_id
 from app.extensions import db
 from app.models.subject import Subject
 from app.models.task import Task
+from app.ownership import get_owned
 
 
 tasks_bp = Blueprint(
@@ -182,7 +184,8 @@ def validate_task_subject_id(
     # 範囲外のIDをDBに渡すと、SQLiteでOverflowErrorになるため先に確認する。
     if not 1 <= subject_id <= MAX_ID:
         return None, "指定された授業が存在しません"
-    if db.session.get(Subject, subject_id) is None:
+    # 他人の授業も、存在しない授業と同じに扱う
+    if get_owned(Subject, subject_id) is None:
         return None, "指定された授業が存在しません"
     return subject_id, None
 
@@ -197,7 +200,7 @@ def get_tasks():
             {"is_completed": query_error},
         )
 
-    statement = db.select(Task)
+    statement = db.select(Task).where(Task.user_id == current_user_id())
     if specified:
         statement = statement.where(Task.is_completed.is_(is_completed))
     statement = statement.order_by(
@@ -210,7 +213,7 @@ def get_tasks():
 
 @tasks_bp.get(f"/<int(max={MAX_ID}):task_id>")
 def get_task(task_id: int):
-    task = db.session.get(Task, task_id)
+    task = get_owned(Task, task_id)
     if task is None:
         return api_error_response("not_found", "課題・タスクが見つかりません")
     return jsonify(task_to_dict(task))
@@ -257,6 +260,7 @@ def create_task():
         )
 
     task = Task(
+        user_id=current_user_id(),
         category=category,
         subject_id=subject_id,
         title=values["title"],
@@ -272,7 +276,7 @@ def create_task():
 @tasks_bp.patch(f"/<int(max={MAX_ID}):task_id>")
 def update_task(task_id: int):
     # 対象の課題・タスクがなければ、本文を読む前に404にする。
-    task = db.session.get(Task, task_id)
+    task = get_owned(Task, task_id)
     if task is None:
         return api_error_response("not_found", "課題・タスクが見つかりません")
 
@@ -322,7 +326,7 @@ def update_task(task_id: int):
 
 @tasks_bp.delete(f"/<int(max={MAX_ID}):task_id>")
 def delete_task(task_id: int):
-    task = db.session.get(Task, task_id)
+    task = get_owned(Task, task_id)
     if task is None:
         return api_error_response("not_found", "課題・タスクが見つかりません")
 

@@ -25,9 +25,11 @@ from app.categories import (
     EVENT_CATEGORY_OTHER,
     EVENT_CATEGORY_PART_TIME,
 )
+from app.auth import current_user_id
 from app.extensions import db
 from app.models.event import Event
 from app.models.subject import Subject
+from app.ownership import get_owned
 
 
 events_bp = Blueprint(
@@ -215,7 +217,8 @@ def validate_event_subject_id(
     # 範囲外のIDをDBに渡すと、SQLiteでOverflowErrorになるため先に確認する。
     if not 1 <= subject_id <= MAX_ID:
         return None, SUBJECT_NOT_FOUND_MESSAGE
-    if db.session.get(Subject, subject_id) is None:
+    # 他人の授業も、存在しない授業と同じに扱う
+    if get_owned(Subject, subject_id) is None:
         return None, SUBJECT_NOT_FOUND_MESSAGE
     return subject_id, None
 
@@ -346,7 +349,11 @@ def get_events():
     # 予定は、日付を1つだけ持つため、日付が期間内（両端を含む）の予定を返す。
     statement = (
         db.select(Event)
-        .where(Event.date >= start_date, Event.date <= end_date)
+        .where(
+            Event.user_id == current_user_id(),
+            Event.date >= start_date,
+            Event.date <= end_date,
+        )
         .order_by(
             Event.date.asc(),
             Event.start_time.asc(),
@@ -359,7 +366,7 @@ def get_events():
 
 @events_bp.get(f"/<int(max={MAX_ID}):event_id>")
 def get_event(event_id: int):
-    event = db.session.get(Event, event_id)
+    event = get_owned(Event, event_id)
     if event is None:
         return api_error_response("not_found", "予定が見つかりません")
     return jsonify(event_to_dict(event))
@@ -375,6 +382,7 @@ def get_employers():
     statement = (
         db.select(Event.employer)
         .where(
+            Event.user_id == current_user_id(),
             Event.category == EVENT_CATEGORY_PART_TIME,
             Event.employer.is_not(None),
         )
@@ -437,12 +445,19 @@ def create_event():
 
     if category == EVENT_CATEGORY_CLASS:
         # 授業の予定のタイトルは、授業の科目名の控え（指定できない）。
-        subject = db.session.get(Subject, values["subject_id"])
+        subject = get_owned(Subject, values["subject_id"])
         values["title"] = subject.subject_name
 
     # values のキーは、Eventの列の名前と同じ。そのカテゴリにない項目
     # （授業ID・教室・派遣会社）は、values になく、None のまま。
-    event = Event(category=category, is_generated=False, **values)
+    # 単発の予定の持ち主は、ログインした利用者（授業の予定なら、授業は
+    # 上で、自分のものと確かめた）
+    event = Event(
+        user_id=current_user_id(),
+        category=category,
+        is_generated=False,
+        **values,
+    )
     db.session.add(event)
     db.session.commit()
     return jsonify(event_to_dict(event)), 201
@@ -451,7 +466,7 @@ def create_event():
 @events_bp.patch(f"/<int(max={MAX_ID}):event_id>")
 def update_event(event_id: int):
     # 対象の予定がなければ、本文を読む前に404にする。
-    event = db.session.get(Event, event_id)
+    event = get_owned(Event, event_id)
     if event is None:
         return api_error_response("not_found", "予定が見つかりません")
 
@@ -504,7 +519,7 @@ def update_event(event_id: int):
 
 @events_bp.delete(f"/<int(max={MAX_ID}):event_id>")
 def delete_event(event_id: int):
-    event = db.session.get(Event, event_id)
+    event = get_owned(Event, event_id)
     if event is None:
         return api_error_response("not_found", "予定が見つかりません")
 
