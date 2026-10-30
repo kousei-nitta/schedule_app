@@ -12,7 +12,8 @@
 | Pythonの検査 | `ruff check .` |
 | JavaScriptの検査 | `npm run lint` |
 | 起動 | `python run.py`（`http://127.0.0.1:5001`。`instance/app.db` を使う。環境変数 `DATABASE_URL` で切り替える。デバッグモードは `FLASK_DEBUG=1` のときだけ） |
-| デモのDB | `DATABASE_URL=sqlite:///demo.db flask --app app create-demo-db`（`instance/demo.db` を作る） |
+| デモのDB | `DATABASE_URL=sqlite:///demo.db flask --app app create-demo-db`（`instance/demo.db` を作る。利用者 `demo` のパスワードの入力を求める） |
+| 利用者の管理 | `flask --app app create-user <ID>`・`set-password <ID>`・`rename-user <ID> <新しいID>`・`unlock-login <ID>`（`docs/development/database.md` の「利用者の管理」） |
 | 手動のバックアップ | `flask --app app backup-db --label <ラベル>` |
 
 PRを作る前に、テスト・E2Eテスト・2つの検査が、すべて通ることを確かめる（CIも、同じことを確かめる）。
@@ -48,10 +49,11 @@ PRを作る前に、テスト・E2Eテスト・2つの検査が、すべて通�
   - 利用者の入力やAPIの応答の文字を表示するときは、`textContent` を使う
   - `fetch` は `api.js` の中だけで呼ぶ。Jinjaの値をJavaScriptに書かない
 - テンプレート：インラインの `<script>`（`src` のないもの）・`<style>`・`style` 属性・`onclick` などの属性を書かない（CSPで止まる。`docs/architecture/security.md`）。CDNのファイルの版を変えるときは、`app/security.py` のCSPのURLも変える
+- 認可（`docs/architecture/api.md` の「利用者ごとのデータ（認可）」）：routeでは、IDでデータを取るときに `app/ownership.py` の `get_owned` を使い、`db.session.get` を使わない。一覧・件数・候補・重複の検査・一括の削除と作成の文には、`Model.user_id == current_user_id()` の条件を付ける。子の行は、親の `user_id` を写す。ログインを外す設定や分岐を作らない
 - 検査の例外（`# noqa` など）は、理由をコメントに書いて、その行だけに付ける
 
 ## テスト
-- APIを作る・変えるタスクでは、そのAPIのpytestのテストを、同じタスクで作る。書き方は `docs/development/testing.md` の「自動テスト（pytest）」
+- APIを作る・変えるタスクでは、そのAPIのpytestのテストを、同じタスクで作る。書き方は `docs/development/testing.md` の「自動テスト（pytest）」。APIを足したら、`tests/test_authorization.py` の `CASES` にも足す（ほかの利用者のデータに触れられないこと）
 - 期待値は、設計資料から決める。テストを通すために、期待値を設計資料に反して変えない
 - テスト専用のコード（テスト用のルートなど）を、`app/` に入れない
 - 通らないテストを残したまま、PRにしない

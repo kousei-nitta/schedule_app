@@ -2,14 +2,18 @@
 
 > 仕様の正本。変更は、Komaの承認を得てから、PRで行う（`docs/development/workflow.md`）。
 
-テーブルは5つ（Semester・Subject・Event・Task・Closure）。関係は **Semester → Subject → Event / Task** と、**Semester → Closure**。Closure（休講日）は、初期migrationには含まれない（休講日を実装するときに、新しいmigrationで追加する）。
+データのテーブルは5つ（Semester・Subject・Event・Task・Closure）。関係は **Semester → Subject → Event / Task** と、**Semester → Closure**。Closure（休講日）は、初期migrationには含まれない（休講日を実装するときに、新しいmigrationで追加する）。
+
+ログインのテーブルは3つ（User・UserSession・LoginFailure。Task 025）。5つのデータのテーブルは、すべて `user_id` で、どれかの利用者（User）のものになる（下の「データの持ち主」）。
 
 ## 共通の約束
 - 型は SQLAlchemy の型で書く。`String(n)` の n は最大文字数。
 - 日付・時刻（Date／Time／DateTime）は、タイムゾーン情報なし（naive）のローカル時刻として扱う。タイムゾーンの変換はしない。
+  - 例外：ログインのテーブル（User・UserSession・LoginFailure）の日時は、UTC（タイムゾーンなしで保存）。期限を、サーバーのタイムゾーンや、Macとクラウドの違いに左右されずに決めるため。処理は `app/clock.py` の `utc_now` の1か所で求める
 - 主キー `id` は整数の自動採番。
 - 初期値（`default`）は SQLAlchemy 側（Python側）で指定する。DB側の `server_default` は、現時点のモデルでは使わない（データが入ったテーブルにNOT NULLのカラムを後から追加する場合は、そのときのmigrationで別途検討する）。
-- 現時点のモデルには、インデックス・unique制約・check制約を定義しない（制約の命名規則だけは先に定める。「制約の命名規則」を参照）。
+- 現時点のモデルには、インデックス・check制約を定義しない。unique制約は、ログインのテーブルの2つ（`users.username`・`user_sessions.token_digest`。取り違えると、他人としてログインしうるため、DBでも守る）だけにする（制約の命名規則は「制約の命名規則」を参照）。
+- SQLiteは、既定では外部キー制約を強制しない（`PRAGMA foreign_keys` を有効にしていない）。`user_id` の外部キーも、DBでは強制されないため、守りとして当てにしない（持ち主は、routeで確かめる。「データの持ち主」）。
 - 削除時の連動は、ORMの `cascade` やDB側の `ondelete` を使わず、routeで、子の行を明示的に削除してから、親の行を削除する（1回のcommit。2026-10-13に決定）。SQLiteは既定では外部キー制約を強制しない（`PRAGMA foreign_keys`）ため、親の行だけを削除すると、子の行が残る（ORMで親の行を `session.delete` すると、`relationship` を通して、子の行の外部キーが `NULL` に書き換えられて残る）。routeに書くのは、何を削除するかを、routeのコードから読めるようにするため（休講日の追加で、その日の予定を削除する処理と同じ書き方）。DBの構造は変えない（migrationは不要）。現時点で、子の行を持つ親の削除は、授業の削除（予定・課題。「授業API」）と、学期の削除（休講日。授業がある学期は削除できない。「学期API」。2026-10-20）
 - `category` には、コード値（英小文字と `_` だけの固定の文字列）を保存する。値は、Event・Taskの表のとおり。画面に出す表示名・色・アイコンは、画面側の対応表（`app/static/js/categories.js`。色の値は `app/static/css/style.css`。「JavaScriptの構成」）で持ち、DBには持たない。
 - `category` の保存値と、APIで受け付ける値（許可値）の一覧は、`app/categories.py` だけで持つ（2026-10-15に決定。下の「カテゴリの保存値の置き場所」）。APIで `category` を受け付けるときは、許可値と完全に一致する文字列だけを受け付け、それ以外は400にする（「API共通ルール」の「決まった値から選ぶ文字列」）。Event・Taskの両方に、同じ規則を使う
@@ -28,6 +32,48 @@
 - Pythonのコードで、カテゴリの保存値の文字列（`"class"` など）を直接書かず、この定数を使う（テストの期待値は除く）。授業のEventの自動生成（`app/class_events.py`）も、`EVENT_CATEGORY_CLASS` を、ここから `import` して使う
 - 予定のAPIは、登録（`POST /api/events`）で `category` を受け付け、許可値に `EVENT_CATEGORIES` を使う（2026-10-19。「予定API」）
 - 画面側の対応表（`categories.js`）は、表示名・色・アイコンのための別の対応表で、このファイルとは独立に持つ（PythonとJavaScriptで、定数を共有する仕組みは作らない。保存値を変えることはないため）
+
+## データの持ち主（`user_id`。Task 025）
+- 5つのデータのテーブル（semesters・subjects・closures・events・tasks）は、どれも `user_id`（Integer、外部キー → `users.id`、NULL不可）を持つ。下の各テーブルの表では、省いて書く
+- 子の行は、作るときに、親の `user_id` を写す（授業・休講日は学期から、授業の予定は授業から。単発の予定と課題・タスクは、ログインした利用者。授業の予定（単発）と課題の授業は、自分のものと確かめてある）
+- APIは、ログインした利用者の行だけを扱う（`architecture/api.md` の「利用者ごとのデータ（認可）」）
+- 既存のデータ（Task 025より前）は、migration（`a750d741785a`）で、利用者 `owner`（パスワードなし）のものになる。データのないDBでは、利用者を作らない
+- `relationship` は足さない（利用者から、すべてのデータを辿る必要がなく、問い合わせを、routeの文で明示するため）
+
+## User（利用者）　テーブル名：`users`
+ログインする人。データの持ち主。作る・変えるのは、コマンドだけ（`architecture/security.md` の「利用者の管理」）。
+
+| フィールド | 型 | NULL | 内容 |
+|---|---|---|---|
+| id | Integer（主キー） | 不可 | |
+| username | String(32) | 不可 | ログインID。半角英小文字・数字・`_`・`-`、3〜32文字。一意（`uq_users_username`） |
+| password_hash | String(255) | 可 | パスワードのハッシュ（scrypt。Werkzeug の形）。NULLの利用者は、ログインできない（パスワードを決める前の `owner`） |
+| created_at | DateTime | 不可 | 作った日時（UTC） |
+
+## UserSession（ログイン中の端末）　テーブル名：`user_sessions`
+1回のログインにつき1行。ログアウト・期限切れで消す（`architecture/security.md` の「ログインの状態（セッション）」）。
+
+| フィールド | 型 | NULL | 内容 |
+|---|---|---|---|
+| id | Integer（主キー） | 不可 | |
+| user_id | Integer、外部キー → `users.id` | 不可 | ログインした利用者 |
+| token_digest | String(64) | 不可 | Cookie のトークンの SHA-256（16進数）。トークンそのものは保存しない。一意（`uq_user_sessions_token_digest`） |
+| created_at | DateTime | 不可 | ログインした日時（UTC）。30日で切れる |
+| last_used_at | DateTime | 不可 | 最後に使った日時（UTC。1時間に1回だけ更新）。14日で切れる |
+
+## LoginFailure（ログインの失敗）　テーブル名：`login_failures`
+試行の制限に使う記録（`architecture/security.md` の「ログインの試行の制限」）。利用者とは結びつけない（IDがないときも記録するため）。
+
+| フィールド | 型 | NULL | 内容 |
+|---|---|---|---|
+| id | Integer（主キー） | 不可 | |
+| login_id_digest | String(64) | 不可 | 打ち込まれたログインIDの HMAC-SHA256（鍵は `SECRET_KEY`）。IDそのものは保存しない |
+| client_digest | String(64) | 不可 | 接続元（IPv4、または IPv6 の /64）の HMAC-SHA256。アドレスそのものは保存しない |
+| failed_at | DateTime | 不可 | 失敗した日時（UTC） |
+| login_id_locked_until | DateTime | 不可 | この失敗で始まった、ログインIDごとの制限の期限（UTC）。断らないときは `failed_at` と同じ |
+| client_locked_until | DateTime | 不可 | この失敗で始まった、接続元ごとの制限の期限（UTC）。断らないときは `failed_at` と同じ |
+
+- 行は、24時間より古く、その行で始まった制限が終わってから消す
 
 ## Semester（学期）　テーブル名：`semesters`
 学期を表す。UIの学期タブ、「新しい学期の登録」、学期ごとの期間管理に対応する。
@@ -113,6 +159,7 @@
 - Subject 1 — 0..n Event（授業由来のEvent）
 - Subject 1 — 0..n Task（対象授業としての参照）
 - Semester 1 — 0..n Closure（休講日）
+- User 1 — 0..n 各データ（Semester・Subject・Closure・Event・Task。`user_id`）、User 1 — 0..n UserSession
 - ORMの `relationship`（`back_populates` で双方向）：`Semester.subjects` ↔ `Subject.semester`、`Subject.events` ↔ `Event.subject`、`Subject.tasks` ↔ `Task.subject`、`Semester.closures` ↔ `Closure.semester`。`cascade` は指定しない（削除の連動は、「共通の約束」のとおり、routeで明示的に行う）。
 
 ## 制約の命名規則（naming convention）
@@ -137,7 +184,8 @@ NAMING_CONVENTION = {
 現在のモデルで作られる名前（初期migrationの確認に使う）：
 - 主キー：`pk_semesters`、`pk_subjects`、`pk_events`、`pk_tasks`
 - 外部キー：`fk_subjects_semester_id_semesters`、`fk_events_subject_id_subjects`、`fk_tasks_subject_id_subjects`
-- index・unique・check：現時点では作らない
+- index・check：現時点では作らない。unique：ログインのテーブルの2つだけ（下の Task 025 の migration）
 - 休講日のテーブル（「Closure（休講日）」）を加えるmigrationで作られる名前（そのmigrationの確認に使う）：主キー `pk_closures`、外部キー `fk_closures_semester_id_semesters`
+- 利用者とデータの持ち主を加えるmigration（`a750d741785a`。Task 025）で作られる名前：主キー `pk_users`・`pk_user_sessions`・`pk_login_failures`、外部キー `fk_user_sessions_user_id_users`・`fk_semesters_user_id_users`・`fk_subjects_user_id_users`・`fk_closures_user_id_users`・`fk_events_user_id_users`・`fk_tasks_user_id_users`、unique `uq_users_username`・`uq_user_sessions_token_digest`
 
 注意：checkを定義する場合は、`ck` の規則が `constraint_name` を使うため、制約に明示的な名前が必要になる。`Boolean` などの型にcheck制約を自動で作らせない（`create_constraint` は既定のまま使わない）。

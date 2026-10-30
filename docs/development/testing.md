@@ -21,12 +21,14 @@
 - `create_app(test_config=None)`。`test_config` がなければ、これまでどおり `Config` を使う
 - `test_config`（辞書）を渡すと、`Config` の読み込みのあと、`db.init_app(app)` の**前**に、その内容で設定を上書きする
 - `test_config` を渡す場合は、`SQLALCHEMY_DATABASE_URI` の指定を必須とする。ない場合は、`ValueError`（開発用DBを、うっかり使わないため）。このとき、`instance/` ディレクトリの作成も行わない
+- `test_config` を渡すと、`SECRET_KEY` は、アプリごとの乱数になる（`instance/secret_key` を作らない・読まない。`test_config` で指定すれば、その値）
 
 ### テスト用DB
 - 場所：pytestが用意する一時ディレクトリ（`tmp_path_factory`・`tmp_path`）の中だけ。リポジトリの中や、`instance/` には作らない
 - 作り方：**本番と同じmigration（`upgrade`）**。セッションの最初に1回だけ、一時ディレクトリに「雛形のDB」を作り、`flask_migrate.upgrade()`（`directory` は、リポジトリの `migrations/` の絶対パス）で、最新の状態にする。これで、migrationの経路も、毎回確認される
 - 各テストの前に、雛形のDBを、テストごとの一時ファイルへコピーして使う（テスト間でデータが混ざらない。リセットは、新しいコピーに替わることで行う）
 - テストの中のデータは、各テストが自分で作る（ORMで直接作るか、APIで作る）
+- fixture `app` は、テストごとのDBに、テストの利用者（id 1。`tests/auth_support.py` の `TEST_USER_ID`）を作る。ORMで直接作るデータには、`user_id=TEST_USER_ID` を付ける（`user_id` はNULL不可）
 
 ### 開発用DB（`instance/app.db`）を触らない仕組み
 1. テストは、`create_app({...})` に、一時ディレクトリのDBのURIを渡してアプリを作る。`create_app()` を、引数なしで呼ばない
@@ -36,7 +38,14 @@
 5. バックアップは、DBのファイルと同じフォルダの `backups/` にできるため、テストのバックアップは、一時ディレクトリの中にだけできる。実データのDBかどうか（`instance/app.db` か）の判定を確かめるテストは、`instance/` を一時ディレクトリにした空のFlaskアプリ（`Flask(__name__, instance_path=…)`）で行う（`tests/test_database_files.py`・`tests/test_backup.py`・`tests/test_demo_data.py`）
 
 ### テストの書き方
-- APIは、`app.test_client()` で呼ぶ。JSONの本文は `client.post(url, json=...)`。JSONでない本文や、`Content-Type` の違いは、`data=` と `content_type=` で指定する
+- APIは、fixture `client`（テストの利用者で、ログインした状態）で呼ぶ。JSONの本文は `client.post(url, json=...)`。JSONでない本文や、`Content-Type` の違いは、`data=` と `content_type=` で指定する
+- ログイン（Task 025）
+  - `client` は、ログインの画面を通らず、DBにログイン中の端末の行を作って、Cookie を入れる（`tests/auth_support.py` の `log_in`。scrypt の計算を、テストごとにしないため）。パスワードのハッシュは、テスト全体で1回だけ計算する
+  - ログインしていない状態は、fixture `anonymous_client`。ほかの利用者は、`create_user` と `logged_in_client`（`tests/auth_support.py`）
+  - テストのために、ログインを外す設定や分岐を、`app/` に作らない
+  - 時刻（ログインの期限・試行の制限）は、`app/clock.py` の `utc_now` を、`monkeypatch` で差し替える（`tests/test_auth.py` の `FakeClock`）
+  - 画面のフォームの送信（`/login`・`/logout` など）は、ブラウザが付けるヘッダー（`Origin` か `Sec-Fetch-Site`）がないと403になる。テストでは、`headers` に付ける（`tests/test_auth.py` の `FORM_HEADERS`）
+  - APIを足したら、`tests/test_authorization.py` の `CASES` に、ほかの利用者のデータに触れられないことを確かめる関数を足す（足し忘れると、テストが失敗する）
 - 500の確認は、テストの中で、テスト専用のルートを `app.add_url_rule` で足し、`PROPAGATE_EXCEPTIONS` を `False` にして行う。テスト専用のコードを、`app/` に入れない
 - 既存のrouteの途中で例外が起きた場合の確認（例：Eventの生成中の例外で、授業も保存されないこと）は、pytestの `monkeypatch` で、routeが呼ぶ関数を、例外を投げる関数に置き換えて行う。置き換える場所は、routeのモジュールが参照している名前（`from ... import` で取り込んだ名前なら、routeのモジュール側）。500のJSONを確かめるため、このときも `PROPAGATE_EXCEPTIONS` を `False` にする。保存されていないことは、例外のあとで、DBの行数を数えて確かめる
 - DBを使わない関数（`class_events.py` の日付の計算など）は、アプリやDBを作らずに、関数を直接呼んで確認する
@@ -81,7 +90,7 @@
 画面を、ブラウザ（Chromium）で、利用者と同じように操作して確かめる。道具は Playwright（pytest-playwright。pytestから動かす）。手動の確認を、すべて置き換えるものではない（ADR 0001 の「自動の確認」）。
 
 ### 対象
-- 主な流れ（`tests/e2e/test_main_flow.py`）：学期の登録 → 休講日の追加 → 授業の登録（休講日を除いて予定ができる）→ カレンダーの週表示（休講日に授業の予定がなく、次の週にはある）→ 課題の登録（「直近の締切」欄に出る）→ 完了（完了の一覧に移り、「直近の締切」欄から消える）。流れの全体で、JavaScriptの例外と、CSPの違反（ブラウザが、CSPに反するとして止めた読み込み・実行）が起きていないこと
+- 主な流れ（`tests/e2e/test_main_flow.py`）：ログイン（ログインしていないと、ログインの画面に移る）→ 学期の登録 → 休講日の追加 → 授業の登録（休講日を除いて予定ができる）→ カレンダーの週表示（休講日に授業の予定がなく、次の週にはある）→ 課題の登録（「直近の締切」欄に出る）→ 完了（完了の一覧に移り、「直近の締切」欄から消える）→ ログアウト（トップを開き直しても、ログインの画面）。ほかのタブでログアウトしたあと、次の操作で、ログインの画面へ移ること（`api.js` の401の扱い）も確かめる。流れの全体で、JavaScriptの例外と、CSPの違反（ブラウザが、CSPに反するとして止めた読み込み・実行）が起きていないこと
 - E2Eテストは、主な流れと、新しい画面の重要な操作に絞る。細かな入力の検査は、APIのテスト（pytest）で確かめる
 
 ### 配置と実行
@@ -91,7 +100,7 @@
 - Claudeの作業環境：`E2E_CDN_FROM_NPM=1 python -m pytest -m e2e`。CDN（jsDelivr）に届かないため、この環境変数があるときだけ、CDNへの読み込みに、`node_modules` の同じ版のファイル（`npm ci` で入る）で答える（`tests/e2e/conftest.py`）。ブラウザが `integrity`（SRI）を確かめるので、違うファイルなら読み込まれない。CIとKomaのMacでは、付けない（CDNから読む）
 
 ### 仕組み（`tests/e2e/conftest.py`）
-- テストごとに、migrationで作った雛形のDB（`tests/conftest.py` の `template_db`）を一時ディレクトリにコピーし、そのDBで、アプリを別のスレッドで起動する（空いているポート）。実データのDBに触れない（「開発用DB（`instance/app.db`）を触らない仕組み」も、そのまま効く）
+- テストごとに、migrationで作った雛形のDB（`tests/conftest.py` の `template_db`）を一時ディレクトリにコピーし、E2Eの利用者（`tests/auth_support.py` の `E2E_USERNAME`・`TEST_PASSWORD`。架空）を作って、そのDBで、アプリを別のスレッドで起動する（空いているポート）。ログインは、テストが画面から行う。実データのDBに触れない（「開発用DB（`instance/app.db`）を触らない仕組み」も、そのまま効く）
 - アプリは、ふだんと同じく、サーバーの中の例外を外へ出さない設定（`PROPAGATE_EXCEPTIONS` を `False`）で動かす（APIの500を、JSONで返すため）
 - ページで起きたJavaScriptの例外を、fixture `page_errors` に集める。CSPの違反を、fixture `csp_violations` に集める（ブラウザの `securitypolicyviolation` のイベントと、Chromiumがコンソールに記録する「Content Security Policy」を含むエラーの、両方。片方の仕組みが変わっても、空振りしないように）。テストの最後に、どちらも空であることを確かめる
 
