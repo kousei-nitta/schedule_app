@@ -15,6 +15,8 @@ from app.user_sessions import start_session
 TEST_USER_ID = 1
 TEST_USERNAME = "test-user"
 OTHER_USERNAME = "other-user"
+# E2Eの利用者のログインID（tests/e2e/。パスワードは TEST_PASSWORD）
+E2E_USERNAME = "e2e-user"
 # テスト専用の架空のパスワード（決まり：15文字以上、IDを含まない）
 TEST_PASSWORD = "kumo sakura densha 2099"
 

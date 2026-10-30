@@ -1,4 +1,5 @@
-"""E2E：主な流れ（学期 → 休講日 → 授業 → カレンダー → 課題 → 完了）。
+"""E2E：主な流れ（ログイン → 学期 → 休講日 → 授業 → カレンダー → 課題 →
+完了 → ログアウト）。
 
 画面を、利用者と同じようにブラウザで操作して確かめる。日付は、
 すべて今日からの相対で決める（docs/development/testing.md の
@@ -18,6 +19,7 @@ from datetime import date, datetime, time, timedelta
 from playwright.sync_api import Page, expect
 
 from app.demo_data import semester_name
+from tests.auth_support import E2E_USERNAME, TEST_PASSWORD
 
 SUBJECT_A = "E2Eテストの授業A"
 SUBJECT_B = "E2Eテストの授業B"
@@ -62,6 +64,27 @@ def add_closure(page: Page, closure_date: date):
     expect(closure_items).to_contain_text("E2Eテストの休講日")
 
 
+def log_in(page: Page, app_url: str) -> None:
+    """ログインしていないと、ログインの画面に移る。ログインして、トップへ。"""
+    page.goto(app_url + "/")
+    expect(page).to_have_url(app_url + "/login")
+    page.locator("#login-id").fill(E2E_USERNAME)
+    page.locator("#login-password").fill(TEST_PASSWORD)
+    page.locator("#login-submit-button").click()
+    expect(page).to_have_url(app_url + "/")
+    expect(page.locator("#user-menu-button")).to_have_text(E2E_USERNAME)
+
+
+def log_out(page: Page, app_url: str) -> None:
+    """利用者のメニューから、ログアウトする。ログインの画面に戻る。"""
+    page.locator("#user-menu-button").click()
+    page.locator("#logout-button").click()
+    expect(page).to_have_url(app_url + "/login")
+    # ログアウトのあとは、トップを開いても、ログインの画面になる
+    page.goto(app_url + "/")
+    expect(page).to_have_url(app_url + "/login")
+
+
 def register_subject(
     page: Page, name: str, weekday: int, start_time: str, end_time: str
 ) -> None:
@@ -91,7 +114,9 @@ def test_main_flow(
     # ブラウザの「今」を、テストの「今日」の正午に固定する（テストの途中で
     # 日付をまたいでも、Pythonとブラウザの「今日」がずれないように）
     page.clock.set_fixed_time(datetime.combine(today, time(12, 0)))
-    page.goto(app_url + "/")
+
+    # 0. ログインする
+    log_in(page, app_url)
 
     # 1. 学期を登録する
     register_semester(page, today, semester_start, semester_end)
@@ -158,8 +183,34 @@ def test_main_flow(
     expect(page.locator("#calendar-deadline-empty")).to_be_visible()
     expect(deadline_list).not_to_contain_text(TASK_TITLE)
 
+    # 7. ログアウトする
+    log_out(page, app_url)
+
     # 流れの全体で、JavaScriptの例外が起きていない
     assert page_errors == []
     # CSP（app/security.py）で、BootstrapやFullCalendar（差し込む <style>
     # を含む）の読み込み・実行が止められていない
+    assert csp_violations == []
+
+
+def test_expired_login_moves_to_login_page(
+    page: Page,
+    app_url: str,
+    page_errors: list[str],
+    csp_violations: list[str],
+):
+    # 画面を開いたまま、ログインが切れたら（ここでは、ほかのタブで
+    # ログアウトする）、次のAPIの呼び出し（401）で、ログインの画面に移る
+    # （app/static/js/api.js）
+    log_in(page, app_url)
+    other_tab = page.context.new_page()
+    other_tab.goto(app_url + "/")
+    other_tab.locator("#user-menu-button").click()
+    other_tab.locator("#logout-button").click()
+    expect(other_tab).to_have_url(app_url + "/login")
+
+    page.locator("#tasks-tab").click()
+
+    expect(page).to_have_url(app_url + "/login")
+    assert page_errors == []
     assert csp_violations == []
