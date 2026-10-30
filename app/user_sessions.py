@@ -46,10 +46,11 @@ def is_expired(session: UserSession, now: datetime) -> bool:
 def start_session(user_id: int) -> str:
     """ログインした端末の行を作り、トークンを返す（commitしない）。
 
-    同じ利用者の、期限の切れた行は、ここで消す。
+    期限の切れた行（すべての利用者の分）は、ここで消す（使われなく
+    なった端末の行を、残し続けないため）。
     """
     now = clock.utc_now()
-    delete_expired_sessions(user_id, now)
+    delete_expired_sessions(now)
     token = secrets.token_urlsafe(TOKEN_BYTES)
     db.session.add(
         UserSession(
@@ -88,11 +89,10 @@ def find_session(token: str | None) -> UserSession | None:
     return session
 
 
-def delete_expired_sessions(user_id: int, now: datetime) -> None:
-    """利用者の、期限の切れた行を消す（commitしない）。"""
+def delete_expired_sessions(now: datetime) -> None:
+    """期限の切れた行を、すべて消す（commitしない）。"""
     db.session.execute(
         db.delete(UserSession).where(
-            UserSession.user_id == user_id,
             db.or_(
                 UserSession.last_used_at <= now - SESSION_IDLE_TIMEOUT,
                 UserSession.created_at <= now - SESSION_ABSOLUTE_TIMEOUT,

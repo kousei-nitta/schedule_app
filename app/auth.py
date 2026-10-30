@@ -93,8 +93,11 @@ def is_cross_site_request() -> bool:
        （画面への GET のページ移動）は許す。APIは、読み取りも断る
     2. データを変えるメソッドで、Origin が、このアプリと違えば断る
        （null を含む）
-    どちらのヘッダーもない要求（ブラウザでないもの）は、ここでは通す
-    （CSRF は、利用者のブラウザを使う攻撃のため）。
+    3. 画面のフォームの送信（ログイン・ログアウト）は、どちらのヘッダーも
+       なければ断る（今のブラウザは、フォームの送信に、必ず付ける）
+    APIは、どちらのヘッダーもない要求（ブラウザでないもの）を通す
+    （CSRF は、利用者のブラウザを使う攻撃のため。ほかのサイトは、
+    application/json を、事前の確かめなしに送れない）。
     """
     fetch_site = request.headers.get("Sec-Fetch-Site")
     if fetch_site is not None and fetch_site not in ALLOWED_FETCH_SITES:
@@ -112,6 +115,12 @@ def is_cross_site_request() -> bool:
         origin = request.headers.get("Origin")
         if origin is not None and origin != own_origin():
             return True
+        if (
+            origin is None
+            and fetch_site is None
+            and not is_api_path(request.path)
+        ):
+            return True
     return False
 
 
@@ -119,12 +128,14 @@ def reject_cross_site_request() -> Response | tuple[Response, int] | None:
     """ほかのサイトからの要求を断る（before_request）。"""
     if is_rejected_host() or not is_cross_site_request():
         return None
+    # 要求から来た値は、%r で書く（改行などで、偽の行を作らせない）
     auth_logger.warning(
         "ほかのサイトからの要求を断りました"
-        "（%s %s、Sec-Fetch-Site：%s、接続元：%s）",
+        "（%s %r、Sec-Fetch-Site：%r、Origin：%r、接続元：%s）",
         request.method,
         request.path,
-        request.headers.get("Sec-Fetch-Site", "なし"),
+        request.headers.get("Sec-Fetch-Site"),
+        request.headers.get("Origin"),
         client_address(),
     )
     if is_api_path(request.path):

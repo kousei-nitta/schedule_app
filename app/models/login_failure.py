@@ -17,3 +17,8 @@ class LoginFailure(db.Model):
     client_digest = db.Column(db.String(64), nullable=False)
     # 失敗した日時（UTC。タイムゾーンなしで保存）
     failed_at = db.Column(db.DateTime, nullable=False)
+    # この失敗で始まった、ログインを断る期限（ログインIDごと・接続元
+    # ごと）。断らないときは、failed_at と同じ。記録するときに決めて残す
+    # （古い失敗が数えなくなっても、始まった制限が早く解けないように）
+    login_id_locked_until = db.Column(db.DateTime, nullable=False)
+    client_locked_until = db.Column(db.DateTime, nullable=False)

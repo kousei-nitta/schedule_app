@@ -2,6 +2,8 @@
 
 処理の順序と理由は、docs/architecture/security.md の「ログイン」。
 """
+import threading
+
 from flask import Blueprint, Response, g, redirect, render_template
 from flask import request, url_for
 
@@ -9,6 +11,7 @@ from app import clock
 from app.auth import auth_logger, client_address, current_user
 from app.extensions import db
 from app.login_limits import (
+    cancel_attempt,
     client_key,
     forget_failures,
     keyed_digest,
@@ -16,7 +19,11 @@ from app.login_limits import (
     reserve_attempt,
 )
 from app.models.user import User
-from app.passwords import is_valid_username, verify_password
+from app.passwords import (
+    MAX_PASSWORD_INPUT_LENGTH,
+    is_valid_username,
+    verify_password,
+)
 from app.user_sessions import (
     clear_session_cookie,
     end_all_sessions,
@@ -27,6 +34,9 @@ from app.user_sessions import (
 auth_bp = Blueprint("auth", __name__)
 
 LOGIN_FAILED_MESSAGE = "ログインIDかパスワードが違います"
+LOGIN_BUSY_MESSAGE = (
+    "混み合っています。少し時間をおいて、もう一度お試しください"
+)
 LOGIN_LOCKED_MESSAGE = (
     "ログインの失敗が続いたため、しばらくログインできません。"
     "約{minutes}分後に、もう一度お試しください"
@@ -46,11 +56,37 @@ DUMMY_PASSWORD_HASH = (
 # 消してもらう
 CLEAR_SITE_DATA = '"cache", "storage"'
 
+# パスワードの確かめ（scrypt。1回に32MiBのメモリー）を、同時にいくつまで
+# 行うか。ログインの前に重い計算をさせて、サーバーのメモリーやCPUを
+# 使い切らせないため。空かなければ、待つ時間（秒）のあと、断る（503）
+PASSWORD_CHECK_SLOTS = threading.BoundedSemaphore(2)
+PASSWORD_CHECK_WAIT_SECONDS = 5
+
 
 def render_login(
-    error_message: str | None = None, status: int = 200
+    error_message: str | None = None,
+    status: int = 200,
+    *,
+    reload_once: bool = False,
 ) -> tuple[str, int]:
-    return render_template("login.html", error_message=error_message), status
+    return (
+        render_template(
+            "login.html",
+            error_message=error_message,
+            reload_once=reload_once,
+        ),
+        status,
+    )
+
+
+def opened_from_other_site() -> bool:
+    """ほかのサイトのリンクから開いた（ページの移動）か。
+
+    Cookie は SameSite=Strict のため、そのときは送られず、ログイン中でも
+    ログインの画面になる。画面を1回だけ開き直すと（このアプリの中からの
+    移動になる）、Cookie が送られ、ログイン中なら、そのまま使える。
+    """
+    return request.headers.get("Sec-Fetch-Site") in ("cross-site", "same-site")
 
 
 def find_user_for_login(login_id: str) -> User | None:
@@ -73,7 +109,7 @@ def login():
     if request.method == "GET":
         if current_user() is not None:
             return redirect("/", code=303)
-        return render_login()
+        return render_login(reload_once=opened_from_other_site())
     return attempt_login()
 
 
@@ -81,8 +117,10 @@ def attempt_login():
     """ログインを試す（POST /login）。
 
     順序：①試行の制限を確かめ、先に失敗として記録する ②パスワードを
-    確かめる（IDがなくても、同じ計算をする）③合っていれば、記録を消し、
-    新しいトークンで、ログイン中の端末を作る。
+    確かめる（IDがあってもなくても、同じ計算をする）③合っていれば、
+    記録を消し、新しいトークンで、ログイン中の端末を作る。
+    決まりに合わないID（ありえないID）と、長すぎるパスワードは、計算せずに
+    失敗にする（決まりは公開しているため、時間で分かっても、何も漏れない）。
     """
     login_id = request.form.get("login_id", "")
     password = request.form.get("password", "")
@@ -90,7 +128,9 @@ def attempt_login():
     login_id_digest = keyed_digest("login_id", login_id)
     client_digest = keyed_digest("client", client_key(request.remote_addr))
 
-    _, locked_until = reserve_attempt(login_id_digest, client_digest, now)
+    failure, locked_until = reserve_attempt(
+        login_id_digest, client_digest, now
+    )
     if locked_until is not None:
         auth_logger.warning(
             "ログインを断りました（試行の制限。接続元：%s）",
@@ -101,12 +141,32 @@ def attempt_login():
         )
         return render_login(message, 429)
 
-    user = find_user_for_login(login_id)
-    if user is not None and user.password_hash is not None:
-        password_matches = verify_password(user.password_hash, password)
+    password_matches = False
+    if (
+        is_valid_username(login_id)
+        and len(password) <= MAX_PASSWORD_INPUT_LENGTH
+    ):
+        if not PASSWORD_CHECK_SLOTS.acquire(
+            timeout=PASSWORD_CHECK_WAIT_SECONDS
+        ):
+            # 確かめなかったので、失敗に数えない
+            cancel_attempt(failure)
+            auth_logger.warning(
+                "ログインを断りました（混雑。接続元：%s）", client_address()
+            )
+            return render_login(LOGIN_BUSY_MESSAGE, 503)
+        try:
+            user = find_user_for_login(login_id)
+            if user is not None and user.password_hash is not None:
+                password_matches = verify_password(
+                    user.password_hash, password
+                )
+            else:
+                verify_password(DUMMY_PASSWORD_HASH, password)
+        finally:
+            PASSWORD_CHECK_SLOTS.release()
     else:
-        verify_password(DUMMY_PASSWORD_HASH, password)
-        password_matches = False
+        user = None
 
     if not password_matches:
         auth_logger.warning(

@@ -482,7 +482,9 @@ def test_api_405_has_allow_header_in_name_order(client, method, url, allow):
 
 def test_regular_page_405_remains_html(client):
     # 通常のHTMLページの405は、変えない（Flaskの標準のHTMLのまま）。
-    response = client.post("/")
+    # 画面へのPOSTは、ブラウザが付けるヘッダーがないと403になるため、
+    # このアプリの画面からの送信として送る（app/auth.py）
+    response = client.post("/", headers={"Sec-Fetch-Site": "same-origin"})
     assert response.status_code == 405
     assert response.content_type.startswith("text/html")
     assert set(response.headers["Allow"].split(", ")) == {

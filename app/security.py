@@ -54,20 +54,31 @@ SECURITY_HEADERS = {
 # データを含まないため、対象にしない
 NO_STORE = "no-store"
 
+# スクリプトを1つも許さない画面（routeの名前）
+NO_SCRIPT_ENDPOINTS = {"auth.login"}
 
-def content_security_policy(nonce: str) -> str:
+
+def content_security_policy(nonce: str, allow_scripts: bool = True) -> str:
     """CSP（ページが読み込んでよいものの一覧）の値を作る。
 
     nonce は、FullCalendarが差し込む <style> だけに渡す、要求ごとの
     使い捨ての値。インラインのスクリプト・スタイル（'unsafe-inline'）と、
     文字列からのコードの実行（'unsafe-eval'）は、許さない。
+    allow_scripts が False なら、スクリプトを1つも許さない（ログインの
+    画面。パスワードを入れる画面では、万一入り込んでも動かさない）。
     """
+    if allow_scripts:
+        # スクリプト：自分のファイル（main.js など）と、CDNの2つの
+        # ファイルだけ（jsDelivrの、ほかのファイルは読ませない）
+        script_sources = (
+            f"'self' {BOOTSTRAP_JS_URL} {FULLCALENDAR_JS_URL}"
+        )
+    else:
+        script_sources = "'none'"
     directives = [
         # 下で決めていない種類は、自分のサイトからだけ
         "default-src 'self'",
-        # スクリプト：自分のファイル（main.js など）と、CDNの2つのファイル
-        # だけ（jsDelivrの、ほかのファイルは読ませない）
-        f"script-src 'self' {BOOTSTRAP_JS_URL} {FULLCALENDAR_JS_URL}",
+        f"script-src {script_sources}",
         # スタイル：自分の style.css、BootstrapのCSS、FullCalendarが
         # 差し込む <style>（nonce つき）
         f"style-src 'self' {BOOTSTRAP_CSS_URL} 'nonce-{nonce}'",
@@ -123,7 +134,10 @@ def register_security_headers(app: Flask) -> None:
         for name, value in SECURITY_HEADERS.items():
             response.headers[name] = value
         response.headers["Content-Security-Policy"] = (
-            content_security_policy(current_csp_nonce())
+            content_security_policy(
+                current_csp_nonce(),
+                allow_scripts=request.endpoint not in NO_SCRIPT_ENDPOINTS,
+            )
         )
         if request.endpoint != "static":
             response.headers["Cache-Control"] = NO_STORE

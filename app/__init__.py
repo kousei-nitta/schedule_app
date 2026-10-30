@@ -6,7 +6,7 @@ from flask import Flask
 
 from app.api_helpers import register_api_error_handlers
 from app.auth import register_auth
-from app.config import Config
+from app.config import Config, check_cookie_security
 from app.extensions import db, migrate
 from app.secret_key import load_secret_key
 from app.security import register_security_headers
@@ -33,6 +33,9 @@ def create_app(test_config: dict[str, Any] | None = None):
         # アプリごとの乱数）
         app.config["SECRET_KEY"] = secrets.token_hex(32)
         app.config.update(test_config)
+
+    # 公開の設定で、Cookie の Secure を付け忘れていたら、起動しない
+    check_cookie_security(app.config)
 
     db.init_app(app)
 

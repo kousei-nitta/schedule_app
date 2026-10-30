@@ -45,6 +45,8 @@ def upgrade():
     sa.Column('login_id_digest', sa.String(length=64), nullable=False),
     sa.Column('client_digest', sa.String(length=64), nullable=False),
     sa.Column('failed_at', sa.DateTime(), nullable=False),
+    sa.Column('login_id_locked_until', sa.DateTime(), nullable=False),
+    sa.Column('client_locked_until', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_login_failures'))
     )
     op.create_table('users',
@@ -62,7 +64,8 @@ def upgrade():
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('last_used_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_user_sessions_user_id_users')),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_user_sessions'))
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_user_sessions')),
+    sa.UniqueConstraint('token_digest', name=op.f('uq_user_sessions_token_digest'))
     )
 
     # 2. user_id を、まずNULL可で足す（データのある表に、値のない
@@ -88,6 +91,9 @@ def upgrade():
             sa.text(
                 'INSERT INTO users (username, password_hash, created_at) '
                 'VALUES (:username, NULL, :created_at)'
+            ).bindparams(
+                # 日時は、モデルの DateTime と同じ形の文字で保存する
+                sa.bindparam('created_at', type_=sa.DateTime())
             ),
             {'username': OWNER_USERNAME, 'created_at': created_at},
         )

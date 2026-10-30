@@ -37,3 +37,23 @@ class Config:
     # （docs/architecture/security.md の「公開の前の点検」）。
     AUTH_COOKIE_NAME = "schedule_session"
     AUTH_COOKIE_SECURE = False
+
+
+# Cookie の Secure をオフにしてよい Host（このMacの中だけ）
+LOCAL_HOSTS = {"127.0.0.1", "localhost"}
+
+
+def check_cookie_security(config: Mapping) -> None:
+    """ローカルでないのに、Cookie の Secure がオフなら、起動しない。
+
+    公開のとき（Task 026）に、TRUSTED_HOSTS だけを本番の名前にして、
+    Secure を付け忘れると、ログインの Cookie が HTTP でも送られてしまう。
+    その設定の誤りで、起動しないようにする（安全な側に倒す）。
+    """
+    hosts = set(config["TRUSTED_HOSTS"])
+    if not config["AUTH_COOKIE_SECURE"] and not hosts <= LOCAL_HOSTS:
+        raise RuntimeError(
+            "TRUSTED_HOSTS に、このMacの外の名前があるのに、"
+            "AUTH_COOKIE_SECURE がオフです（HTTPSで公開するときは、"
+            "オンにしてください）"
+        )

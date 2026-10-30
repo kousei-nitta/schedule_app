@@ -2,13 +2,19 @@
 
 仕様は docs/architecture/security.md の「ログインの試行の制限」。
 - 同じログインID（IDがなくても同じに扱う。IDの有無を知らせないため）：
-  24時間の失敗が5回で15分、10回で1時間、20回で24時間、最後の失敗から
+  24時間の失敗が5回で15分、10回で1時間、20回で24時間、その失敗から
   ログインを断る
 - 同じ接続元（IPv6は、同じ /64 の範囲をまとめる）：1時間の失敗が10回で、
-  最後の失敗から1時間断る
+  その失敗から1時間断る
 - 断っている間は、正しいパスワードでも断る。断った試行は、失敗に数えない
 - 記録は、ログインIDと接続元を、秘密の鍵（SECRET_KEY）を使ったハッシュ
-  （HMAC-SHA256）でだけ残す。24時間より古い記録は消す
+  （HMAC-SHA256）でだけ残す
+
+断る期限は、失敗を記録するときに決めて、その行に残す（失敗の数を
+数える窓より、断る時間のほうが長いことがあるため。例：11時間で20回の
+失敗なら、そこから24時間断る。あとから数え直すと、古い失敗が窓から
+外れて、早く解けてしまう）。行は、24時間より古く、その行で始まった
+制限が終わってから消す。
 
 同時に送られた試行で、数え漏れが起きないよう、「断るかの判断」と
 「失敗の記録」を、ひとまとめにして、1つずつ行う（reserve_attempt）。
@@ -35,11 +41,11 @@ LOGIN_ID_LOCK_STEPS = [
 LOGIN_ID_WINDOW = timedelta(hours=24)
 
 # 同じ接続元の失敗の数と、断る時間
-CLIENT_FAILURE_LIMIT = 10
+CLIENT_LOCK_STEPS = [(10, timedelta(hours=1))]
 CLIENT_WINDOW = timedelta(hours=1)
-CLIENT_LOCK_TIME = timedelta(hours=1)
 
-# 記録を残す長さ（いちばん長い窓と同じ）
+# 失敗の行を残す長さ（いちばん長い窓と同じ。その行で始まった制限が
+# まだ続いていれば、終わるまで残す）
 RECORD_RETENTION = timedelta(hours=24)
 
 # 「断るかの判断」と「失敗の記録」を、1つずつ行うための鍵
@@ -52,7 +58,9 @@ def keyed_digest(purpose: str, value: str) -> str:
     """値を、秘密の鍵で、HMAC-SHA256 にする（16進数の64文字）。
 
     purpose（"login_id"・"client"）を混ぜ、同じ文字の値でも、用途ごとに
-    違うハッシュにする。
+    違うハッシュにする。ログインIDは、打ち込まれたまま（大文字・空白・
+    全角を変えない）にする。書き方を変えると別に数えられるが、決まりに
+    合わないIDは、ログインできないため、総当たりの抜け道にならない。
     """
     key = current_app.config["SECRET_KEY"].encode("utf-8")
     message = f"{purpose}\0{value}".encode("utf-8", errors="replace")
@@ -64,14 +72,15 @@ def client_key(remote_address: str | None) -> str:
 
     IPv6 は、1つの契約で /64 の範囲（とても多くのアドレス）を持つことが
     多く、アドレスを変えながら試せるため、/64 でまとめる。IPv4 を IPv6 の
-    形で表したもの（::ffff:192.0.2.1）は、IPv4 として扱う。
+    形で表したもの（::ffff:192.0.2.1）は、IPv4 として扱う（/64 にまとめる
+    と、IPv4 の全員が1つになってしまうため）。
     """
     if not remote_address:
         return "unknown"
     try:
         address = ipaddress.ip_address(remote_address)
     except ValueError:
-        return remote_address
+        return "unknown"
     if isinstance(address, ipaddress.IPv6Address):
         if address.ipv4_mapped is not None:
             return str(address.ipv4_mapped)
@@ -79,32 +88,29 @@ def client_key(remote_address: str | None) -> str:
     return str(address)
 
 
-def lock_until(
-    failure_times: list[datetime],
-    steps: list[tuple[int, timedelta]],
-) -> datetime | None:
-    """失敗の時刻の一覧から、いつまで断るかを返す（断らなければ None）。
-
-    steps は、（失敗の数、断る時間）の一覧（多いものから順）。失敗の数が
-    しきい値以上なら、最後の失敗から、その時間だけ断る。
-    """
-    if not failure_times:
-        return None
-    for limit, lock_time in steps:
-        if len(failure_times) >= limit:
-            return max(failure_times) + lock_time
-    return None
+def lock_time(
+    failure_count: int, steps: list[tuple[int, timedelta]]
+) -> timedelta:
+    """失敗の数から、断る時間を決める（断らなければ 0）。"""
+    for limit, duration in steps:
+        if failure_count >= limit:
+            return duration
+    return timedelta(0)
 
 
-def failure_times(column, digest: str, since: datetime) -> list[datetime]:
-    """ある digest の、since より後の失敗の時刻の一覧。"""
-    return list(
-        db.session.scalars(
-            db.select(LoginFailure.failed_at).where(
-                column == digest,
-                LoginFailure.failed_at > since,
-            )
-        )
+def count_failures(column, digest: str, since: datetime) -> int:
+    """ある digest の、since より後の失敗の数。"""
+    return db.session.scalar(
+        db.select(db.func.count())
+        .select_from(LoginFailure)
+        .where(column == digest, LoginFailure.failed_at > since)
+    )
+
+
+def latest_lock(column, until_column, digest: str):
+    """ある digest の失敗で始まった制限の、いちばん遅い期限。"""
+    return db.session.scalar(
+        db.select(db.func.max(until_column)).where(column == digest)
     )
 
 
@@ -115,33 +121,37 @@ def locked_until(
 ) -> datetime | None:
     """今、ログインを断るなら、いつまでかを返す（断らなければ None）。"""
     candidates = [
-        lock_until(
-            failure_times(
-                LoginFailure.login_id_digest,
-                login_id_digest,
-                now - LOGIN_ID_WINDOW,
-            ),
-            LOGIN_ID_LOCK_STEPS,
+        latest_lock(
+            LoginFailure.login_id_digest,
+            LoginFailure.login_id_locked_until,
+            login_id_digest,
         ),
-        lock_until(
-            failure_times(
-                LoginFailure.client_digest,
-                client_digest,
-                now - CLIENT_WINDOW,
-            ),
-            [(CLIENT_FAILURE_LIMIT, CLIENT_LOCK_TIME)],
+        latest_lock(
+            LoginFailure.client_digest,
+            LoginFailure.client_locked_until,
+            client_digest,
         ),
     ]
     future = [until for until in candidates if until is not None]
-    if not future:
+    if not future or max(future) <= now:
         return None
-    until = max(future)
-    return until if until > now else None
+    return max(future)
 
 
 def remaining_minutes(until: datetime, now: datetime) -> int:
     """断っている残りの時間を、分で返す（切り上げ。最低1分）。"""
     return max(1, math.ceil((until - now).total_seconds() / 60))
+
+
+def delete_old_failures(now: datetime) -> None:
+    """24時間より古く、その行で始まった制限も終わった行を消す。"""
+    db.session.execute(
+        db.delete(LoginFailure).where(
+            LoginFailure.failed_at <= now - RECORD_RETENTION,
+            LoginFailure.login_id_locked_until <= now,
+            LoginFailure.client_locked_until <= now,
+        )
+    )
 
 
 def reserve_attempt(
@@ -153,28 +163,45 @@ def reserve_attempt(
     記録する（commitする）。
 
     戻り値：（記録した失敗の行、断る期限）。断るときは（None、期限）。
-    パスワードが合っていたら、呼び出し側が、記録した行を消す
-    （forget_failures）。
+    パスワードが合っていたら、呼び出し側が、記録を消す（forget_failures）。
     """
     with ATTEMPT_LOCK:
-        # 古い記録を消す
-        db.session.execute(
-            db.delete(LoginFailure).where(
-                LoginFailure.failed_at <= now - RECORD_RETENTION
-            )
-        )
+        delete_old_failures(now)
         until = locked_until(login_id_digest, client_digest, now)
         if until is not None:
             db.session.commit()
             return None, until
+
+        # この試行を含めた数で、この失敗で始まる制限を決める
+        login_id_count = 1 + count_failures(
+            LoginFailure.login_id_digest,
+            login_id_digest,
+            now - LOGIN_ID_WINDOW,
+        )
+        client_count = 1 + count_failures(
+            LoginFailure.client_digest,
+            client_digest,
+            now - CLIENT_WINDOW,
+        )
         failure = LoginFailure(
             login_id_digest=login_id_digest,
             client_digest=client_digest,
             failed_at=now,
+            login_id_locked_until=now
+            + lock_time(login_id_count, LOGIN_ID_LOCK_STEPS),
+            client_locked_until=now
+            + lock_time(client_count, CLIENT_LOCK_STEPS),
         )
         db.session.add(failure)
         db.session.commit()
         return failure, None
+
+
+def cancel_attempt(failure: LoginFailure) -> None:
+    """記録した試行を、なかったことにする（パスワードを確かめなかったとき。
+    commitする）。"""
+    db.session.delete(failure)
+    db.session.commit()
 
 
 def forget_failures(login_id_digest: str, client_digest: str) -> None:
@@ -182,7 +209,7 @@ def forget_failures(login_id_digest: str, client_digest: str) -> None:
     （commitしない）。
 
     ほかの接続元からの失敗（ほかの人の試行かもしれない）は、残す
-    （本人のログインで、他人の試行の数が戻らないように）。
+    （本人のログインで、他人の試行の数や、始まった制限が戻らないように）。
     """
     db.session.execute(
         db.delete(LoginFailure).where(

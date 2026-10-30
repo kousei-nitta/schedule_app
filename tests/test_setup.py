@@ -138,7 +138,7 @@ def test_user_sessions_table_matches_design(app):
         "name": "pk_user_sessions",
     }
     assert foreign_keys == [user_id_foreign_key("user_sessions")]
-    assert unique == []
+    assert unique == [("uq_user_sessions_token_digest", ["token_digest"])]
 
 
 def test_login_failures_table_matches_design(app):
@@ -151,6 +151,8 @@ def test_login_failures_table_matches_design(app):
         "login_id_digest": ("VARCHAR(64)", False),
         "client_digest": ("VARCHAR(64)", False),
         "failed_at": ("DATETIME", False),
+        "login_id_locked_until": ("DATETIME", False),
+        "client_locked_until": ("DATETIME", False),
     }
     assert primary_key == {
         "constrained_columns": ["id"],

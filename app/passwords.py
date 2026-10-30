@@ -23,6 +23,10 @@ USERNAME_PATTERN = re.compile(r"[a-z0-9_-]{3,32}")
 # 入力で、ハッシュの計算に時間をかけさせないため
 MIN_PASSWORD_LENGTH = 15
 MAX_PASSWORD_LENGTH = 128
+# ログインで受け付ける入力の長さ（正規化の前）。これより長いものは、
+# 正規化もハッシュもせずに、失敗にする（NFKCは文字数を増やすことがあり、
+# 長い入力で計算させないため）
+MAX_PASSWORD_INPUT_LENGTH = 512
 
 # ハッシュの方式：scrypt（N=2^15、r=8、p=3）。OWASPの推奨の1つで、
 # 1回に32MiBのメモリーを使う（小さなクラウドのサーバーでも動くように、
@@ -55,6 +59,10 @@ def password_rule_errors(password: str, username: str) -> list[str]:
 
     漏えいの確認（通信が要る）は、別の関数（is_breached_password）。
     """
+    if len(password) > MAX_PASSWORD_INPUT_LENGTH:
+        return [
+            f"パスワードは{MAX_PASSWORD_LENGTH}文字以内にしてください"
+        ]
     normalized = normalize_password(password)
     errors = []
     if len(normalized) < MIN_PASSWORD_LENGTH:

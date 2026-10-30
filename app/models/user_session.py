@@ -15,8 +15,8 @@ class UserSession(db.Model):
     user_id = db.Column(
         db.Integer, db.ForeignKey("users.id"), nullable=False
     )
-    # トークンの SHA-256（16進数の64文字）
-    token_digest = db.Column(db.String(64), nullable=False)
+    # トークンの SHA-256（16進数の64文字）。同じ値の行は作らない
+    token_digest = db.Column(db.String(64), nullable=False, unique=True)
     # ログインした日時と、最後に使った日時（どちらも UTC。タイムゾーン
     # なしで保存）。期限は、この2つから決める
     created_at = db.Column(db.DateTime, nullable=False)

@@ -4,6 +4,13 @@
    （フォームは、ブラウザがそのまま送る）。 #}
 {% block library_scripts %}{% endblock %}
 
+{# ほかのサイトのリンクから開いたときは、Cookie（SameSite=Strict）が
+   送られないため、1回だけ開き直す（このアプリの中からの移動になり、
+   ログイン中なら、そのまま使える。JavaScriptは使わない） #}
+{% block head_extra %}
+{% if reload_once %}<meta http-equiv="refresh" content="0">{% endif %}
+{% endblock %}
+
 {% block content %}
 <main class="container py-5">
   <div class="row justify-content-center">
