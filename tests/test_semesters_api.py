@@ -9,6 +9,7 @@ from app.api_helpers import (
 )
 from app.extensions import db
 from app.models.semester import Semester
+from tests.auth_support import TEST_USER_ID
 
 
 def create_semester(client, name, start_date, end_date):
@@ -262,6 +263,7 @@ def test_invalid_semester_payloads_have_expected_fields(
         with app.app_context():
             db.session.add(
                 Semester(
+                    user_id=TEST_USER_ID,
                     name="2026年度 前期",
                     start_date=date(2026, 4, 1),
                     end_date=date(2026, 7, 31),
