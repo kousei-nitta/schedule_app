@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{# ログインの画面（docs/ui_ux.md の「ログイン」）。JavaScriptを読み込まない
+   （フォームは、ブラウザがそのまま送る）。 #}
+{% block library_scripts %}{% endblock %}
+
+{% block content %}
+<main class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-sm-9 col-md-6 col-lg-4">
+      <h1 class="h4 mb-4 text-center">スケジュール帳</h1>
+      {% if error_message %}
+      <div id="login-error" class="alert alert-danger" role="alert">{{ error_message }}</div>
+      {% endif %}
+      <form id="login-form" method="post" action="{{ url_for('auth.login') }}">
+        <div class="mb-3">
+          <label for="login-id" class="form-label">ログインID</label>
+          <input type="text" class="form-control" id="login-id" name="login_id" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required autofocus>
+        </div>
+        <div class="mb-3">
+          <label for="login-password" class="form-label">パスワード</label>
+          <input type="password" class="form-control" id="login-password" name="password" autocomplete="current-password" maxlength="128" required>
+        </div>
+        <button type="submit" id="login-submit-button" class="btn btn-primary w-100">ログイン</button>
+      </form>
+    </div>
+  </div>
+</main>
+{% endblock %}

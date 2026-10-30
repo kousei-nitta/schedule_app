@@ -16,8 +16,9 @@ from flask import Flask
 
 from app import create_app
 from app.config import DEFAULT_DATABASE_URI
-from app import demo_data
+from app import cli, demo_data
 from app.demo_data import (
+    DEMO_USERNAME,
     DEMO_APPLICATION_ID,
     DemoDataError,
     create_demo_database,
@@ -25,11 +26,31 @@ from app.demo_data import (
     semester_period,
 )
 from app.extensions import db
-from app.models import Event, Task
+from app.models import Event, Task, User
+from tests.auth_support import TEST_PASSWORD, logged_in_client
 
 
 # 水曜日。学期は 2026-09-14（月）〜2026-12-27（日）になる
 TODAY = date(2026, 10, 21)
+
+# コマンドの、パスワードの入力（確かめのため2回）
+PASSWORD_INPUT = f"{TEST_PASSWORD}\n{TEST_PASSWORD}\n"
+
+
+@pytest.fixture(autouse=True)
+def no_breach_check_network(monkeypatch):
+    # 漏えいしたパスワードの確認は、インターネットにつながず、
+    # 「漏えいしていない」とする（確認そのもののテストは test_passwords.py）
+    monkeypatch.setattr(cli, "is_breached_password", lambda password: False)
+
+
+def demo_user_client(app):
+    """デモの利用者（demo）でログインした test_client。"""
+    with app.app_context():
+        user_id = db.session.scalar(
+            db.select(User.id).where(User.username == DEMO_USERNAME)
+        )
+    return logged_in_client(app, user_id)
 
 
 @pytest.fixture
@@ -77,9 +98,10 @@ def test_semester_period_contains_today():
 
 
 def test_create_demo_database(demo_app, tmp_path):
-    counts = create_demo_database(demo_app, TODAY)
+    counts = create_demo_database(demo_app, TODAY, password=TEST_PASSWORD)
 
     assert counts == {
+        "利用者": 1,
         "学期": 1,
         "授業": 6,
         "休講日": 2,
@@ -88,7 +110,7 @@ def test_create_demo_database(demo_app, tmp_path):
     }
     assert (tmp_path / "demo.db").exists()
 
-    client = demo_app.test_client()
+    client = demo_user_client(demo_app)
     semesters = client.get("/api/semesters").get_json()
     assert semesters == [
         {
@@ -104,7 +126,7 @@ def test_create_demo_database(demo_app, tmp_path):
 
 
 def test_demo_events(demo_app):
-    create_demo_database(demo_app, TODAY)
+    create_demo_database(demo_app, TODAY, password=TEST_PASSWORD)
 
     with demo_app.app_context():
         events = db.session.scalars(db.select(Event)).all()
@@ -128,7 +150,7 @@ def test_demo_events(demo_app):
 
 
 def test_demo_tasks(demo_app):
-    create_demo_database(demo_app, TODAY)
+    create_demo_database(demo_app, TODAY, password=TEST_PASSWORD)
 
     with demo_app.app_context():
         tasks = db.session.scalars(db.select(Task)).all()
@@ -147,7 +169,9 @@ def test_demo_tasks(demo_app):
 
 
 def test_create_demo_db_command(demo_app, tmp_path):
-    result = demo_app.test_cli_runner().invoke(args=["create-demo-db"])
+    result = demo_app.test_cli_runner().invoke(
+        args=["create-demo-db"], input=PASSWORD_INPUT
+    )
 
     assert result.exit_code == 0, result.output
     database_path = tmp_path / "demo.db"
@@ -159,7 +183,9 @@ def test_command_refuses_existing_file(demo_app, tmp_path):
     database_path = tmp_path / "demo.db"
     database_path.write_bytes(b"existing")
 
-    result = demo_app.test_cli_runner().invoke(args=["create-demo-db"])
+    result = demo_app.test_cli_runner().invoke(
+        args=["create-demo-db"], input=PASSWORD_INPUT
+    )
 
     assert result.exit_code == 1
     assert "すでにあります" in result.output
@@ -172,15 +198,15 @@ def application_id(path: Path) -> int:
 
 
 def test_demo_database_has_marker(demo_app, tmp_path):
-    create_demo_database(demo_app, TODAY)
+    create_demo_database(demo_app, TODAY, password=TEST_PASSWORD)
 
     assert application_id(tmp_path / "demo.db") == DEMO_APPLICATION_ID
 
 
 def test_command_replaces_demo_database(demo_app, tmp_path):
-    create_demo_database(demo_app, TODAY)
+    create_demo_database(demo_app, TODAY, password=TEST_PASSWORD)
     # 作り直しで消えることを確かめるため、デモのDBに、予定を1件足す
-    demo_app.test_client().post(
+    demo_user_client(demo_app).post(
         "/api/events",
         json={
             "category": "other",
@@ -192,11 +218,11 @@ def test_command_replaces_demo_database(demo_app, tmp_path):
     )
 
     result = demo_app.test_cli_runner().invoke(
-        args=["create-demo-db", "--replace"]
+        args=["create-demo-db", "--replace"], input=PASSWORD_INPUT
     )
 
     assert result.exit_code == 0, result.output
-    response = demo_app.test_client().get("/api/subjects")
+    response = demo_user_client(demo_app).get("/api/subjects")
     assert len(response.get_json()) == 6
     with demo_app.app_context():
         titles = db.session.scalars(db.select(Event.title)).all()
@@ -217,7 +243,7 @@ def test_command_refuses_to_replace_other_files(
     hash_before = file_hash(database_path)
 
     result = demo_app.test_cli_runner().invoke(
-        args=["create-demo-db", "--replace"]
+        args=["create-demo-db", "--replace"], input=PASSWORD_INPUT
     )
 
     assert result.exit_code == 1
@@ -231,10 +257,10 @@ def test_command_replaces_empty_file(demo_app, tmp_path):
     (tmp_path / "demo.db").write_bytes(b"")
 
     without_replace = demo_app.test_cli_runner().invoke(
-        args=["create-demo-db"]
+        args=["create-demo-db"], input=PASSWORD_INPUT
     )
     with_replace = demo_app.test_cli_runner().invoke(
-        args=["create-demo-db", "--replace"]
+        args=["create-demo-db", "--replace"], input=PASSWORD_INPUT
     )
 
     assert without_replace.exit_code == 1
@@ -261,7 +287,7 @@ def test_failure_on_the_way_leaves_no_half_database(
     monkeypatch.setattr(demo_data, "register_demo_data", fail_on_the_way)
 
     with pytest.raises(DemoDataError, match="失敗しました"):
-        create_demo_database(demo_app, TODAY)
+        create_demo_database(demo_app, TODAY, password=TEST_PASSWORD)
 
     assert list(tmp_path.iterdir()) == []
 
@@ -277,7 +303,9 @@ def test_refuses_missing_real_database(tmp_path):
     bare_app = make_bare_app(tmp_path, DEFAULT_DATABASE_URI)
 
     with pytest.raises(DemoDataError, match="実データのDB"):
-        create_demo_database(bare_app, TODAY, replace=True)
+        create_demo_database(
+            bare_app, TODAY, replace=True, password=TEST_PASSWORD
+        )
 
     assert list(tmp_path.iterdir()) == []
 
@@ -291,7 +319,9 @@ def test_refuses_existing_real_database_even_with_replace(tmp_path):
     bare_app = make_bare_app(tmp_path, f"sqlite:///{other_spelling}")
 
     with pytest.raises(DemoDataError, match="実データのDB"):
-        create_demo_database(bare_app, TODAY, replace=True)
+        create_demo_database(
+            bare_app, TODAY, replace=True, password=TEST_PASSWORD
+        )
 
     assert file_hash(real_path) == hash_before
     assert sorted(path.name for path in tmp_path.iterdir()) == ["app.db"]
@@ -308,7 +338,9 @@ def test_refuses_real_database_with_same_file_other_name(tmp_path):
     bare_app = make_bare_app(tmp_path, f"sqlite:///{alias_path}")
 
     with pytest.raises(DemoDataError, match="実データのDB"):
-        create_demo_database(bare_app, TODAY, replace=True)
+        create_demo_database(
+            bare_app, TODAY, replace=True, password=TEST_PASSWORD
+        )
 
     assert alias_path.exists()
     assert file_hash(real_path) == hash_before
@@ -323,7 +355,9 @@ def test_refuses_real_backup_directory_even_with_replace(tmp_path):
     bare_app = make_bare_app(tmp_path, f"sqlite:///{backup_path}")
 
     with pytest.raises(DemoDataError, match="バックアップのフォルダ"):
-        create_demo_database(bare_app, TODAY, replace=True)
+        create_demo_database(
+            bare_app, TODAY, replace=True, password=TEST_PASSWORD
+        )
 
     assert file_hash(backup_path) == hash_before
     assert sorted(path.name for path in backup_path.parent.iterdir()) == [
@@ -337,7 +371,7 @@ def test_refuses_new_file_in_real_backup_directory(tmp_path):
     bare_app = make_bare_app(tmp_path, "sqlite:///backups/demo.db")
 
     with pytest.raises(DemoDataError, match="バックアップのフォルダ"):
-        create_demo_database(bare_app, TODAY)
+        create_demo_database(bare_app, TODAY, password=TEST_PASSWORD)
 
     assert list((tmp_path / "backups").iterdir()) == []
 
@@ -350,7 +384,7 @@ def test_refuses_sqlite_companion_names(tmp_path, name):
     bare_app = make_bare_app(tmp_path, f"sqlite:///{name}")
 
     with pytest.raises(DemoDataError, match="SQLiteが使う名前"):
-        create_demo_database(bare_app, TODAY)
+        create_demo_database(bare_app, TODAY, password=TEST_PASSWORD)
 
     assert list(tmp_path.iterdir()) == []
 
@@ -360,7 +394,9 @@ def test_refuses_directory_even_with_replace(tmp_path):
     bare_app = make_bare_app(tmp_path, "sqlite:///somedir")
 
     with pytest.raises(DemoDataError, match="ファイルでないもの"):
-        create_demo_database(bare_app, TODAY, replace=True)
+        create_demo_database(
+            bare_app, TODAY, replace=True, password=TEST_PASSWORD
+        )
 
     assert (tmp_path / "somedir").is_dir()
 
@@ -369,4 +405,4 @@ def test_refuses_non_file_database(tmp_path):
     bare_app = make_bare_app(tmp_path, "sqlite://")
 
     with pytest.raises(DemoDataError, match="SQLiteのファイルのDBだけ"):
-        create_demo_database(bare_app, TODAY)
+        create_demo_database(bare_app, TODAY, password=TEST_PASSWORD)

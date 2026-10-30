@@ -31,3 +31,9 @@ class Config:
     # localhost は、テストの test_client の既定の名前でもある。
     # docs/architecture/security.md の「Hostヘッダーの検査」。
     TRUSTED_HOSTS = ["127.0.0.1", "localhost"]
+    # ログインの Cookie（app/user_sessions.py）。Secure（HTTPSのときだけ
+    # 送る）は、ローカル（HTTP）ではオフにする。公開のとき（Task 026）に、
+    # オンにし、名前を __Host- で始まるものにする
+    # （docs/architecture/security.md の「公開の前の点検」）。
+    AUTH_COOKIE_NAME = "schedule_session"
+    AUTH_COOKIE_SECURE = False

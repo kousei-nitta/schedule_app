@@ -4,7 +4,7 @@
 """
 import secrets
 
-from flask import Flask, Response, g
+from flask import Flask, Response, g, request
 
 # CDN（jsDelivr）から読み込むファイル。templates/base.html の
 # <script>・<link> と同じURLにする（版を変えるときは、両方を変える。
@@ -32,7 +32,27 @@ SECURITY_HEADERS = {
     # フォームの送信（ログインの画面など）の Origin ヘッダーが null になり、
     # ログインのタスク（Task 025）で、Origin の検査に使えなくなるため
     "Referrer-Policy": "same-origin",
+    # ほかのサイトの窓（window.open など）と、このアプリの窓を切り離す
+    # （ほかのサイトから、このアプリの窓を操作・観察させない）
+    "Cross-Origin-Opener-Policy": "same-origin",
+    # このアプリの応答（APIのJSON・画面・静的ファイル）を、ほかのサイトの
+    # ページに読み込ませない（<script src> や <img src> での読み込みを含む）
+    "Cross-Origin-Resource-Policy": "same-origin",
+    # 使わないブラウザの機能を、使えないようにする（万一、スクリプトが
+    # 入り込んでも、カメラ・マイク・位置情報などを使わせない）
+    "Permissions-Policy": (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    ),
+    # 公開したとき（Task 026）、検索エンジンに載せない（ログインの画面の
+    # URLを、検索で見つけさせない）
+    "X-Robots-Tag": "noindex, nofollow",
 }
+
+# 個人のデータを含む応答（画面・API）を、ブラウザやプロキシに保存させない
+# （共用のPCで、ログアウトのあとに「戻る」で見えたり、途中の機器に
+# 残ったりしないように）。静的ファイル（JavaScript・CSS）は、個人の
+# データを含まないため、対象にしない
+NO_STORE = "no-store"
 
 
 def content_security_policy(nonce: str) -> str:
@@ -105,4 +125,6 @@ def register_security_headers(app: Flask) -> None:
         response.headers["Content-Security-Policy"] = (
             content_security_policy(current_csp_nonce())
         )
+        if request.endpoint != "static":
+            response.headers["Cache-Control"] = NO_STORE
         return response
