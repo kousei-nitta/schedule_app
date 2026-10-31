@@ -156,7 +156,7 @@ def attempt_login():
     )
     if locked_until is not None:
         auth_logger.warning(
-            "ログインを断りました（試行の制限。接続元：%s）",
+            "ログインを断りました（試行の制限。接続元：%r）",
             client_address(),
         )
         message = LOGIN_LOCKED_MESSAGE.format(
@@ -178,7 +178,7 @@ def attempt_login():
             # 確かめなかったので、失敗に数えない
             cancel_attempt(failure)
             auth_logger.warning(
-                "ログインを断りました（混雑。接続元：%s）", client_address()
+                "ログインを断りました（混雑。接続元：%r）", client_address()
             )
             return render_login(LOGIN_BUSY_MESSAGE, 503)
         try:
@@ -194,7 +194,7 @@ def attempt_login():
 
     if not password_matches:
         auth_logger.warning(
-            "ログインに失敗しました（利用者：%s、接続元：%s）",
+            "ログインに失敗しました（利用者：%s、接続元：%r）",
             user.id if user is not None else "不明なID",
             client_address(),
         )
@@ -209,7 +209,7 @@ def attempt_login():
     token = start_session(user.id)
     db.session.commit()
     auth_logger.info(
-        "ログインしました（利用者：%s、接続元：%s）",
+        "ログインしました（利用者：%s、接続元：%r）",
         user.id,
         client_address(),
     )
@@ -225,7 +225,7 @@ def logout():
     db.session.delete(g.user_session)
     db.session.commit()
     auth_logger.info(
-        "ログアウトしました（利用者：%s、接続元：%s）",
+        "ログアウトしました（利用者：%s、接続元：%r）",
         user_id,
         client_address(),
     )
@@ -239,7 +239,7 @@ def logout_all():
     count = end_all_sessions(user_id)
     db.session.commit()
     auth_logger.info(
-        "すべての端末でログアウトしました（利用者：%s、%s台、接続元：%s）",
+        "すべての端末でログアウトしました（利用者：%s、%s台、接続元：%r）",
         user_id,
         count,
         client_address(),

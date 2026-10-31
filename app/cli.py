@@ -224,6 +224,11 @@ def rename_user_command(username: str, new_username: str) -> None:
     db.session.commit()
     auth_logger.info("ログインIDを変えました（利用者：%s）", user.id)
     click.echo(f"ログインIDを {username} から {new_username} に変えました")
+    # パスワードは、ハッシュしかないため、新しいIDを含むかを確かめられない
+    click.echo(
+        "今のパスワードに、新しいIDが含まれているときは、"
+        f"set-password {new_username} で変えてください"
+    )
 
 
 @click.command("unlock-login")

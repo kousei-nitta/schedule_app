@@ -205,12 +205,32 @@ def test_password_not_in_list(requests_sent):
 
 
 def test_breach_check_uses_normalized_password(requests_sent):
-    sent, _ = requests_sent
+    sent, body = requests_sent
+    body["text"] = "0123456789ABCDEF0123456789ABCDEF012:5\r\n"
 
     is_breached_password("ＡＢＣdefghijklmnop")
 
     [(request, _timeout)] = sent
     assert request.full_url.endswith(sha1_upper("ABCdefghijklmnop")[:5])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "<html><body>Wi-Fi にログインしてください</body></html>",
+        "0123456789ABCDEF0123456789ABCDEF012:5\r\nnot a hash line\r\n",
+    ],
+    ids=["空", "HTML", "形の違う行"],
+)
+def test_unexpected_response_is_not_treated_as_safe(requests_sent, text):
+    # このサービスの形でない応答（途中の機器が返した Wi-Fi のログインの
+    # 画面など）を、「漏えいなし」にしない
+    _, body = requests_sent
+    body["text"] = text
+
+    with pytest.raises(BreachCheckError):
+        is_breached_password(GOOD_PASSWORD)
 
 
 def test_breach_check_failure_is_reported(monkeypatch):

@@ -40,9 +40,11 @@ PASSWORD_HASH_METHOD = "scrypt:32768:8:3"
 
 # 漏えいしたパスワードの確認（Have I Been Pwned の Pwned Passwords）。
 # パスワードのSHA-1の、先頭5文字だけを送り、同じ先頭を持つハッシュの
-# 一覧を受け取って、手元で照らす（パスワードそのものは送らない）
+# 一覧を受け取って、手元で照らす（パスワードそのものは送らない）。
+# 応答の1行は「SHA-1の残りの35文字:件数」の形
 BREACH_CHECK_URL = "https://api.pwnedpasswords.com/range/"
 BREACH_CHECK_TIMEOUT_SECONDS = 10
+BREACH_LINE_PATTERN = re.compile(r"([0-9A-F]{35}):([0-9]+)")
 
 
 class BreachCheckError(Exception):
@@ -138,7 +140,9 @@ def is_breached_password(password: str) -> bool:
     SHA-1の先頭5文字だけを送る（k-匿名性。サービスは、どのパスワードかを
     知れない）。Add-Padding：応答の件数を、毎回ばらばらに増やしてもらい、
     応答の大きさからも推測されないようにする。増やした分は、件数が 0 の
-    行なので、数えない。つながらないときは、BreachCheckError。
+    行なので、数えない。つながらないとき・応答がこのサービスの形でない
+    とき（Wi-Fi のログインの画面など、途中の機器が返した応答）は、
+    BreachCheckError（確かめられなかったものを「漏えいなし」にしない）。
     """
     # SHA-1 は、サービスの決まり（照らし合わせのためで、パスワードを
     # 守るためのハッシュではない）
@@ -164,10 +168,19 @@ def is_breached_password(password: str) -> bool:
             f"漏えいしたパスワードの確認ができませんでした（{error}）"
         ) from error
 
+    entries = {}
     for line in body.splitlines():
-        line_suffix, _, count_text = line.strip().partition(":")
-        if line_suffix.upper() != suffix:
-            continue
-        # 件数が 0 の行は、大きさを隠すための詰め物
-        return count_text.strip().isdigit() and int(count_text) > 0
-    return False
+        match = BREACH_LINE_PATTERN.fullmatch(line.strip().upper())
+        if match is None:
+            raise BreachCheckError(
+                "漏えいしたパスワードの確認の応答が、読めませんでした"
+                "（途中の機器が、別の応答を返したかもしれません）"
+            )
+        entries[match.group(1)] = int(match.group(2))
+    if not entries:
+        # 本物の応答は、詰め物があるため、いつも数百行ある
+        raise BreachCheckError(
+            "漏えいしたパスワードの確認の応答が、空でした"
+        )
+    # 件数が 0 の行は、大きさを隠すための詰め物
+    return entries.get(suffix, 0) > 0

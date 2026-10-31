@@ -69,6 +69,19 @@ def test_local_hosts_may_use_cookies_without_secure():
     )
 
 
+@pytest.mark.parametrize("hosts", [[], None])
+def test_empty_trusted_hosts_refuse_to_start(tmp_path, hosts):
+    # 空・None では、Flask が Host を確かめなくなるため、起動しない
+    with pytest.raises(RuntimeError, match="TRUSTED_HOSTS"):
+        create_app(
+            {
+                "TESTING": True,
+                "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'x.db'}",
+                "TRUSTED_HOSTS": hosts,
+            }
+        )
+
+
 def test_public_host_without_secure_cookie_refuses_to_start(tmp_path):
     with pytest.raises(RuntimeError, match="AUTH_COOKIE_SECURE"):
         create_app(

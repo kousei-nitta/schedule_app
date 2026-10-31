@@ -128,10 +128,11 @@ def reject_cross_site_request() -> Response | tuple[Response, int] | None:
     """ほかのサイトからの要求を断る（before_request）。"""
     if is_rejected_host() or not is_cross_site_request():
         return None
-    # 要求から来た値は、%r で書く（改行などで、偽の行を作らせない）
+    # 要求から来た値は、%r で書く（改行や端末の制御の文字などで、偽の行や
+    # 表示を作らせない。接続元も、公開のときはプロキシのヘッダーから来る）
     auth_logger.warning(
         "ほかのサイトからの要求を断りました"
-        "（%s %r、Sec-Fetch-Site：%r、Origin：%r、接続元：%s）",
+        "（%r %r、Sec-Fetch-Site：%r、Origin：%r、接続元：%r）",
         request.method,
         request.path,
         request.headers.get("Sec-Fetch-Site"),

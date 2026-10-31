@@ -18,13 +18,11 @@ import pytest
 from app import clock
 from app.extensions import db
 from app.login_limits import (
-    CLIENT_LOCK_STEPS,
-    CLIENT_WINDOW,
     LOGIN_ID_LOCK_STEPS,
-    LOGIN_ID_WINDOW,
     client_key,
     keyed_digest,
     lock_time,
+    reserve_attempt,
 )
 from app.models.login_failure import LoginFailure
 from app.models.semester import Semester
@@ -126,44 +124,46 @@ def failure_count(app) -> int:
 
 
 def add_failures(app, login_id, address, times):
-    """ログインの失敗の記録を、時刻を指定して足す。
+    """ログインの失敗を、時刻を指定して、本物の reserve_attempt で記録する。
 
-    断る期限は、アプリ（app/login_limits.py の reserve_attempt）と同じ
-    決め方で、その時点の数から決める（断っている間かどうかは見ない）。
+    断る期限は、アプリと同じ処理で決まる（テストの中で、決め方を写さない）。
+    断られる時刻を渡したら、本物では起きない状態なので、テストの誤りと
+    して止める。
     """
     with app.app_context():
         login_id_digest = keyed_digest("login_id", login_id)
         client_digest = keyed_digest("client", client_key(address))
         for failed_at in sorted(times):
-            login_id_count = 1 + db.session.scalar(
-                db.select(db.func.count())
-                .select_from(LoginFailure)
-                .where(
-                    LoginFailure.login_id_digest == login_id_digest,
-                    LoginFailure.failed_at > failed_at - LOGIN_ID_WINDOW,
-                )
+            failure, until = reserve_attempt(
+                login_id_digest, client_digest, failed_at
             )
-            client_count = 1 + db.session.scalar(
-                db.select(db.func.count())
-                .select_from(LoginFailure)
-                .where(
-                    LoginFailure.client_digest == client_digest,
-                    LoginFailure.failed_at > failed_at - CLIENT_WINDOW,
-                )
+            assert failure is not None, (
+                f"{failed_at} は、{until} まで断られる時刻です"
             )
-            db.session.add(
-                LoginFailure(
-                    login_id_digest=login_id_digest,
-                    client_digest=client_digest,
-                    failed_at=failed_at,
-                    login_id_locked_until=failed_at
-                    + lock_time(login_id_count, LOGIN_ID_LOCK_STEPS),
-                    client_locked_until=failed_at
-                    + lock_time(client_count, CLIENT_LOCK_STEPS),
-                )
+
+
+def fail_as_soon_as_allowed(app, login_id, count, start):
+    """攻撃者が、断られなくなりしだい、同じIDに失敗を送り続けたときの記録。
+
+    本物の reserve_attempt を使う。接続元は、毎回変える（接続元ごとの
+    制限に当たらず、IDごとの制限だけを見るため）。count 回の失敗を記録し、
+    各失敗の（時刻、その失敗で始まったIDの制限の期限）の一覧を返す。
+    """
+    results = []
+    now = start
+    with app.app_context():
+        login_id_digest = keyed_digest("login_id", login_id)
+        while len(results) < count:
+            address = f"203.0.113.{len(results)}"
+            failure, until = reserve_attempt(
+                login_id_digest, keyed_digest("client", address), now
             )
-            db.session.flush()
-        db.session.commit()
+            if until is not None:
+                now = until
+                continue
+            results.append((failure.failed_at, failure.login_id_locked_until))
+            now += timedelta(seconds=1)
+    return results
 
 
 def semester_count(app) -> int:
@@ -462,6 +462,43 @@ def test_lock_time_steps(count, expected):
     assert lock_time(count, LOGIN_ID_LOCK_STEPS) == expected
 
 
+def test_login_id_lock_steps_from_real_attempts(app):
+    # 1〜4回目：断らない。5〜9回目：15分。10〜19回目：1時間。20回目：24時間
+    results = fail_as_soon_as_allowed(app, TEST_USERNAME, 20, START)
+    locks = [until - failed_at for failed_at, until in results]
+
+    assert locks[:4] == [timedelta(0)] * 4
+    assert locks[4:9] == [timedelta(minutes=15)] * 5
+    assert locks[9:19] == [timedelta(hours=1)] * 10
+    assert locks[19] == timedelta(hours=24)
+    # 断っている間は試せないため、次の失敗は、制限が終わってから
+    assert results[5][0] == results[4][1]
+    assert results[10][0] == results[9][1]
+
+
+def test_address_lock_from_real_attempts(app, anonymous_client, clock_now):
+    # 同じ接続元から、10個のIDに1回ずつ：10回目で1時間。11回目は断る
+    with app.app_context():
+        client_digest = keyed_digest("client", OTHER_ADDRESS)
+        for index in range(10):
+            failure, until = reserve_attempt(
+                keyed_digest("login_id", f"guess-{index}"),
+                client_digest,
+                START + timedelta(seconds=index),
+            )
+            assert until is None
+        tenth_lock = failure.client_locked_until - failure.failed_at
+        refused, refused_until = reserve_attempt(
+            keyed_digest("login_id", "guess-10"),
+            client_digest,
+            START + timedelta(minutes=59),
+        )
+
+    assert tenth_lock == timedelta(hours=1)
+    assert refused is None
+    assert refused_until == START + timedelta(seconds=9, hours=1)
+
+
 def test_four_failures_do_not_lock(app, anonymous_client, clock_now):
     add_failures(app, TEST_USERNAME, "127.0.0.1", [START] * 4)
 
@@ -507,9 +544,8 @@ def test_real_failed_logins_lock_and_unlock(app, anonymous_client, clock_now):
 
 
 def test_long_lock_message_uses_hours(app, anonymous_client, clock_now):
-    times = [START + timedelta(minutes=index) for index in range(20)]
-    add_failures(app, TEST_USERNAME, OTHER_ADDRESS, times)
-    clock_now.value = max(times) + timedelta(minutes=1)
+    results = fail_as_soon_as_allowed(app, TEST_USERNAME, 20, START)
+    clock_now.value = results[-1][0] + timedelta(minutes=1)
 
     response = post_login(anonymous_client, TEST_USERNAME, TEST_PASSWORD)
 
@@ -549,9 +585,8 @@ def test_login_id_lock_applies_from_any_address(
 def test_longer_locks(
     app, anonymous_client, clock_now, count, waited, expected_status
 ):
-    times = [START + timedelta(minutes=index) for index in range(count)]
-    add_failures(app, TEST_USERNAME, OTHER_ADDRESS, times)
-    clock_now.value = max(times) + waited
+    results = fail_as_soon_as_allowed(app, TEST_USERNAME, count, START)
+    clock_now.value = results[-1][0] + waited
 
     response = post_login(anonymous_client, TEST_USERNAME, TEST_PASSWORD)
 
@@ -574,13 +609,11 @@ def test_failures_older_than_a_day_are_ignored_and_deleted(
 def test_long_lock_is_kept_after_its_failures_leave_the_window(
     app, anonymous_client, clock_now
 ):
-    # 11時間かけて20回失敗すると、20回目から24時間断る。1回目が24時間の
-    # 窓から外れても、早く解けない
-    times = [
-        START + timedelta(minutes=35 * index) for index in range(20)
-    ]
-    add_failures(app, TEST_USERNAME, OTHER_ADDRESS, times)
-    clock_now.value = max(times) + timedelta(hours=23, minutes=59)
+    # 断られなくなりしだい試すと、20回目までに約11時間かかり、20回目から
+    # 24時間断る。古い失敗が24時間の窓から外れても、早く解けない
+    results = fail_as_soon_as_allowed(app, TEST_USERNAME, 20, START)
+    assert results[-1][0] - results[0][0] > timedelta(hours=11)
+    clock_now.value = results[-1][0] + timedelta(hours=23, minutes=59)
 
     locked = post_login(anonymous_client, TEST_USERNAME, TEST_PASSWORD)
     clock_now.advance(minutes=1)
@@ -588,19 +621,6 @@ def test_long_lock_is_kept_after_its_failures_leave_the_window(
 
     assert locked.status_code == 429
     assert unlocked.status_code == 303
-
-
-def test_failure_rows_are_kept_while_their_lock_lasts(
-    app, anonymous_client, clock_now
-):
-    times = [START + timedelta(minutes=index) for index in range(20)]
-    add_failures(app, TEST_USERNAME, OTHER_ADDRESS, times)
-    clock_now.value = max(times) + timedelta(hours=23)
-
-    post_login(anonymous_client, "someone-else", "wrong password for test")
-
-    # 24時間より古い行も、その行で始まった制限が続く間は、消さない
-    assert failure_count(app) == 21
 
 
 def test_unknown_id_is_locked_the_same_way(app, anonymous_client, clock_now):
@@ -1044,6 +1064,8 @@ def test_cross_site_rejection_is_logged_safely(client, caplog):
     assert "ほかのサイトからの要求を断りました" in caplog.text
     # 要求から来た値は、そのまま書かない（制御文字で、行を偽らせない）
     assert "'https://evil.example\\tforged'" in caplog.text
+    assert "（'POST' '/api/semesters'" in caplog.text
+    assert "接続元：'127.0.0.1'" in caplog.text
 
 
 def test_untrusted_host_is_bad_request_for_every_entry(anonymous_client):

@@ -212,6 +212,8 @@ def test_rename_user(app):
     assert result.exit_code == 0, result.output
     assert find_user(app, TEST_USERNAME) is None
     assert find_user(app, "hard-to-guess-42").id == TEST_USER_ID
+    # パスワードが新しいIDを含むかは確かめられないため、知らせる
+    assert "set-password hard-to-guess-42" in result.output
 
 
 def test_rename_user_refuses_invalid_or_existing_id(app):

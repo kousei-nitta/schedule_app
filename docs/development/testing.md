@@ -44,6 +44,7 @@
   - ログインしていない状態は、fixture `anonymous_client`。ほかの利用者は、`create_user` と `logged_in_client`（`tests/auth_support.py`）
   - テストのために、ログインを外す設定や分岐を、`app/` に作らない
   - 時刻（ログインの期限・試行の制限）は、`app/clock.py` の `utc_now` を、`monkeypatch` で差し替える（`tests/test_auth.py` の `FakeClock`）
+  - 試行の制限のテストで、失敗の記録を前もって作るときは、本物の `reserve_attempt` を通す（`tests/test_auth.py` の `add_failures`・`fail_as_soon_as_allowed`）。期限の決め方をテストの中に写さない（写すと、本体が壊れても、テストが気づけない。別の目のレビューで、本体を壊しても全テストが通ることが分かった）。断られる時刻の記録は作れない（本物では起きない状態のため）
   - 画面のフォームの送信（`/login`・`/logout` など）は、ブラウザが付けるヘッダー（`Origin` か `Sec-Fetch-Site`）がないと403になる。テストでは、`headers` に付ける（`tests/test_auth.py` の `FORM_HEADERS`）
   - APIを足したら、`tests/test_authorization.py` の `CASES` に、ほかの利用者のデータに触れられないことを確かめる関数を足す（足し忘れると、テストが失敗する）
 - 攻撃のテスト（`tests/test_attacks_*.py`。Task 025で、攻撃のテストの担当のエージェントが作った）：攻撃者として試したことを、テストにしたもの。今は直さないと決めた弱さ（受け入れた弱さ）は、`@pytest.mark.xfail(strict=True, reason=…)` で「予想どおり失敗」にして残す（理由に、どこで決めるかを書く）。直したら、印を外す（外さないと、予想に反して通ったとして、テストが失敗する）
