@@ -434,7 +434,7 @@ def test_login_id_lock_steps_from_real_attempts(app):
     assert results[10][0] == results[9][1]
 
 
-def test_address_lock_from_real_attempts(app, anonymous_client, clock_now):
+def test_address_lock_from_real_attempts(app):
     # 同じ接続元から、10個のIDに1回ずつ：10回目で1時間。11回目は断る
     with app.app_context():
         client_digest = keyed_digest("client", OTHER_ADDRESS)
@@ -481,8 +481,8 @@ def test_five_failures_lock_even_correct_password(
 
 
 def test_real_failed_logins_lock_and_unlock(app, anonymous_client, clock_now):
-    # 記録を直接作らず、本当のログインの送信だけで確かめる（補助の
-    # add_failures は、期限の決め方を写したもののため）
+    # 記録を作る補助（add_failures）を使わず、本当のログインの送信
+    # だけで、制限が始まって終わるまでを確かめる
     for _ in range(5):
         failed = post_login(
             anonymous_client, TEST_USERNAME, "wrong password for test"
@@ -1137,5 +1137,9 @@ def test_logs_never_contain_passwords_tokens_or_typed_ids(
     assert "ログインに失敗しました（利用者：不明なID" in caplog.text
     assert f"ログインしました（利用者：{TEST_USER_ID}" in caplog.text
     assert "ログアウトしました" in caplog.text
+    # 接続元は、どのログでも %r（引用符つき）で書く（偽の行を作らせない）
+    addresses = re.findall(r"接続元：(.+?)）", caplog.text)
+    assert len(addresses) == 3
+    assert set(addresses) == {"'127.0.0.1'"}
     for secret in [typed_id, TEST_PASSWORD, "wrong password", token]:
         assert secret not in caplog.text
