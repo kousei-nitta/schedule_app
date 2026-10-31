@@ -30,7 +30,7 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     # ほかのサイトへ、URL（Referer）を送らない。no-referrer にしないのは、
     # フォームの送信（ログインの画面など）の Origin ヘッダーが null になり、
-    # ログインのタスク（Task 025）で、Origin の検査に使えなくなるため
+    # Origin の検査（app/auth.py）に使えなくなるため
     "Referrer-Policy": "same-origin",
     # ほかのサイトの窓（window.open など）と、このアプリの窓を切り離す
     # （ほかのサイトから、このアプリの窓を操作・観察させない）

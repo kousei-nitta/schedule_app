@@ -18,7 +18,8 @@ MIGRATIONS = str(Path(__file__).resolve().parents[1] / "migrations")
 PREVIOUS_REVISION = "42bd53808fa1"
 OWNED_TABLES = ["semesters", "subjects", "closures", "events", "tasks"]
 
-# 前の版のDBに入れる、架空のデータ（実データの形をまねる）
+# 前の版のDBに入れる、架空のデータ（実データの形をまねる。消した行の
+# あとのように、id が飛んでいる行も入れる）
 OLD_ROWS = [
     "INSERT INTO semesters (name, start_date, end_date)"
     " VALUES ('2026年度 後期', '2026-09-21', '2026-12-27')",
@@ -39,6 +40,13 @@ OLD_ROWS = [
     "INSERT INTO tasks (subject_id, category, title, due_datetime,"
     " is_completed) VALUES (1, 'assignment', '架空の課題',"
     " '2026-10-01 23:59:00.000000', 0)",
+    "INSERT INTO tasks (id, subject_id, category, title, due_datetime,"
+    " notes, is_completed) VALUES (7, NULL, 'other', '架空のタスク',"
+    " '2026-10-02 12:00:00.000000', '架空のメモ', 1)",
+    "INSERT INTO events (id, subject_id, category, date, start_time,"
+    " end_time, title, notes, is_generated) VALUES (40, NULL, 'other',"
+    " '2026-09-23', '10:00:00.000000', '11:00:00.000000', '架空の予定',"
+    " '架空のメモ', 0)",
 ]
 
 
@@ -62,6 +70,22 @@ def query(database_path, sql):
         return connection.execute(sql).fetchall()
 
 
+def rows_without_owner(database_path):
+    """5つの表の、user_id のほかのすべての列の値（id の順）。"""
+    result = {}
+    with closing(sqlite3.connect(database_path)) as connection:
+        for table in OWNED_TABLES:
+            columns = [
+                row[1]
+                for row in connection.execute(f"PRAGMA table_info({table})")
+                if row[1] != "user_id"
+            ]
+            result[table] = connection.execute(
+                f"SELECT {', '.join(columns)} FROM {table} ORDER BY id"
+            ).fetchall()
+    return result
+
+
 def counts(database_path):
     return {
         table: query(database_path, f"SELECT COUNT(*) FROM {table}")[0][0]
@@ -79,11 +103,14 @@ def test_existing_data_becomes_owner_data(migration_app):
             connection.execute(sql)
         connection.commit()
     counts_before = counts(database_path)
+    rows_before = rows_without_owner(database_path)
 
     with app.app_context():
         upgrade(directory=MIGRATIONS)
         db.engine.dispose()
 
+    # 表を作り直しても、行の中身と id は、そのまま
+    assert rows_without_owner(database_path) == rows_before
     users = query(
         database_path, "SELECT id, username, password_hash FROM users"
     )

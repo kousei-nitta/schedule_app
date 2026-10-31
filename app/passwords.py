@@ -28,6 +28,11 @@ MAX_PASSWORD_LENGTH = 128
 # 長い入力で計算させないため）
 MAX_PASSWORD_INPUT_LENGTH = 512
 
+# 使われている文字の種類が、これより少ないパスワードは断る
+# （abababab… のような、短い並びの繰り返し。漏えいの確認を省いたときも
+# 断るため、手元で確かめる）
+MIN_DISTINCT_CHARACTERS = 5
+
 # ハッシュの方式：scrypt（N=2^15、r=8、p=3）。OWASPの推奨の1つで、
 # 1回に32MiBのメモリーを使う（小さなクラウドのサーバーでも動くように、
 # メモリーの代わりに、計算の回数（p）で強さを出す組み合わせ）
@@ -54,6 +59,23 @@ def normalize_password(password: str) -> str:
     return unicodedata.normalize("NFKC", password)
 
 
+def is_simple_sequence(text: str) -> bool:
+    """1つずつ増える・減る文字だけの並びか（123…・abc…・987… など）。
+
+    空白は除き、大文字・小文字は区別しない。数字は、9の次の0（と、0の
+    次の9）も続きとみなす（1234567890123… を断るため）。
+    """
+    characters = text.replace(" ", "").lower()
+    if len(characters) < 2:
+        return False
+    for current, following in zip(characters, characters[1:]):
+        step = ord(following) - ord(current)
+        wraps = (current, following) in (("9", "0"), ("0", "9"))
+        if abs(step) != 1 and not wraps:
+            return False
+    return True
+
+
 def password_rule_errors(password: str, username: str) -> list[str]:
     """パスワードの決まりに合わない点を、文の一覧で返す（合えば空）。
 
@@ -76,8 +98,20 @@ def password_rule_errors(password: str, username: str) -> list[str]:
         )
     if username and username.lower() in normalized.lower():
         errors.append("パスワードに、ログインIDを含めないでください")
-    if normalized and len(set(normalized)) == 1:
+    distinct_count = len(set(normalized))
+    if distinct_count == 1:
         errors.append("同じ文字の繰り返しだけのパスワードは使えません")
+    elif 1 < distinct_count < MIN_DISTINCT_CHARACTERS:
+        errors.append(
+            "使われている文字の種類が少なすぎます"
+            "（同じ並びの繰り返しなど）"
+        )
+    if distinct_count >= MIN_DISTINCT_CHARACTERS and is_simple_sequence(
+        normalized
+    ):
+        errors.append(
+            "連続した文字（123… や abc… など）だけのパスワードは使えません"
+        )
     if any(unicodedata.category(character) == "Cc"
            for character in normalized):
         errors.append("パスワードに、制御文字は使えません")

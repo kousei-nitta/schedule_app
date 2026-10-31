@@ -43,7 +43,7 @@ def test_good_password_has_no_errors():
 
 
 def test_fourteen_characters_are_too_short():
-    errors = password_rule_errors("a" * 13 + "b", "owner")
+    errors = password_rule_errors("kumo sakura 12", "owner")
 
     assert errors == [
         "パスワードは15文字以上にしてください"
@@ -52,17 +52,18 @@ def test_fourteen_characters_are_too_short():
 
 
 def test_fifteen_characters_are_enough():
-    assert password_rule_errors("abcdefghijklmno", "owner") == []
+    assert password_rule_errors("kumo sakura 123", "owner") == []
 
 
 def test_length_is_counted_after_normalization():
-    # 全角の英数字は、半角にしてから数える（15文字のまま）
-    full_width = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏ"
+    # 全角の英数字・空白は、半角にしてから数える（15文字のまま）
+    full_width = "ｋｕｍｏ　ｓａｋｕｒａ　１２３"
     assert password_rule_errors(full_width, "owner") == []
+    assert password_rule_errors(full_width[:-1], "owner") != []
 
 
 def test_too_long_password():
-    errors = password_rule_errors("ab" * 64 + "c", "owner")
+    errors = password_rule_errors(("kumo sakura densha " * 7)[:129], "owner")
 
     assert errors == ["パスワードは128文字以内にしてください"]
 
@@ -86,6 +87,30 @@ def test_repeated_single_character_is_rejected():
     errors = password_rule_errors("z" * 20, "owner")
 
     assert errors == ["同じ文字の繰り返しだけのパスワードは使えません"]
+
+
+@pytest.mark.parametrize(
+    "password",
+    ["ab12 ab12 ab12 ab12", "kumo sakura densha 2099", "9876 5432 10 abc"],
+)
+def test_varied_passwords_are_accepted(password):
+    # 文字の種類が5つ以上で、連番だけでないもの
+    assert password_rule_errors(password, "owner") == []
+
+
+@pytest.mark.parametrize(
+    "password, message",
+    [
+        ("abababababababab", "使われている文字の種類が少なすぎます"),
+        ("1212 1212 1212 1212", "使われている文字の種類が少なすぎます"),
+        ("123456789012345", "連続した文字"),
+        ("ZYXWVUTSRQPONMLK", "連続した文字"),
+        ("9876 5432 1098 7654", "連続した文字"),
+    ],
+)
+def test_weak_patterns_are_rejected(password, message):
+    [error] = password_rule_errors(password, "owner")
+    assert error.startswith(message)
 
 
 def test_control_characters_are_rejected():

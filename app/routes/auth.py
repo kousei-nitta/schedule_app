@@ -2,6 +2,7 @@
 
 処理の順序と理由は、docs/architecture/security.md の「ログイン」。
 """
+import math
 import threading
 
 from flask import Blueprint, Response, g, redirect, render_template
@@ -39,8 +40,15 @@ LOGIN_BUSY_MESSAGE = (
 )
 LOGIN_LOCKED_MESSAGE = (
     "ログインの失敗が続いたため、しばらくログインできません。"
-    "約{minutes}分後に、もう一度お試しください"
+    "{wait}後に、もう一度お試しください"
 )
+
+# ログインの送信の本文の大きさの上限（バイト）。IDは32文字、パスワードは
+# 512文字（正規化の前）までしか使わないため、それより十分に大きく、
+# 決まりに合う入力を断らない大きさ（1文字4バイト×URLの形で3倍でも足りる）。
+# ログインの前に、大きな本文を読ませて、メモリーを使わせないため。
+# 超えたら、本文を読まずに、413
+LOGIN_MAX_CONTENT_LENGTH = 16 * 1024
 
 # ログインIDがない・パスワードのない利用者のときに、確かめに使う
 # ハッシュ（だれのパスワードでもない、乱数の文字列のハッシュ）。
@@ -61,6 +69,13 @@ CLEAR_SITE_DATA = '"cache", "storage"'
 # 使い切らせないため。空かなければ、待つ時間（秒）のあと、断る（503）
 PASSWORD_CHECK_SLOTS = threading.BoundedSemaphore(2)
 PASSWORD_CHECK_WAIT_SECONDS = 5
+
+
+def wait_text(minutes: int) -> str:
+    """断っている残りの時間の書き方（60分以上は、時間で）。"""
+    if minutes >= 60:
+        return f"約{math.ceil(minutes / 60)}時間"
+    return f"約{minutes}分"
 
 
 def render_login(
@@ -85,7 +100,11 @@ def opened_from_other_site() -> bool:
     Cookie は SameSite=Strict のため、そのときは送られず、ログイン中でも
     ログインの画面になる。画面を1回だけ開き直すと（このアプリの中からの
     移動になる）、Cookie が送られ、ログイン中なら、そのまま使える。
+    開き直したURLには reloaded を付け、2回目は開き直さない（ブラウザの
+    違いで、開き直しが続かないように）。
     """
+    if "reloaded" in request.args:
+        return False
     return request.headers.get("Sec-Fetch-Site") in ("cross-site", "same-site")
 
 
@@ -106,11 +125,13 @@ def logged_out_response() -> Response:
 
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
-    if request.method == "GET":
-        if current_user() is not None:
-            return redirect("/", code=303)
-        return render_login(reload_once=opened_from_other_site())
-    return attempt_login()
+    # ログインを試すのは、POST だけ（Flask は HEAD も、この route で
+    # 受けるため、「GET でなければ」としない。HEAD は画面を返すだけ）
+    if request.method == "POST":
+        return attempt_login()
+    if current_user() is not None:
+        return redirect("/", code=303)
+    return render_login(reload_once=opened_from_other_site())
 
 
 def attempt_login():
@@ -122,6 +143,8 @@ def attempt_login():
     決まりに合わないID（ありえないID）と、長すぎるパスワードは、計算せずに
     失敗にする（決まりは公開しているため、時間で分かっても、何も漏れない）。
     """
+    # 本文を読む前に、大きさの上限を決める（超えたら413。読まない）
+    request.max_content_length = LOGIN_MAX_CONTENT_LENGTH
     login_id = request.form.get("login_id", "")
     password = request.form.get("password", "")
     now = clock.utc_now()
@@ -137,10 +160,13 @@ def attempt_login():
             client_address(),
         )
         message = LOGIN_LOCKED_MESSAGE.format(
-            minutes=remaining_minutes(locked_until, now)
+            wait=wait_text(remaining_minutes(locked_until, now))
         )
         return render_login(message, 429)
 
+    # 利用者と、パスワードが合ったか。決まりに合わない入力は、確かめずに
+    # 失敗のまま
+    user = None
     password_matches = False
     if (
         is_valid_username(login_id)
@@ -165,8 +191,6 @@ def attempt_login():
                 verify_password(DUMMY_PASSWORD_HASH, password)
         finally:
             PASSWORD_CHECK_SLOTS.release()
-    else:
-        user = None
 
     if not password_matches:
         auth_logger.warning(

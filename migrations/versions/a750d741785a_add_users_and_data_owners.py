@@ -8,7 +8,8 @@ Task 025（ログインと、利用者ごとのデータ）。docs/architecture/
 の「User」「UserSession」「LoginFailure」と、5つの表の user_id。
 
 upgrade() の流れ（データのあるDBでも、件数を変えずに移すため）：
-1. 利用者・ログイン中の端末・ログインの失敗の表を作る
+1. 利用者・ログイン中の端末・ログインの失敗の表を作る（失敗の表には、
+   探す・消すための索引も作る）
 2. 5つの表に user_id を、NULL可で足す
 3. データが1行でもあれば、利用者 owner（パスワードなし。ログインできない）
    を作り、すべての行を owner のものにする。データのないDB（テスト・
@@ -49,6 +50,9 @@ def upgrade():
     sa.Column('client_locked_until', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_login_failures'))
     )
+    op.create_index(op.f('ix_login_failures_login_id_digest'), 'login_failures', ['login_id_digest'], unique=False)
+    op.create_index(op.f('ix_login_failures_client_digest'), 'login_failures', ['client_digest'], unique=False)
+    op.create_index(op.f('ix_login_failures_failed_at'), 'login_failures', ['failed_at'], unique=False)
     op.create_table('users',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('username', sa.String(length=32), nullable=False),
@@ -145,5 +149,8 @@ def downgrade():
 
     op.drop_table('user_sessions')
     op.drop_table('users')
+    op.drop_index(op.f('ix_login_failures_failed_at'), table_name='login_failures')
+    op.drop_index(op.f('ix_login_failures_client_digest'), table_name='login_failures')
+    op.drop_index(op.f('ix_login_failures_login_id_digest'), table_name='login_failures')
     op.drop_table('login_failures')
     # ### end Alembic commands ###

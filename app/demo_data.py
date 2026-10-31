@@ -29,7 +29,7 @@ from app.database_files import (
 from app.extensions import db
 from app.models import Closure, Event, Semester, Subject, Task, User
 from app.passwords import hash_password, password_rule_errors
-from app.user_sessions import start_session
+from app.user_sessions import end_all_sessions, start_session
 
 # デモの利用者のログインID
 DEMO_USERNAME = "demo"
@@ -390,7 +390,8 @@ def demo_client(app: Flask, password: str) -> FlaskClient:
     """利用者 demo を作り、その利用者でログインした test_client を返す。
 
     ログインの画面は通らず、ログイン中の端末の行を、直接作る（パスワードの
-    確かめは、ログインのテストで行う）。
+    確かめは、ログインのテストで行う）。この行は、登録のあとで消す
+    （create_demo_database）。
     """
     user = User(
         username=DEMO_USERNAME,
@@ -437,6 +438,15 @@ def create_demo_database(
             # 空のDBに、migrationで、テーブルを作る
             upgrade(directory=str(MIGRATIONS_DIRECTORY))
             register_demo_data(demo_client(app, password), today)
+            # 登録に使ったログイン中の端末の行を消す（だれも使わない行が
+            # 残ると、利用者のメニューの「ログイン中の端末」の数が、
+            # 本当より多く見えるため）
+            end_all_sessions(
+                db.session.scalar(
+                    db.select(User.id).where(User.username == DEMO_USERNAME)
+                )
+            )
+            db.session.commit()
         except BaseException:
             db.session.remove()
             db.engine.dispose()

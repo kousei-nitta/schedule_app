@@ -12,7 +12,7 @@
   - 例外：ログインのテーブル（User・UserSession・LoginFailure）の日時は、UTC（タイムゾーンなしで保存）。期限を、サーバーのタイムゾーンや、Macとクラウドの違いに左右されずに決めるため。処理は `app/clock.py` の `utc_now` の1か所で求める
 - 主キー `id` は整数の自動採番。
 - 初期値（`default`）は SQLAlchemy 側（Python側）で指定する。DB側の `server_default` は、現時点のモデルでは使わない（データが入ったテーブルにNOT NULLのカラムを後から追加する場合は、そのときのmigrationで別途検討する）。
-- 現時点のモデルには、インデックス・check制約を定義しない。unique制約は、ログインのテーブルの2つ（`users.username`・`user_sessions.token_digest`。取り違えると、他人としてログインしうるため、DBでも守る）だけにする（制約の命名規則は「制約の命名規則」を参照）。
+- 現時点のモデルには、check制約を定義しない。unique制約は、ログインのテーブルの2つ（`users.username`・`user_sessions.token_digest`。取り違えると、他人としてログインしうるため、DBでも守る）だけ。インデックスは、`login_failures` の3つ（ログインの試行のたびに探す・消す列。行を増やされても、ログインが遅くならないように）だけにする（名前は「制約の命名規則」を参照）。
 - SQLiteは、既定では外部キー制約を強制しない（`PRAGMA foreign_keys` を有効にしていない）。`user_id` の外部キーも、DBでは強制されないため、守りとして当てにしない（持ち主は、routeで確かめる。「データの持ち主」）。
 - 削除時の連動は、ORMの `cascade` やDB側の `ondelete` を使わず、routeで、子の行を明示的に削除してから、親の行を削除する（1回のcommit。2026-10-13に決定）。SQLiteは既定では外部キー制約を強制しない（`PRAGMA foreign_keys`）ため、親の行だけを削除すると、子の行が残る（ORMで親の行を `session.delete` すると、`relationship` を通して、子の行の外部キーが `NULL` に書き換えられて残る）。routeに書くのは、何を削除するかを、routeのコードから読めるようにするため（休講日の追加で、その日の予定を削除する処理と同じ書き方）。DBの構造は変えない（migrationは不要）。現時点で、子の行を持つ親の削除は、授業の削除（予定・課題。「授業API」）と、学期の削除（休講日。授業がある学期は削除できない。「学期API」。2026-10-20）
 - `category` には、コード値（英小文字と `_` だけの固定の文字列）を保存する。値は、Event・Taskの表のとおり。画面に出す表示名・色・アイコンは、画面側の対応表（`app/static/js/categories.js`。色の値は `app/static/css/style.css`。「JavaScriptの構成」）で持ち、DBには持たない。
@@ -74,6 +74,7 @@
 | client_locked_until | DateTime | 不可 | この失敗で始まった、接続元ごとの制限の期限（UTC）。断らないときは `failed_at` と同じ |
 
 - 行は、24時間より古く、その行で始まった制限が終わってから消す
+- インデックス：`login_id_digest`・`client_digest`・`failed_at`（`ix_login_failures_login_id_digest`・`ix_login_failures_client_digest`・`ix_login_failures_failed_at`）
 
 ## Semester（学期）　テーブル名：`semesters`
 学期を表す。UIの学期タブ、「新しい学期の登録」、学期ごとの期間管理に対応する。
@@ -184,8 +185,8 @@ NAMING_CONVENTION = {
 現在のモデルで作られる名前（初期migrationの確認に使う）：
 - 主キー：`pk_semesters`、`pk_subjects`、`pk_events`、`pk_tasks`
 - 外部キー：`fk_subjects_semester_id_semesters`、`fk_events_subject_id_subjects`、`fk_tasks_subject_id_subjects`
-- index・check：現時点では作らない。unique：ログインのテーブルの2つだけ（下の Task 025 の migration）
+- check：現時点では作らない。unique・index：ログインのテーブルのものだけ（下の Task 025 の migration）
 - 休講日のテーブル（「Closure（休講日）」）を加えるmigrationで作られる名前（そのmigrationの確認に使う）：主キー `pk_closures`、外部キー `fk_closures_semester_id_semesters`
-- 利用者とデータの持ち主を加えるmigration（`a750d741785a`。Task 025）で作られる名前：主キー `pk_users`・`pk_user_sessions`・`pk_login_failures`、外部キー `fk_user_sessions_user_id_users`・`fk_semesters_user_id_users`・`fk_subjects_user_id_users`・`fk_closures_user_id_users`・`fk_events_user_id_users`・`fk_tasks_user_id_users`、unique `uq_users_username`・`uq_user_sessions_token_digest`
+- 利用者とデータの持ち主を加えるmigration（`a750d741785a`。Task 025）で作られる名前：主キー `pk_users`・`pk_user_sessions`・`pk_login_failures`、外部キー `fk_user_sessions_user_id_users`・`fk_semesters_user_id_users`・`fk_subjects_user_id_users`・`fk_closures_user_id_users`・`fk_events_user_id_users`・`fk_tasks_user_id_users`、unique `uq_users_username`・`uq_user_sessions_token_digest`、index `ix_login_failures_login_id_digest`・`ix_login_failures_client_digest`・`ix_login_failures_failed_at`
 
 注意：checkを定義する場合は、`ck` の規則が `constraint_name` を使うため、制約に明示的な名前が必要になる。`Boolean` などの型にcheck制約を自動で作らせない（`create_constraint` は既定のまま使わない）。

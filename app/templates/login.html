@@ -8,7 +8,7 @@
    送られないため、1回だけ開き直す（このアプリの中からの移動になり、
    ログイン中なら、そのまま使える。JavaScriptは使わない） #}
 {% block head_extra %}
-{% if reload_once %}<meta http-equiv="refresh" content="0">{% endif %}
+{% if reload_once %}<meta http-equiv="refresh" content="0; url={{ url_for('auth.login', reloaded=1) }}">{% endif %}
 {% endblock %}
 
 {% block content %}

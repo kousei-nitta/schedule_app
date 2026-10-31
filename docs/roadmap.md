@@ -44,6 +44,7 @@
 
 | ID | 内容 | 見つけた時 | 扱う予定 |
 |---|---|---|---|
+| 025-D1 | 締め出しの悪用：ログインIDを知っていれば、1つの接続元から少しずつ失敗を送るだけで、本人を締め出し続けられる（攻撃のテストで確かめた。`tests/test_attacks_auth.py` の xfail）。今は、推測されにくいIDにして防ぐ | 2026-10-31（Task 025の攻撃のテスト） | Task 026の設計で、一度ログインした端末の印（device cookie）を足すかを決める（`architecture/security.md` の「公開の前の点検」） |
 | D-48 | Dependabot #48（pyee 13.0.1 → 14.0.0）：今の Playwright 1.63.0 が pyee を「14未満」に限るため、CIが失敗する（インストールで止まる）。Playwright 1.64.0・1.64.1 は「15未満」で、pyee 14 と一緒に入る（手元で確かめた）。pyee 14 の変更は、古いPythonへの対応の打ち切りと、不具合の修正1件 | 2026-10-27（Dependabot） | #48 は開いたまま待つ。Playwright の更新のPR（Dependabotは、公開から14日たった版を出す。1.64.0 は 2026-11-02 の週、1.64.1 は 2026-11-09 の週の見込み）をマージしたあと、Komaが #48 に `@dependabot rebase` と書き、CIの合格と差分の確認（Claude）のあと、マージする。pyee 15・16 のPRが出たら、Playwright 1.64 が受け付けないため、閉じる |
 
 - Task 021までの持ち越し（010-N1〜021-N1の17件）は、Task 022で閉じた。多くは、Copilotが計画書を書き写して報告する経路に関するもので、開発体制の変更で不要になった。ブラウザ確認で分かったこと（010-N1・018-N2・020-N2・020-N3・021-N1）は、`docs/development/testing.md` の「画面の確認」に、`sqlite3` を `-readonly` で開くこと（011-L1）は、`docs/development/database.md` に残した。記録は `docs/archive/roadmap_until_task021.md`

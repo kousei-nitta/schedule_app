@@ -46,6 +46,7 @@
   - 時刻（ログインの期限・試行の制限）は、`app/clock.py` の `utc_now` を、`monkeypatch` で差し替える（`tests/test_auth.py` の `FakeClock`）
   - 画面のフォームの送信（`/login`・`/logout` など）は、ブラウザが付けるヘッダー（`Origin` か `Sec-Fetch-Site`）がないと403になる。テストでは、`headers` に付ける（`tests/test_auth.py` の `FORM_HEADERS`）
   - APIを足したら、`tests/test_authorization.py` の `CASES` に、ほかの利用者のデータに触れられないことを確かめる関数を足す（足し忘れると、テストが失敗する）
+- 攻撃のテスト（`tests/test_attacks_*.py`。Task 025で、攻撃のテストの担当のエージェントが作った）：攻撃者として試したことを、テストにしたもの。今は直さないと決めた弱さ（受け入れた弱さ）は、`@pytest.mark.xfail(strict=True, reason=…)` で「予想どおり失敗」にして残す（理由に、どこで決めるかを書く）。直したら、印を外す（外さないと、予想に反して通ったとして、テストが失敗する）
 - 500の確認は、テストの中で、テスト専用のルートを `app.add_url_rule` で足し、`PROPAGATE_EXCEPTIONS` を `False` にして行う。テスト専用のコードを、`app/` に入れない
 - 既存のrouteの途中で例外が起きた場合の確認（例：Eventの生成中の例外で、授業も保存されないこと）は、pytestの `monkeypatch` で、routeが呼ぶ関数を、例外を投げる関数に置き換えて行う。置き換える場所は、routeのモジュールが参照している名前（`from ... import` で取り込んだ名前なら、routeのモジュール側）。500のJSONを確かめるため、このときも `PROPAGATE_EXCEPTIONS` を `False` にする。保存されていないことは、例外のあとで、DBの行数を数えて確かめる
 - DBを使わない関数（`class_events.py` の日付の計算など）は、アプリやDBを作らずに、関数を直接呼んで確認する

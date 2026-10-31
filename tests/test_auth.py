@@ -485,6 +485,38 @@ def test_five_failures_lock_even_correct_password(
     assert failure_count(app) == 5
 
 
+def test_real_failed_logins_lock_and_unlock(app, anonymous_client, clock_now):
+    # 記録を直接作らず、本当のログインの送信だけで確かめる（補助の
+    # add_failures は、期限の決め方を写したもののため）
+    for _ in range(5):
+        failed = post_login(
+            anonymous_client, TEST_USERNAME, "wrong password for test"
+        )
+        assert failed.status_code == 401
+
+    locked = post_login(anonymous_client, TEST_USERNAME, TEST_PASSWORD)
+    clock_now.advance(minutes=14, seconds=59)
+    still_locked = post_login(anonymous_client, TEST_USERNAME, TEST_PASSWORD)
+    clock_now.advance(seconds=1)
+    unlocked = post_login(anonymous_client, TEST_USERNAME, TEST_PASSWORD)
+
+    assert locked.status_code == 429
+    assert "約15分後" in locked.get_data(as_text=True)
+    assert still_locked.status_code == 429
+    assert unlocked.status_code == 303
+
+
+def test_long_lock_message_uses_hours(app, anonymous_client, clock_now):
+    times = [START + timedelta(minutes=index) for index in range(20)]
+    add_failures(app, TEST_USERNAME, OTHER_ADDRESS, times)
+    clock_now.value = max(times) + timedelta(minutes=1)
+
+    response = post_login(anonymous_client, TEST_USERNAME, TEST_PASSWORD)
+
+    assert response.status_code == 429
+    assert "約24時間後" in response.get_data(as_text=True)
+
+
 def test_lock_ends_after_fifteen_minutes(app, anonymous_client, clock_now):
     add_failures(app, TEST_USERNAME, "127.0.0.1", [START] * 5)
     clock_now.advance(minutes=15)
@@ -736,6 +768,18 @@ def test_using_session_extends_idle_timeout(
     assert anonymous_client.get("/api/semesters").status_code == 200
 
     clock_now.advance(days=10)
+
+    assert anonymous_client.get("/api/semesters").status_code == 200
+
+
+def test_session_is_valid_just_before_thirty_days(
+    app, anonymous_client, clock_now
+):
+    log_in(app, anonymous_client, TEST_USER_ID)
+    for _ in range(2):
+        clock_now.advance(days=10)
+        anonymous_client.get("/api/semesters")
+    clock_now.advance(days=9, hours=23, minutes=59)
 
     assert anonymous_client.get("/api/semesters").status_code == 200
 
@@ -1021,8 +1065,30 @@ def test_login_page_opened_from_other_site_reloads_once(anonymous_client):
         "/login", headers={"Sec-Fetch-Site": "same-origin"}
     ).get_data(as_text=True)
 
-    assert '<meta http-equiv="refresh" content="0">' in from_other_site
+    assert (
+        '<meta http-equiv="refresh" content="0; url=/login?reloaded=1">'
+        in from_other_site
+    )
     assert "http-equiv" not in from_this_app
+
+
+def test_reloaded_login_page_does_not_reload_again(anonymous_client):
+    # 開き直したあとは、ブラウザが何を付けても、もう開き直さない
+    # （開き直しが続かないように）
+    response = anonymous_client.get(
+        "/login?reloaded=1",
+        headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate",
+                 "Sec-Fetch-Dest": "document"},
+    )
+
+    assert "http-equiv" not in response.get_data(as_text=True)
+
+
+def test_head_login_shows_page_only(app, anonymous_client):
+    response = anonymous_client.head("/login")
+
+    assert response.status_code == 200
+    assert failure_count(app) == 0
 
 
 def test_login_page_allows_no_scripts(anonymous_client):

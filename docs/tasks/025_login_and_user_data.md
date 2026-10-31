@@ -54,6 +54,8 @@
 | DBの制約 | `user_sessions.token_digest` も一意（指摘19）。SQLiteは外部キーを強制しないため、守りとして当てにしない（routeで確かめる）。期限の切れた行は、ログインのたびに、すべての利用者の分を消す | 同上 |
 | ログの止まり | `migrations/env.py` は、既にあるロガーを止めない（同じプロセスでmigrationを動かすと、`app.auth` のログが止まっていた） | `architecture/security.md` の「ログ」 |
 | `owner` のID | 公開のリポジトリに書かれるため、適用のあと、`rename-user` で推測されにくいIDに変える（指摘3）。新しいIDは、リポジトリ・PRに書かない | `development/database.md` |
+| 攻撃のテストからの追加 | ログインを試すのは `POST` だけ（`HEAD` が試行になっていた）。ログインの本文は16KiBまで（413）。`login_failures` に索引3つ。SQLite の `secure_delete` をオン（消したメモがファイルに残っていた）。文字の種類が5つ未満・連続した文字だけのパスワードを、手元で断る。デモのDBに、作成のときのログイン中の端末の行を残さない。締め出しの悪用（IDを知っていれば、1つの接続元から続けられる）と、IDの通し番号は、受け入れた弱さとして、xfail のテストに残す（device cookie は Task 026 の前に決める） | `architecture/security.md`、`architecture/data_model.md` |
+| 全体のレビューからの追加 | 締め出しの文は、60分以上なら「約N時間後」。ほかのサイトのリンクから開いたときの開き直しは、`/login?reloaded=1` へ1回だけ | `ui_ux.md`、`architecture/security.md` |
 
 ## 段階（commit）
 1. 計画書（この資料）と roadmap

@@ -7,7 +7,7 @@
 |---|---|---|
 | 言語 | Python 3.14 | プロジェクト専用の仮想環境 `.venv` を使用。版を選んだ理由は `docs/decisions/0003-python-3-14.md`、開発の環境の方針は `architecture/security.md` の「開発の環境」 |
 | バックエンド | Flask | |
-| DB | SQLite | 単一ユーザー・ローカル1ファイル。同時アクセスの考慮は不要。使うDBは、環境変数で切り替えられる（「DBの切り替え（環境変数）」）。実データのDBは、自動でバックアップする（「データの保護（バックアップ）」） |
+| DB | SQLite | ローカル1ファイル。利用者は少数（ログインして使う。Task 025）。同時の要求は、ログインの試行の制限で考える（`architecture/security.md` の「ログインの試行の制限」）。使うDBは、環境変数で切り替えられる（「DBの切り替え（環境変数）」）。実データのDBは、自動でバックアップする（「データの保護（バックアップ）」） |
 | ORM | Flask-SQLAlchemy | |
 | DBスキーマ変更 | Flask-Migrate（内部でAlembicを使用） | モデルの変更をmigrationファイルとして記録し、既存データを保ったままテーブルを更新する。方式の詳細は「DBスキーマ変更の方式」を参照 |
 | テンプレート | Jinja2（Flask標準） | |
@@ -161,6 +161,8 @@ schedule_app/
 │   ├── test_secret_key.py   # SECRET_KEY と、Cookie の設定の守り
 │   ├── test_user_commands.py # 利用者の管理のコマンド
 │   ├── test_migration_users.py # 利用者とデータの持ち主の migration（既存のデータが owner のものになる）
+│   ├── test_attacks_auth.py # 攻撃のテスト（ログイン・試行の制限・ほかのサイト・既定で拒否。受け入れた弱さは xfail）
+│   ├── test_attacks_data.py # 攻撃のテスト（認可・DBに残る値・デモのDB・パスワードの決まり）
 │   ├── test_setup.py        # テスト基盤そのものの確認（migrationで作られるテーブル・列・制約の確認と、モデルとmigrationのずれの確認を含む）
 │   ├── test_api_helpers.py  # api_helpers.py の共通関数の単体テスト
 │   ├── test_class_events.py # class_events.py の単体テスト（日付の計算、Eventの値）

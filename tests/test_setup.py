@@ -162,6 +162,21 @@ def test_login_failures_table_matches_design(app):
     assert unique == []
 
 
+def test_login_failures_indexes_match_design(app):
+    # 試行のたびに探す・消す列の索引（行が増えても、表の全部を読まない）
+    with app.app_context():
+        indexes = {
+            index["name"]: index["column_names"]
+            for index in inspect(db.engine).get_indexes("login_failures")
+        }
+
+    assert indexes == {
+        "ix_login_failures_login_id_digest": ["login_id_digest"],
+        "ix_login_failures_client_digest": ["client_digest"],
+        "ix_login_failures_failed_at": ["failed_at"],
+    }
+
+
 @pytest.mark.parametrize(
     "table_name", ["semesters", "subjects", "events", "tasks", "closures"]
 )
