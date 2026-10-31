@@ -7,20 +7,20 @@
 |---|---|---|
 | 言語 | Python 3.14 | プロジェクト専用の仮想環境 `.venv` を使用。版を選んだ理由は `docs/decisions/0003-python-3-14.md`、開発の環境の方針は `architecture/security.md` の「開発の環境」 |
 | バックエンド | Flask | |
-| DB | SQLite | 単一ユーザー・ローカル1ファイル。同時アクセスの考慮は不要。使うDBは、環境変数で切り替えられる（「DBの切り替え（環境変数）」）。実データのDBは、自動でバックアップする（「データの保護（バックアップ）」） |
+| DB | SQLite | ローカル1ファイル。利用者は少数（ログインして使う。Task 025）。同時の要求は、ログインの試行の制限で考える（`architecture/security.md` の「ログインの試行の制限」）。使うDBは、環境変数で切り替えられる（「DBの切り替え（環境変数）」）。実データのDBは、自動でバックアップする（「データの保護（バックアップ）」） |
 | ORM | Flask-SQLAlchemy | |
 | DBスキーマ変更 | Flask-Migrate（内部でAlembicを使用） | モデルの変更をmigrationファイルとして記録し、既存データを保ったままテーブルを更新する。方式の詳細は「DBスキーマ変更の方式」を参照 |
 | テンプレート | Jinja2（Flask標準） | |
 | フロントエンドJS | バニラJavaScript（ES modules） | `fetch` でFlaskのAPIを呼ぶ。構成と規則は「JavaScriptの構成」、APIの規則は「API共通ルール」を参照 |
 | カレンダー描画 | FullCalendar 6.1.21 | MIT・無料の標準のバンドル（週／月／一覧表示）だけを使う。リソース／タイムライン表示などの有料機能は使わない。CDN（jsDelivr）から、バージョンを固定して読み込む（「FullCalendarの読み込み」を参照） |
 | CSS（UI部品） | Bootstrap 5.3.8 | CDN（jsDelivr）から、バージョンを固定して読み込む（「Bootstrapの読み込み」を参照）。タブ（モード切り替え）、モーダル（詳細パネル）、バッジ（カテゴリ表示）などに利用 |
-| 認証 | なし | ログイン機能は実装しない（Task 025で作る予定。`docs/roadmap.md`） |
-| セキュリティ | Hostヘッダーの検査、セキュリティのヘッダー（CSP）、依存とCIの守り | `architecture/security.md`。ヘッダーは `app/security.py` |
+| 認証 | 自作（Flask・Werkzeug・Python標準だけ。ライブラリは足さない） | ログインIDとパスワード。ログインの状態は、サーバー側の表（`user_sessions`）。利用者は、コマンドで作る。仕様は `architecture/security.md` の「ログイン」、理由は `docs/decisions/0004-login-and-user-data.md` |
+| セキュリティ | Hostヘッダーの検査、セキュリティのヘッダー（CSP）、ログインと認可、ほかのサイトからの要求の拒否、依存とCIの守り | `architecture/security.md`。ヘッダーは `app/security.py`、ログインは `app/auth.py` ほか |
 | 自動テスト | pytest | APIのテストに使う。配置・DB・実行方法は「自動テスト（pytest）」を参照 |
 | 検査・CI | ruff・ESLint・GitHub Actions | 開発のときだけ使う（`requirements-dev.txt`・`package.json`）。設定と実行は `docs/development/testing.md` の「検査の道具」「CI」 |
 | E2Eテスト | Playwright（pytest-playwright。ブラウザは Chromium） | 開発のときだけ使う（`requirements-dev.txt`。CDNの代用のファイルは `package.json`）。画面の主な流れを確かめる。`docs/development/testing.md` の「E2Eテスト」 |
 | 起動 | `run.py` | 開発用サーバーを `127.0.0.1:5001` で起動する。デバッグモードは、環境変数 `FLASK_DEBUG=1` のときだけ（`architecture/security.md` の「debug（デバッグモード）」）。5001番を使うのは、macOSではAirPlayレシーバーが5000番を使うことがあるため。起動のとき、使っているDBを表示し、実データのDBの自動バックアップを作る（「データの保護（バックアップ）」） |
-| 自作のコマンド | Flaskのコマンド（`app/cli.py`） | `flask --app app backup-db`（手動のバックアップ）、`flask --app app create-demo-db`（デモ用の架空のデータ。`docs/development/database.md` の「デモ用の架空のデータ」）。`create_app` で登録する |
+| 自作のコマンド | Flaskのコマンド（`app/cli.py`） | `flask --app app backup-db`（手動のバックアップ）、`flask --app app create-demo-db`（デモ用の架空のデータ。`docs/development/database.md` の「デモ用の架空のデータ」）、`create-user`・`set-password`・`rename-user`・`unlock-login`（利用者の管理。`docs/development/database.md` の「利用者の管理」）。`create_app` で登録する |
 
 制約：費用をかけない（大学の授業の一環のため）。
 
@@ -83,12 +83,19 @@ DB（SQLiteのファイル）のバックアップ。処理は `app/backup.py`�
 schedule_app/
 ├── app/
 │   ├── __init__.py          # Flaskアプリの作成（`create_app(test_config=None)`）
-│   ├── config.py            # 設定（使うDB：環境変数 DATABASE_URL。「DBの切り替え（環境変数）」。受け付ける Host：TRUSTED_HOSTS）
+│   ├── config.py            # 設定（使うDB：環境変数 DATABASE_URL。「DBの切り替え（環境変数）」。受け付ける Host：TRUSTED_HOSTS。ログインの Cookie。公開の設定で Secure の付け忘れを断る check_cookie_security）
 │   ├── security.py          # セキュリティのヘッダー（CSPと、要求ごとのnonce。architecture/security.md）
+│   ├── auth.py              # ほかのサイトからの要求の拒否、ログインしている利用者の読み込み、既定で拒否（current_user・current_user_id）
+│   ├── ownership.py         # 認可：IDと持ち主の両方でデータを探す get_owned（architecture/api.md の「利用者ごとのデータ（認可）」）
+│   ├── passwords.py         # ログインIDとパスワードの決まり、ハッシュ（scrypt）、漏えいしたパスワードの確認
+│   ├── login_limits.py      # ログインの試行の制限（失敗の記録は HMAC だけ）
+│   ├── user_sessions.py     # ログイン中の端末（トークンの SHA-256 だけを保存。期限・ログアウト・Cookie）
+│   ├── secret_key.py        # SECRET_KEY（環境変数か instance/secret_key）
+│   ├── clock.py             # ログインの処理が使う「今」（UTC。テストで差し替える）
 │   ├── database_files.py    # 使っているDBのファイルの場所と、実データのDBかどうかの判定
 │   ├── backup.py            # DBのバックアップ（「データの保護（バックアップ）」）
 │   ├── demo_data.py         # デモ用の架空のデータ（docs/development/database.md の「デモ用の架空のデータ」）
-│   ├── cli.py               # 自作のコマンド（backup-db・create-demo-db）
+│   ├── cli.py               # 自作のコマンド（backup-db・create-demo-db・create-user・set-password・rename-user・unlock-login）
 │   ├── extensions.py        # db = SQLAlchemy(命名規則つきのMetaData)、migrate = Migrate() など
 │   ├── api_helpers.py       # API共通処理（エラー応答、エラーハンドラー、JSON本文の受け取り（PATCHの空の本文の検査 read_patch_object を含む）、一覧のクエリのIDの読み取り read_id_query、項目の検査（使用できない文字の検査、真偽値、決まった値から選ぶ文字列を含む）、日付・時刻・日時の変換と検証、IDの上限 MAX_ID、メッセージの定数 UNUSABLE_CHARACTER_MESSAGE・EMPTY_PATCH_MESSAGE）。DBの操作は行わない
 │   ├── categories.py        # カテゴリの保存値の定数と、APIで受け付ける値の一覧（EVENT_CATEGORIES・TASK_CATEGORIES）。定数だけを持つ
@@ -99,18 +106,23 @@ schedule_app/
 │   │   ├── subject.py       # 授業
 │   │   ├── event.py         # 時間型の予定
 │   │   ├── task.py          # 課題・タスク（期限型）
-│   │   └── closure.py       # 学期の休講日
+│   │   ├── closure.py       # 学期の休講日
+│   │   ├── user.py          # 利用者
+│   │   ├── user_session.py  # ログイン中の端末
+│   │   └── login_failure.py # ログインの失敗の記録
 │   ├── routes/
 │   │   ├── __init__.py      # routesをパッケージにする（空のファイル）
-│   │   ├── main.py          # トップページ（カレンダー・授業・課題の3モードを含む1画面）
+│   │   ├── main.py          # トップページ（カレンダー・授業・課題の3モードを含む1画面と、利用者のメニュー）
+│   │   ├── auth.py          # ログイン・ログアウト・すべての端末からログアウト（画面）
 │   │   ├── semesters.py     # 学期のAPI（一覧・取得・登録・編集・削除と、期間の変更の、予定・休講日への反映）
 │   │   ├── subjects.py      # 授業モードのAPI（登録・編集・削除・一覧）
 │   │   ├── closures.py      # 休講日のAPI（一覧・登録・削除と、予定の同期）
 │   │   ├── events.py        # 予定（Event）のAPI（期間を指定した一覧・1件取得・派遣会社の候補と、単発の予定の登録・編集・削除）
 │   │   └── tasks.py         # 課題・タスクのAPI（一覧（完了の状態の絞り込み）・1件取得・登録・編集（完了の切り替えを含む）・削除）
 │   ├── templates/
-│   │   ├── base.html        # 共通の骨組み。Bootstrap・FullCalendar・style.css の読み込み（FullCalendarに、CSPのnonceを渡す）と、JavaScript用の scripts ブロック
-│   │   └── index.html
+│   │   ├── base.html        # 共通の骨組み。Bootstrap・FullCalendar・style.css の読み込み（FullCalendarに、CSPのnonceを渡す。ライブラリのスクリプトは library_scripts ブロック）と、JavaScript用の scripts ブロック
+│   │   ├── index.html
+│   │   └── login.html       # ログインの画面（JavaScriptを読み込まない）
 │   └── static/
 │       ├── css/style.css    # カテゴリの色・独自スタイル
 │       └── js/
@@ -132,6 +144,7 @@ schedule_app/
 │   └── versions/            # migrationファイル（自動生成後にレビューする）。Git管理対象
 ├── instance/                # Git管理対象外（.gitignore）
 │   ├── app.db               # SQLiteファイル（実データのDB。この資料のほかの節の「開発用DB」も、これを指す）
+│   ├── secret_key           # SECRET_KEY（環境変数がないとき。初回に作る。持ち主だけが読める）
 │   ├── backups/             # DBのバックアップ（自動・手動。「データの保護（バックアップ）」）
 │   └── demo.db              # デモのDB（例。create-demo-db で作る）
 ├── docs/                    # 資料（何がどこにあるかは docs/README.md）
@@ -140,7 +153,16 @@ schedule_app/
 │   └── dependabot.yml       # 依存とアクションの更新のPR（docs/development/workflow.md の「依存の更新（Dependabot）」）
 ├── node_modules/            # npmのパッケージ（Git管理対象外。npm ci で作る）
 ├── tests/                   # pytestのテスト（「自動テスト（pytest）」を参照）
-│   ├── conftest.py          # 共通のfixture（テスト用DB・アプリ・クライアント・開発用DBの保護）
+│   ├── conftest.py          # 共通のfixture（テスト用DB・アプリ・ログインしたクライアント・ログインしていないクライアント・開発用DBの保護）
+│   ├── auth_support.py      # テストの利用者とログインの準備（テストの利用者 id 1、ログイン中の端末の行を作る）
+│   ├── test_auth.py         # ログイン・試行の制限・期限・ログアウト・ほかのサイトからの要求・ヘッダー・ログ
+│   ├── test_authorization.py # 認可の網羅的なテスト（すべてのAPIのURL×メソッド）
+│   ├── test_passwords.py    # パスワードの決まり・ハッシュ・漏えいの確認
+│   ├── test_secret_key.py   # SECRET_KEY と、Cookie の設定の守り
+│   ├── test_user_commands.py # 利用者の管理のコマンド
+│   ├── test_migration_users.py # 利用者とデータの持ち主の migration（既存のデータが owner のものになる）
+│   ├── test_attacks_auth.py # 攻撃のテスト（ログイン・試行の制限・ほかのサイト・既定で拒否。受け入れた弱さは xfail）
+│   ├── test_attacks_data.py # 攻撃のテスト（認可・DBに残る値・デモのDB・パスワードの決まり）
 │   ├── test_setup.py        # テスト基盤そのものの確認（migrationで作られるテーブル・列・制約の確認と、モデルとmigrationのずれの確認を含む）
 │   ├── test_api_helpers.py  # api_helpers.py の共通関数の単体テスト
 │   ├── test_class_events.py # class_events.py の単体テスト（日付の計算、Eventの値）
@@ -154,7 +176,7 @@ schedule_app/
 │   ├── test_semesters_update_delete_api.py  # 学期の編集・削除（期間の変更の、予定・休講日への反映を含む）と、1件取得の件数のAPIのテスト（学期の登録・一覧と、405の Allow などのAPI共通の確認は test_semesters_api.py）
 │   └── e2e/                 # E2Eテスト（Playwright。docs/development/testing.md の「E2Eテスト」）
 │       ├── conftest.py      # E2Eの共通のfixture（一時ディレクトリのDBでのアプリの起動、CDNの代用、JavaScriptの例外とCSPの違反の記録）
-│       └── test_main_flow.py # 主な流れ（学期 → 休講日 → 授業 → カレンダー → 課題 → 完了）
+│       └── test_main_flow.py # 主な流れ（ログイン → 学期 → 休講日 → 授業 → カレンダー → 課題 → 完了 → ログアウト）と、ログインが切れたときの移動
 ├── pytest.ini               # pytestの設定（E2Eテストを、ふだんの実行から外す設定を含む）
 ├── ruff.toml                # ruff（Pythonの検査）の設定
 ├── eslint.config.js         # ESLint（JavaScriptの検査）の設定（セキュリティのための禁止の規則を含む）
@@ -173,4 +195,3 @@ schedule_app/
 注意：
 - 授業のモデル名は、Pythonの予約語 `class` と紛らわしいため `Subject` とする。`class` という語は、Eventのカテゴリの保存値（文字列 `"class"`）と、その定数名 `EVENT_CATEGORY_CLASS`、モジュール名 `class_events.py` とその関数名（`class_event_dates`・`build_class_event`・`build_class_events`）にだけ使う。これは「授業のEvent」を表す名前で、Pythonのクラス名・変数名として授業そのものを `class` と呼ぶわけではない（授業は、クラス名 `Subject`、変数名 `subject`）。
 - 画面はカレンダー／授業／課題・タスクの3モードを1ページ（`index.html`）に持たせ、Bootstrapのタブ機能と、必要なJavaScriptで表示を切り替える。
-- ログインがないため、認証関連のファイルは作らない。

@@ -104,6 +104,7 @@
   - `body` が `undefined` でないときだけ、`Content-Type: application/json` を付けて、`JSON.stringify(body)` を送る（`GET`・`DELETE` には付けない。サーバーも、これらには要求しない）
   - 成功（2xx）：`204` なら `null`、それ以外は、JSONを解析した値を返す
   - 失敗：応答の `{"error": {"code", "message", "fields"}}` から `ApiError` を作って投げる
+  - 401（ログインが切れた。`unauthorized`）のときは、ログインの画面（`/login`）へ移る（`window.location.assign`）。そのうえで、ほかの失敗と同じく `ApiError` を投げる（呼び出し側の処理を止める）
   - サーバーに接続できない場合（`fetch` が例外）：`status: 0`、`code: "network_error"`、`message: "サーバーに接続できませんでした。時間をおいて、もう一度お試しください"` の `ApiError` を投げる
   - 応答がJSONとして読めない、または `{"error": {...}}` の形でない場合：`code: "invalid_response"`、`message: "サーバーから想定外の応答がありました。時間をおいて、もう一度お試しください"` の `ApiError` を投げる（`status` は、実際の値）
 - `network_error` と `invalid_response` は、サーバーが返すコードではなく、`api.js` が作る（「エラー」の表には含めない）

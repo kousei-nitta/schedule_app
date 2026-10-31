@@ -13,6 +13,7 @@ from app.extensions import db
 from app.models.closure import Closure
 from app.models.event import Event
 from app.models.semester import Semester
+from tests.auth_support import TEST_USER_ID
 
 
 DATE_FORMAT_MESSAGE = (
@@ -23,6 +24,7 @@ DATE_FORMAT_MESSAGE = (
 def make_semester(app, name="2026年度 前期"):
     with app.app_context():
         semester = Semester(
+            user_id=TEST_USER_ID,
             name=name,
             start_date=date(2026, 4, 1),
             end_date=date(2026, 7, 31),
@@ -35,6 +37,7 @@ def make_semester(app, name="2026年度 前期"):
 def make_closure(app, semester_id, closure_date, name=None):
     with app.app_context():
         closure = Closure(
+            user_id=TEST_USER_ID,
             semester_id=semester_id,
             date=closure_date,
             name=name,
@@ -622,6 +625,7 @@ def add_single_event(app, subject_id, event_date):
     with app.app_context():
         db.session.add(
             Event(
+                user_id=TEST_USER_ID,
                 subject_id=subject_id,
                 category="class",
                 date=event_date,

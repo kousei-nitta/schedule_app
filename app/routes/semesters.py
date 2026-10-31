@@ -14,12 +14,14 @@ from app.api_helpers import (
     validate_required_date,
     validate_required_string,
 )
+from app.auth import current_user_id
 from app.class_events import build_class_event, class_event_dates
 from app.extensions import db
 from app.models.closure import Closure
 from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
+from app.ownership import get_owned
 
 
 semesters_bp = Blueprint(
@@ -52,8 +54,13 @@ def is_duplicate_name(name: str, current_id: int | None) -> bool:
     """同じ名前の、ほかの学期があるか（完全一致で比べる）。
 
     current_id は、編集する学期のID（自分自身は除く）。登録では None。
+    比べるのは、自分の学期だけ（他人の学期の名前は、関係しない。
+    他人の学期があることも、知らせない）。
     """
-    statement = db.select(Semester.id).where(Semester.name == name)
+    statement = db.select(Semester.id).where(
+        Semester.user_id == current_user_id(),
+        Semester.name == name,
+    )
     if current_id is not None:
         statement = statement.where(Semester.id != current_id)
     return db.session.scalar(statement) is not None
@@ -133,7 +140,10 @@ def count_semester_subjects(semester_id: int) -> int:
     return db.session.scalar(
         db.select(db.func.count())
         .select_from(Subject)
-        .where(Subject.semester_id == semester_id)
+        .where(
+            Subject.user_id == current_user_id(),
+            Subject.semester_id == semester_id,
+        )
     )
 
 
@@ -142,7 +152,10 @@ def count_semester_closures(semester_id: int) -> int:
     return db.session.scalar(
         db.select(db.func.count())
         .select_from(Closure)
-        .where(Closure.semester_id == semester_id)
+        .where(
+            Closure.user_id == current_user_id(),
+            Closure.semester_id == semester_id,
+        )
     )
 
 
@@ -165,13 +178,18 @@ def sync_period_change(
     """
     start_date = semester.start_date
     end_date = semester.end_date
+    # どの文も、学期の持ち主（ログインした利用者）のデータだけを対象に
+    # する（学期で絞れば足りるが、念のため、持ち主でも絞る）
+    user_id = semester.user_id
 
     # 新しい期間の外になった日の、自動生成の予定と休講日を削除する。
     semester_subject_ids = db.select(Subject.id).where(
-        Subject.semester_id == semester.id
+        Subject.user_id == user_id,
+        Subject.semester_id == semester.id,
     )
     db.session.execute(
         db.delete(Event).where(
+            Event.user_id == user_id,
             Event.subject_id.in_(semester_subject_ids),
             Event.is_generated.is_(True),
             db.or_(Event.date < start_date, Event.date > end_date),
@@ -179,6 +197,7 @@ def sync_period_change(
     )
     db.session.execute(
         db.delete(Closure).where(
+            Closure.user_id == user_id,
             Closure.semester_id == semester.id,
             db.or_(Closure.date < start_date, Closure.date > end_date),
         )
@@ -188,12 +207,18 @@ def sync_period_change(
     # 予定を作らない日は、新しい期間の中に残った休講日。
     excluded_dates = set(
         db.session.scalars(
-            db.select(Closure.date).where(Closure.semester_id == semester.id)
+            db.select(Closure.date).where(
+                Closure.user_id == user_id,
+                Closure.semester_id == semester.id,
+            )
         )
     )
     subjects = db.session.scalars(
         db.select(Subject)
-        .where(Subject.semester_id == semester.id)
+        .where(
+            Subject.user_id == user_id,
+            Subject.semester_id == semester.id,
+        )
         .order_by(Subject.id.asc())
     ).all()
     events = []
@@ -217,7 +242,9 @@ def sync_period_change(
 @semesters_bp.get("")
 def get_semesters():
     semesters = db.session.scalars(
-        db.select(Semester).order_by(
+        db.select(Semester)
+        .where(Semester.user_id == current_user_id())
+        .order_by(
             Semester.start_date.desc(),
             Semester.id.desc(),
         )
@@ -227,7 +254,7 @@ def get_semesters():
 
 @semesters_bp.get(f"/<int(max={MAX_ID}):semester_id>")
 def get_semester(semester_id: int):
-    semester = db.session.get(Semester, semester_id)
+    semester = get_owned(Semester, semester_id)
     if semester is None:
         return api_error_response("not_found", "学期が見つかりません")
 
@@ -272,6 +299,7 @@ def create_semester():
         )
 
     semester = Semester(
+        user_id=current_user_id(),
         name=values["name"],
         start_date=start_date,
         end_date=end_date,
@@ -284,7 +312,7 @@ def create_semester():
 @semesters_bp.patch(f"/<int(max={MAX_ID}):semester_id>")
 def update_semester(semester_id: int):
     # 対象の学期がなければ、本文を読む前に404にする。
-    semester = db.session.get(Semester, semester_id)
+    semester = get_owned(Semester, semester_id)
     if semester is None:
         return api_error_response("not_found", "学期が見つかりません")
 
@@ -337,7 +365,7 @@ def update_semester(semester_id: int):
 
 @semesters_bp.delete(f"/<int(max={MAX_ID}):semester_id>")
 def delete_semester(semester_id: int):
-    semester = db.session.get(Semester, semester_id)
+    semester = get_owned(Semester, semester_id)
     if semester is None:
         return api_error_response("not_found", "学期が見つかりません")
 
@@ -350,7 +378,10 @@ def delete_semester(semester_id: int):
     # 「共通の約束」）。学期だけを削除すると、休講日が、semester_id が
     # NULL の行として残る。
     db.session.execute(
-        db.delete(Closure).where(Closure.semester_id == semester.id)
+        db.delete(Closure).where(
+            Closure.user_id == semester.user_id,
+            Closure.semester_id == semester.id,
+        )
     )
     db.session.delete(semester)
     # 休講日と学期の削除を、1回のcommitで保存する。

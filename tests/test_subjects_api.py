@@ -14,6 +14,7 @@ from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
 from app.models.task import Task
+from tests.auth_support import TEST_USER_ID
 
 
 TIME_MESSAGES = {
@@ -35,6 +36,7 @@ TIME_MESSAGES = {
 def make_semester(app, name="2026年度 前期"):
     with app.app_context():
         semester = Semester(
+            user_id=TEST_USER_ID,
             name=name,
             start_date=date(2026, 4, 1),
             end_date=date(2026, 7, 31),
@@ -94,7 +96,13 @@ def generated_event_dates(app, subject_id):
 
 def make_closure(app, semester_id, closure_date):
     with app.app_context():
-        db.session.add(Closure(semester_id=semester_id, date=closure_date))
+        db.session.add(
+            Closure(
+                user_id=TEST_USER_ID,
+                semester_id=semester_id,
+                date=closure_date,
+            )
+        )
         db.session.commit()
 
 
@@ -577,6 +585,7 @@ def test_subject_list_orders_by_weekday_time_and_id_and_filters_semester(
     with app.app_context():
         for semester_id, name, weekday, start_time in entries:
             subject = Subject(
+                user_id=TEST_USER_ID,
                 semester_id=semester_id,
                 subject_name=name,
                 weekday=weekday,
@@ -662,6 +671,7 @@ def test_leading_zero_semester_query_and_unknown_query(client, app):
     with app.app_context():
         db.session.add(
             Subject(
+                user_id=TEST_USER_ID,
                 semester_id=semester_id,
                 subject_name="科目",
                 weekday=0,
@@ -737,6 +747,7 @@ def test_unsupported_subject_methods_do_not_change_rows(
     semester_id = make_semester(app)
     with app.app_context():
         subject = Subject(
+            user_id=TEST_USER_ID,
             semester_id=semester_id,
             subject_name="登録済み授業",
             weekday=0,
@@ -950,6 +961,7 @@ def test_subject_creation_without_matching_days_returns_zero(client, app):
     with app.app_context():
         # 2026-04-01（水）〜2026-04-02（木）の学期に、月曜日はない。
         semester = Semester(
+            user_id=TEST_USER_ID,
             name="2026年度 前期",
             start_date=date(2026, 4, 1),
             end_date=date(2026, 4, 2),
@@ -975,6 +987,7 @@ def test_subject_creation_when_all_days_are_closures_returns_zero(
     with app.app_context():
         # 2026-04-06（月）〜2026-04-12（日）の月曜日は、4/6の1日だけ。
         semester = Semester(
+            user_id=TEST_USER_ID,
             name="2026年度 前期",
             start_date=date(2026, 4, 6),
             end_date=date(2026, 4, 12),

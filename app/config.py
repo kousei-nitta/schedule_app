@@ -31,3 +31,35 @@ class Config:
     # localhost は、テストの test_client の既定の名前でもある。
     # docs/architecture/security.md の「Hostヘッダーの検査」。
     TRUSTED_HOSTS = ["127.0.0.1", "localhost"]
+    # ログインの Cookie（app/user_sessions.py）。Secure（HTTPSのときだけ
+    # 送る）は、ローカル（HTTP）ではオフにする。公開のとき（Task 026）に、
+    # オンにし、名前を __Host- で始まるものにする
+    # （docs/architecture/security.md の「公開の前の点検」）。
+    AUTH_COOKIE_NAME = "schedule_session"
+    AUTH_COOKIE_SECURE = False
+
+
+# Cookie の Secure をオフにしてよい Host（このMacの中だけ）
+LOCAL_HOSTS = {"127.0.0.1", "localhost"}
+
+
+def check_cookie_security(config: Mapping) -> None:
+    """Host と Cookie の設定が危ないときは、起動しない（安全な側に倒す）。
+
+    - TRUSTED_HOSTS が空・None：Flask は Host を確かめなくなる（DNS
+      リバインディングを防げない）
+    - ローカルでない名前があるのに、Cookie の Secure がオフ：公開のとき
+      （Task 026）に、TRUSTED_HOSTS だけを本番の名前にして、Secure を
+      付け忘れると、ログインの Cookie が HTTP でも送られてしまう
+    """
+    if not config.get("TRUSTED_HOSTS"):
+        raise RuntimeError(
+            "TRUSTED_HOSTS が空です（受け付ける Host の名前を決めてください）"
+        )
+    hosts = set(config["TRUSTED_HOSTS"])
+    if not config["AUTH_COOKIE_SECURE"] and not hosts <= LOCAL_HOSTS:
+        raise RuntimeError(
+            "TRUSTED_HOSTS に、このMacの外の名前があるのに、"
+            "AUTH_COOKIE_SECURE がオフです（HTTPSで公開するときは、"
+            "オンにしてください）"
+        )

@@ -2,9 +2,10 @@
 
 大学生活のためのスケジュール帳Webアプリ。授業・課題・アルバイト・その他の予定を、1つの画面で管理する。
 
-大学の授業（PDCAサイクルを回しながらアプリを作る課題）で始め、今は、自分で使いながら開発を続けている。今は、1人で、自分のパソコンで使う形（ログインなし）。
+大学の授業（PDCAサイクルを回しながらアプリを作る課題）で始め、今は、自分で使いながら開発を続けている。今は、自分のパソコンで使う形。ログインして使い、データは利用者ごとに分かれる（次の段階で、クラウドに公開する）。
 
 ## 機能
+- **ログイン**：ログインIDとパスワード（15文字以上）。利用者は、コマンドで作る。試行の制限、ログイン中の端末の数の表示、すべての端末からのログアウト
 - **カレンダー**（週・月・一覧）：授業・アルバイト・その他の予定と、課題の締切を表示する。カテゴリで絞り込める。空き枠から予定を追加し、詳細から編集・削除する
 - **授業モード**：学期を登録し、授業を曜日と時刻で登録すると、学期の毎週の授業の予定が、自動でできる。休講日を登録すると、その日の授業の予定を作らない
 - **課題・タスクモード**：課題と、締切だけのタスクを登録し、完了を管理する。カレンダーにも「直近の締切」を表示する
@@ -20,8 +21,11 @@ python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 flask --app app db upgrade   # DB（instance/app.db）を作る
-python run.py                # http://127.0.0.1:5001 を開く
+flask --app app create-user <ログインID>   # 利用者を作る（パスワードの入力を求める）
+python run.py                # http://127.0.0.1:5001 を開き、ログインする
 ```
+
+- 利用者の管理（パスワードの変更・ログインIDの変更・ログインの制限の解除）は、`docs/development/database.md` の「利用者の管理」
 
 - デバッグモード（コードを変えると自動で起動し直す）は、開発のときだけ：`FLASK_DEBUG=1 python run.py`
 
@@ -30,8 +34,8 @@ python run.py                # http://127.0.0.1:5001 を開く
 
 デモ用の架空のデータで試すとき（使うDBは、環境変数 `DATABASE_URL` で切り替える）：
 ```sh
-DATABASE_URL=sqlite:///demo.db flask --app app create-demo-db   # instance/demo.db を作る
-DATABASE_URL=sqlite:///demo.db python run.py
+DATABASE_URL=sqlite:///demo.db flask --app app create-demo-db   # instance/demo.db を作る（利用者 demo のパスワードを入れる）
+DATABASE_URL=sqlite:///demo.db python run.py                     # demo でログインする
 ```
 
 開発のとき（テストと検査）：

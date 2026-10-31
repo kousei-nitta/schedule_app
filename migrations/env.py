@@ -11,7 +11,10 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-fileConfig(config.config_file_name)
+# 既にあるロガー（ログインの記録 app.auth など）を止めない
+# （同じプロセスの中でmigrationを動かしたあとも、ログを残すため。
+# デモデータの作成・テスト）
+fileConfig(config.config_file_name, disable_existing_loggers=False)
 logger = logging.getLogger('alembic.env')
 
 

@@ -4,7 +4,7 @@
 """
 import secrets
 
-from flask import Flask, Response, g
+from flask import Flask, Response, g, request
 
 # CDN（jsDelivr）から読み込むファイル。templates/base.html の
 # <script>・<link> と同じURLにする（版を変えるときは、両方を変える。
@@ -30,24 +30,55 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     # ほかのサイトへ、URL（Referer）を送らない。no-referrer にしないのは、
     # フォームの送信（ログインの画面など）の Origin ヘッダーが null になり、
-    # ログインのタスク（Task 025）で、Origin の検査に使えなくなるため
+    # Origin の検査（app/auth.py）に使えなくなるため
     "Referrer-Policy": "same-origin",
+    # ほかのサイトの窓（window.open など）と、このアプリの窓を切り離す
+    # （ほかのサイトから、このアプリの窓を操作・観察させない）
+    "Cross-Origin-Opener-Policy": "same-origin",
+    # このアプリの応答（APIのJSON・画面・静的ファイル）を、ほかのサイトの
+    # ページに読み込ませない（<script src> や <img src> での読み込みを含む）
+    "Cross-Origin-Resource-Policy": "same-origin",
+    # 使わないブラウザの機能を、使えないようにする（万一、スクリプトが
+    # 入り込んでも、カメラ・マイク・位置情報などを使わせない）
+    "Permissions-Policy": (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    ),
+    # 公開したとき（Task 026）、検索エンジンに載せない（ログインの画面の
+    # URLを、検索で見つけさせない）
+    "X-Robots-Tag": "noindex, nofollow",
 }
 
+# 個人のデータを含む応答（画面・API）を、ブラウザやプロキシに保存させない
+# （共用のPCで、ログアウトのあとに「戻る」で見えたり、途中の機器に
+# 残ったりしないように）。静的ファイル（JavaScript・CSS）は、個人の
+# データを含まないため、対象にしない
+NO_STORE = "no-store"
 
-def content_security_policy(nonce: str) -> str:
+# スクリプトを1つも許さない画面（routeの名前）
+NO_SCRIPT_ENDPOINTS = {"auth.login"}
+
+
+def content_security_policy(nonce: str, allow_scripts: bool = True) -> str:
     """CSP（ページが読み込んでよいものの一覧）の値を作る。
 
     nonce は、FullCalendarが差し込む <style> だけに渡す、要求ごとの
     使い捨ての値。インラインのスクリプト・スタイル（'unsafe-inline'）と、
     文字列からのコードの実行（'unsafe-eval'）は、許さない。
+    allow_scripts が False なら、スクリプトを1つも許さない（ログインの
+    画面。パスワードを入れる画面では、万一入り込んでも動かさない）。
     """
+    if allow_scripts:
+        # スクリプト：自分のファイル（main.js など）と、CDNの2つの
+        # ファイルだけ（jsDelivrの、ほかのファイルは読ませない）
+        script_sources = (
+            f"'self' {BOOTSTRAP_JS_URL} {FULLCALENDAR_JS_URL}"
+        )
+    else:
+        script_sources = "'none'"
     directives = [
         # 下で決めていない種類は、自分のサイトからだけ
         "default-src 'self'",
-        # スクリプト：自分のファイル（main.js など）と、CDNの2つのファイル
-        # だけ（jsDelivrの、ほかのファイルは読ませない）
-        f"script-src 'self' {BOOTSTRAP_JS_URL} {FULLCALENDAR_JS_URL}",
+        f"script-src {script_sources}",
         # スタイル：自分の style.css、BootstrapのCSS、FullCalendarが
         # 差し込む <style>（nonce つき）
         f"style-src 'self' {BOOTSTRAP_CSS_URL} 'nonce-{nonce}'",
@@ -103,6 +134,11 @@ def register_security_headers(app: Flask) -> None:
         for name, value in SECURITY_HEADERS.items():
             response.headers[name] = value
         response.headers["Content-Security-Policy"] = (
-            content_security_policy(current_csp_nonce())
+            content_security_policy(
+                current_csp_nonce(),
+                allow_scripts=request.endpoint not in NO_SCRIPT_ENDPOINTS,
+            )
         )
+        if request.endpoint != "static":
+            response.headers["Cache-Control"] = NO_STORE
         return response

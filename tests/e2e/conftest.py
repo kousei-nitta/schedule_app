@@ -1,7 +1,9 @@
 """E2Eテスト（Playwright）の共通の準備。
 
 - live_server：一時ディレクトリのDB（migrationで作った雛形のコピー）で、
-  アプリを別のスレッドで起動し、URLを返す（実データのDBに触れない）
+  アプリを別のスレッドで起動し、URLを返す（実データのDBに触れない）。
+  E2Eの利用者（E2E_USERNAME・tests/auth_support.py の TEST_PASSWORD）を
+  作っておく。ログインは、テストが画面から行う
 - app_url：ブラウザで開くアプリのURL。環境変数 E2E_CDN_FROM_NPM=1 の
   ときは、CDN（jsDelivr）への読み込みに、node_modules の同じ版の
   ファイルで答える（CDNに届かない、Claudeの作業環境のため。CIは、
@@ -29,6 +31,7 @@ from werkzeug.serving import make_server
 
 from app import create_app
 from app.extensions import db
+from tests.auth_support import E2E_USERNAME, create_user
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +62,7 @@ def live_server(template_db: Path, tmp_path: Path):
             "SQLALCHEMY_DATABASE_URI": f"sqlite:///{database_path}",
         }
     )
+    create_user(server_app, E2E_USERNAME)
     # 番号0：空いているポートを、OSに選んでもらう
     server = make_server("127.0.0.1", 0, server_app, threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

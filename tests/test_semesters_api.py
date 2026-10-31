@@ -9,6 +9,7 @@ from app.api_helpers import (
 )
 from app.extensions import db
 from app.models.semester import Semester
+from tests.auth_support import TEST_USER_ID
 
 
 def create_semester(client, name, start_date, end_date):
@@ -262,6 +263,7 @@ def test_invalid_semester_payloads_have_expected_fields(
         with app.app_context():
             db.session.add(
                 Semester(
+                    user_id=TEST_USER_ID,
                     name="2026年度 前期",
                     start_date=date(2026, 4, 1),
                     end_date=date(2026, 7, 31),
@@ -480,7 +482,9 @@ def test_api_405_has_allow_header_in_name_order(client, method, url, allow):
 
 def test_regular_page_405_remains_html(client):
     # 通常のHTMLページの405は、変えない（Flaskの標準のHTMLのまま）。
-    response = client.post("/")
+    # 画面へのPOSTは、ブラウザが付けるヘッダーがないと403になるため、
+    # このアプリの画面からの送信として送る（app/auth.py）
+    response = client.post("/", headers={"Sec-Fetch-Site": "same-origin"})
     assert response.status_code == 405
     assert response.content_type.startswith("text/html")
     assert set(response.headers["Allow"].split(", ")) == {

@@ -8,6 +8,7 @@ from app.extensions import db
 from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
+from tests.auth_support import TEST_USER_ID
 
 
 START_FORMAT_MESSAGE = (
@@ -22,6 +23,7 @@ APRIL_QUERY = "start_date=2026-04-01&end_date=2026-04-30"
 def make_semester(app, name="2026年度 前期"):
     with app.app_context():
         semester = Semester(
+            user_id=TEST_USER_ID,
             name=name,
             start_date=date(2026, 4, 1),
             end_date=date(2026, 7, 31),
@@ -35,6 +37,7 @@ def make_subject(app, semester_id, subject_name="授業"):
     """予定を作らずに、授業の行だけを作る（ORMで直接作る）。"""
     with app.app_context():
         subject = Subject(
+            user_id=TEST_USER_ID,
             semester_id=semester_id,
             subject_name=subject_name,
             weekday=0,
@@ -61,6 +64,7 @@ def make_event(
     持つ予定も作れるように、APIを使わない）。"""
     with app.app_context():
         event = Event(
+            user_id=TEST_USER_ID,
             subject_id=subject_id,
             category=category,
             date=event_date,
@@ -111,6 +115,7 @@ def test_event_list_returns_all_fields_of_each_event(client, app):
     subject_id = make_subject(app, semester_id)
     with app.app_context():
         class_event = Event(
+            user_id=TEST_USER_ID,
             subject_id=subject_id,
             category="class",
             date=date(2026, 4, 6),
@@ -122,6 +127,7 @@ def test_event_list_returns_all_fields_of_each_event(client, app):
             is_generated=True,
         )
         part_time_event = Event(
+            user_id=TEST_USER_ID,
             category="part_time",
             date=date(2026, 4, 7),
             start_time=time(17, 0),

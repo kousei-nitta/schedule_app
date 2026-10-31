@@ -10,6 +10,7 @@ from app.extensions import db
 from app.models.semester import Semester
 from app.models.subject import Subject
 from app.models.task import Task
+from tests.auth_support import TEST_USER_ID
 
 
 CATEGORY_MESSAGE = "カテゴリは「assignment」か「other」で指定してください"
@@ -28,6 +29,7 @@ MISSING = object()
 def make_semester(app):
     with app.app_context():
         semester = Semester(
+            user_id=TEST_USER_ID,
             name="2026年度 後期",
             start_date=date(2026, 9, 21),
             end_date=date(2027, 1, 29),
@@ -41,6 +43,7 @@ def make_subject(app, semester_id, subject_name="プログラミング基礎"):
     """授業を、ORMで直接作る（課題のテストには、予定が要らないため）。"""
     with app.app_context():
         subject = Subject(
+            user_id=TEST_USER_ID,
             semester_id=semester_id,
             subject_name=subject_name,
             weekday=0,
