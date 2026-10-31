@@ -5,9 +5,14 @@
   端末の行を作り、Cookie を入れる。ログインの画面は通らない。scrypt の
   計算を、テストごとにしないため）
 - パスワードのハッシュは、テスト全体で1回だけ計算する
+- ログインの画面を通すテスト（tests/test_auth.py・test_attacks_auth.py）の
+  補助（時計・ログインの送信・Cookie・失敗の記録の数）
 """
+from datetime import datetime, timedelta
+
 from app import clock
 from app.extensions import db
+from app.models.login_failure import LoginFailure
 from app.models.user import User
 from app.passwords import hash_password
 from app.user_sessions import start_session
@@ -19,6 +24,12 @@ OTHER_USERNAME = "other-user"
 E2E_USERNAME = "e2e-user"
 # テスト専用の架空のパスワード（決まり：15文字以上、IDを含まない）
 TEST_PASSWORD = "kumo sakura densha 2099"
+
+# ログインの画面を通すテストの、時計の始まり（UTC。fixture clock_now）
+START = datetime(2026, 10, 30, 3, 0, 0)
+COOKIE_NAME = "schedule_session"
+# 画面のフォームの送信に、ブラウザが付けるヘッダー（このアプリから）
+FORM_HEADERS = {"Origin": "http://localhost", "Sec-Fetch-Site": "same-origin"}
 
 # test_client が使う Host の名前（Cookie は、名前ごとに送られる）
 COOKIE_DOMAINS = ["localhost", "127.0.0.1"]
@@ -65,3 +76,50 @@ def logged_in_client(app, user_id: int):
     client = app.test_client()
     log_in(app, client, user_id)
     return client
+
+
+class FakeClock:
+    """テストで動かせる時計（UTC、タイムゾーンなし。fixture clock_now）。"""
+
+    def __init__(self, start: datetime):
+        self.value = start
+
+    def __call__(self) -> datetime:
+        return self.value
+
+    def advance(self, **kwargs) -> None:
+        self.value += timedelta(**kwargs)
+
+
+def post_login(client, login_id, password, address=None, headers=None):
+    """ログインの画面から送る（address は接続元のIPアドレス）。"""
+    environ = {} if address is None else {"REMOTE_ADDR": address}
+    return client.post(
+        "/login",
+        data={"login_id": login_id, "password": password},
+        environ_base=environ,
+        headers=FORM_HEADERS if headers is None else headers,
+    )
+
+
+def session_cookie_header(response) -> str | None:
+    """応答の、ログインの Cookie の Set-Cookie（なければ None）。"""
+    for header in response.headers.getlist("Set-Cookie"):
+        if header.startswith(f"{COOKIE_NAME}="):
+            return header
+    return None
+
+
+def cookie_value(response) -> str:
+    """応答で入れた、ログインの Cookie の値（トークン）。"""
+    header = session_cookie_header(response)
+    assert header is not None
+    return header.split(";", 1)[0].split("=", 1)[1]
+
+
+def failure_count(app) -> int:
+    """ログインの失敗の記録の数（すべての接続元・ID）。"""
+    with app.app_context():
+        return db.session.scalar(
+            db.select(db.func.count()).select_from(LoginFailure)
+        )

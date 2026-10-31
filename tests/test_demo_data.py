@@ -26,7 +26,7 @@ from app.demo_data import (
     semester_period,
 )
 from app.extensions import db
-from app.models import Event, Task, User
+from app.models import Event, Task, User, UserSession
 from tests.auth_support import TEST_PASSWORD, logged_in_client
 
 
@@ -406,3 +406,26 @@ def test_refuses_non_file_database(tmp_path):
 
     with pytest.raises(DemoDataError, match="SQLiteのファイルのDBだけ"):
         create_demo_database(bare_app, TODAY, password=TEST_PASSWORD)
+
+
+# 直した弱さ（攻撃のテストで見つけた）：デモのDBに、だれも使わない
+# ログインが残っていた。
+# demo_client が作った、ログイン中の端末の行が残り、利用者のメニューの
+# 「ログイン中の端末」が1台多く見えていた（知らないログインに気づく
+# ための数が当てにならない）
+
+
+def test_demo_database_has_no_leftover_login(demo_app):
+    create_demo_database(demo_app, TODAY, password=TEST_PASSWORD)
+
+    with demo_app.app_context():
+        demo_id = db.session.scalar(
+            db.select(User.id).where(User.username == DEMO_USERNAME)
+        )
+        count = db.session.scalar(
+            db.select(db.func.count())
+            .select_from(UserSession)
+            .where(UserSession.user_id == demo_id)
+        )
+
+    assert count == 0

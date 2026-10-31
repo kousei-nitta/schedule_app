@@ -5,7 +5,7 @@
 import math
 import threading
 
-from flask import Blueprint, Response, g, redirect, render_template
+from flask import Blueprint, Response, abort, g, redirect, render_template
 from flask import request, url_for
 
 from app import clock
@@ -47,7 +47,7 @@ LOGIN_LOCKED_MESSAGE = (
 # 512文字（正規化の前）までしか使わないため、それより十分に大きく、
 # 決まりに合う入力を断らない大きさ（1文字4バイト×URLの形で3倍でも足りる）。
 # ログインの前に、大きな本文を読ませて、メモリーを使わせないため。
-# 超えたら、本文を読まずに、413
+# 超えたら、本文を読まずに、413（長さのない本文は、411）
 LOGIN_MAX_CONTENT_LENGTH = 16 * 1024
 
 # ログインIDがない・パスワードのない利用者のときに、確かめに使う
@@ -143,6 +143,12 @@ def attempt_login():
     決まりに合わないID（ありえないID）と、長すぎるパスワードは、計算せずに
     失敗にする（決まりは公開しているため、時間で分かっても、何も漏れない）。
     """
+    # 本文の長さ（Content-Length）のない送信（chunked）は、読まずに断る
+    # （411）。長さがないと、Werkzeug は、上限を超えた本文を断らずに、
+    # 上限で切って読む（資料の「超えたら413」にならない）。ブラウザの
+    # フォームの送信には、いつも長さが付く
+    if request.content_length is None:
+        abort(411)
     # 本文を読む前に、大きさの上限を決める（超えたら413。読まない）
     request.max_content_length = LOGIN_MAX_CONTENT_LENGTH
     login_id = request.form.get("login_id", "")

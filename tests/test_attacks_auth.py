@@ -3,23 +3,24 @@
 Task 025 の実装に、攻撃のテストの担当（エージェント）が、攻撃者として
 試したことのうち、残す価値のあるもの（tests/test_auth.py に、まだないもの）。
 - 受け入れた弱さ（今は直さないもの）を再現するテストは、
-  xfail(strict=True) を付ける（今は「予想どおり失敗」）。直したら、印を
-  外す（外さないと、XPASS で失敗する）
+  xfail(strict=True, raises=AssertionError) を付ける（今は「予想どおり
+  失敗」）。直したら、印を外す（外さないと、XPASS で失敗する）
 - 見つかって直した弱さのテストと、守られていることを確かめるテスト
-時刻は、app/clock.py の utc_now を差し替える。
+時刻は、app/clock.py の utc_now を差し替える（fixture clock_now）。
 """
+import io
 import re
 import threading
-from datetime import datetime, timedelta
+from datetime import timedelta
+from urllib.parse import urlencode
 
 import pytest
+from werkzeug.test import EnvironBuilder
 
-from app import clock
 from app.api_helpers import is_api_path
 from app.auth import PUBLIC_ENDPOINTS
 from app.extensions import db
 from app.login_limits import client_key
-from app.models.login_failure import LoginFailure
 from app.models.user_session import UserSession
 from app.passwords import PASSWORD_HASH_METHOD
 from app.routes import auth as auth_routes
@@ -27,15 +28,18 @@ from app.routes.auth import DUMMY_PASSWORD_HASH
 from app.security import SECURITY_HEADERS
 from app.user_sessions import start_session
 from tests.auth_support import (
+    COOKIE_NAME,
+    FORM_HEADERS,
+    START,
     TEST_PASSWORD,
     TEST_USERNAME,
+    cookie_value,
     create_user,
+    failure_count,
+    post_login,
+    session_cookie_header,
 )
 
-START = datetime(2026, 10, 30, 3, 0, 0)
-COOKIE_NAME = "schedule_session"
-# 画面のフォームの送信に、ブラウザが付けるヘッダー（このアプリから）
-FORM_HEADERS = {"Origin": "http://localhost", "Sec-Fetch-Site": "same-origin"}
 # ほかのサイトのページから、ブラウザが送る要求のヘッダー
 CROSS_SITE_FETCH = {
     "Sec-Fetch-Site": "cross-site",
@@ -52,59 +56,9 @@ ATTACKER_ADDRESS = "203.0.113.9"
 OWNER_ADDRESS = "198.51.100.20"
 
 
-class FakeClock:
-    """テストで動かせる時計（UTC、タイムゾーンなし）。"""
-
-    def __init__(self, start: datetime):
-        self.value = start
-
-    def __call__(self) -> datetime:
-        return self.value
-
-    def advance(self, **kwargs) -> None:
-        self.value += timedelta(**kwargs)
-
-
-@pytest.fixture
-def clock_now(monkeypatch) -> FakeClock:
-    fake = FakeClock(START)
-    monkeypatch.setattr(clock, "utc_now", fake)
-    return fake
-
-
-def post_login(client, login_id, password, address=None, headers=None):
-    environ = {} if address is None else {"REMOTE_ADDR": address}
-    return client.post(
-        "/login",
-        data={"login_id": login_id, "password": password},
-        environ_base=environ,
-        headers=FORM_HEADERS if headers is None else headers,
-    )
-
-
-def session_cookie_header(response) -> str | None:
-    for header in response.headers.getlist("Set-Cookie"):
-        if header.startswith(f"{COOKIE_NAME}="):
-            return header
-    return None
-
-
-def cookie_value(response) -> str:
-    header = session_cookie_header(response)
-    assert header is not None
-    return header.split(";", 1)[0].split("=", 1)[1]
-
-
 def all_sessions(app) -> list[UserSession]:
     with app.app_context():
         return list(db.session.scalars(db.select(UserSession)))
-
-
-def failure_count(app) -> int:
-    with app.app_context():
-        return db.session.scalar(
-            db.select(db.func.count()).select_from(LoginFailure)
-        )
 
 
 # --- 直した弱さ：HEAD /login が、ログインの試行になっていた ---
@@ -139,6 +93,9 @@ def test_head_request_is_not_counted_as_login_failure(app, anonymous_client):
 
 @pytest.mark.xfail(
     strict=True,
+    # 弱さの再現（assert の失敗）だけを「予想どおり」にする。ほかの
+    # 例外（500 の応答での KeyError など）は、ふつうの失敗にする
+    raises=AssertionError,
     reason=(
         "受け入れた弱さ：ログインIDごとの制限は、だれの失敗でも始まり、"
         "正しいパスワードも断る。IDを知っていれば、1つの接続元から1分に"
@@ -398,6 +355,39 @@ def test_login_refuses_huge_body_before_reading_it(app, anonymous_client):
     assert response.status_code == 413
     # 本文を読む前に断るので、試行として記録しない
     assert failure_count(app) == 0
+
+
+def chunked_login_environ(body: bytes) -> dict:
+    """長さ（Content-Length）のない、chunked のログインの送信。"""
+    builder = EnvironBuilder(
+        path="/login",
+        method="POST",
+        headers=FORM_HEADERS,
+        data=body,
+        content_type="application/x-www-form-urlencoded",
+    )
+    environ = builder.get_environ()
+    environ.pop("CONTENT_LENGTH", None)
+    environ["HTTP_TRANSFER_ENCODING"] = "chunked"
+    # 本文の終わりを、サーバーが知っている（Werkzeug の開発用サーバーが
+    # chunked を受けたときと同じ）
+    environ["wsgi.input_terminated"] = True
+    environ["wsgi.input"] = io.BytesIO(body)
+    return environ
+
+
+# 直した弱さ：長さのない本文は、16KiB で黙って切られて読まれ、413 に
+# ならなかった（切られたパスワードで、失敗として記録された）
+@pytest.mark.parametrize("password", ["short", "c" * 5_000_000])
+def test_login_refuses_body_without_length(app, anonymous_client, password):
+    body = urlencode({"login_id": TEST_USERNAME, "password": password})
+
+    response = anonymous_client.open(chunked_login_environ(body.encode()))
+
+    assert response.status_code == 411
+    # 読まずに断るので、試行として記録しない
+    assert failure_count(app) == 0
+    assert session_cookie_header(response) is None
 
 
 # --- 守り：ほかのサイトからの要求 ---

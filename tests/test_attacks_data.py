@@ -1,26 +1,22 @@
-"""攻撃のテスト（認可・DBに残る値・デモのDB・パスワードの決まり）。
+"""攻撃のテスト（認可・DBに残る値・パスワードの決まり）。
 
 Task 025 の実装に、攻撃のテストの担当（エージェント）が、攻撃者として
 試したことのうち、残す価値のあるもの（tests/test_authorization.py・
 tests/test_passwords.py に、まだないもの）。
 - 受け入れた弱さ（今は直さないもの）を再現するテストは、
-  xfail(strict=True) を付ける（今は「予想どおり失敗」）。直したら、印を
-  外す（外さないと、XPASS で失敗する）
+  xfail(strict=True, raises=AssertionError) を付ける（今は「予想どおり
+  失敗」）。直したら、印を外す（外さないと、XPASS で失敗する）
 - 見つかって直した弱さのテストと、守られていることを確かめるテスト
 """
-from datetime import date
 from pathlib import Path
 
 import pytest
 
-from app import create_app
-from app.demo_data import DEMO_USERNAME, create_demo_database
 from app.extensions import db
-from app.models import Semester, Subject, Task, User, UserSession
+from app.models import Semester, Subject, Task
 from app.passwords import password_rule_errors
 from tests.auth_support import (
     OTHER_USERNAME,
-    TEST_PASSWORD,
     TEST_USER_ID,
     create_user,
     logged_in_client,
@@ -76,6 +72,9 @@ def owned_rows(app, user_id: int) -> dict:
 
 @pytest.mark.xfail(
     strict=True,
+    # 弱さの再現（assert の失敗）だけを「予想どおり」にする。ほかの
+    # 例外（500 の応答での KeyError など）は、ふつうの失敗にする
+    raises=AssertionError,
     reason=(
         "受け入れた弱さ：IDが、すべての利用者で1つの通し番号。Bは、"
         "自分のデータを2回作ると、その間にAが作った件数が分かる（中身は"
@@ -189,44 +188,6 @@ def test_deleted_notes_do_not_remain_in_database_file(app, client):
         db.engine.dispose()
 
     assert secret.encode() not in database_path.read_bytes()
-
-
-# --- 直した弱さ：デモのDBに、だれも使わないログインが残っていた ---
-#
-# demo_client が作った、ログイン中の端末の行が残り、利用者のメニューの
-# 「ログイン中の端末」が1台多く見えていた（知らないログインに気づく
-# ための数が当てにならない）
-
-
-@pytest.fixture
-def demo_app(tmp_path: Path):
-    """DBを一時ディレクトリの demo.db（まだないファイル）にしたアプリ。"""
-    test_app = create_app(
-        {
-            "TESTING": True,
-            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'demo.db'}",
-        }
-    )
-    yield test_app
-    with test_app.app_context():
-        db.session.remove()
-        db.engine.dispose()
-
-
-def test_demo_database_has_no_leftover_login(demo_app):
-    create_demo_database(demo_app, date(2026, 10, 21), password=TEST_PASSWORD)
-
-    with demo_app.app_context():
-        demo_id = db.session.scalar(
-            db.select(User.id).where(User.username == DEMO_USERNAME)
-        )
-        count = db.session.scalar(
-            db.select(db.func.count())
-            .select_from(UserSession)
-            .where(UserSession.user_id == demo_id)
-        )
-
-    assert count == 0
 
 
 # --- 直した弱さ：漏えいの確認を省くと、弱いパスワードが通っていた ---

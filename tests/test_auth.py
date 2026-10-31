@@ -11,11 +11,10 @@
 import hashlib
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
-from app import clock
 from app.extensions import db
 from app.login_limits import (
     LOGIN_ID_LOCK_STEPS,
@@ -34,20 +33,22 @@ from app.routes.auth import (
     LOGIN_FAILED_MESSAGE,
 )
 from tests.auth_support import (
+    COOKIE_NAME,
+    FORM_HEADERS,
     OTHER_USERNAME,
+    START,
     TEST_PASSWORD,
     TEST_USER_ID,
     TEST_USERNAME,
+    cookie_value,
     create_user,
+    failure_count,
     log_in,
+    post_login,
+    session_cookie_header,
 )
 
-START = datetime(2026, 10, 30, 3, 0, 0)
-COOKIE_NAME = "schedule_session"
 OTHER_ADDRESS = "198.51.100.7"
-# 画面のフォームの送信に、ブラウザが付けるヘッダー（このアプリから）
-FORM_HEADERS = {"Origin": "http://localhost", "Sec-Fetch-Site": "same-origin"}
-
 UNAUTHORIZED_BODY = {
     "error": {"code": "unauthorized", "message": "ログインしてください"}
 }
@@ -64,62 +65,12 @@ SEMESTER_PAYLOAD = {
 }
 
 
-class FakeClock:
-    """テストで動かせる時計（UTC、タイムゾーンなし）。"""
-
-    def __init__(self, start: datetime):
-        self.value = start
-
-    def __call__(self) -> datetime:
-        return self.value
-
-    def advance(self, **kwargs) -> None:
-        self.value += timedelta(**kwargs)
-
-
-@pytest.fixture
-def clock_now(monkeypatch) -> FakeClock:
-    fake = FakeClock(START)
-    monkeypatch.setattr(clock, "utc_now", fake)
-    return fake
-
-
-def post_login(client, login_id, password, address=None, headers=None):
-    environ = {} if address is None else {"REMOTE_ADDR": address}
-    return client.post(
-        "/login",
-        data={"login_id": login_id, "password": password},
-        environ_base=environ,
-        headers=FORM_HEADERS if headers is None else headers,
-    )
-
-
-def session_cookie_header(response) -> str | None:
-    for header in response.headers.getlist("Set-Cookie"):
-        if header.startswith(f"{COOKIE_NAME}="):
-            return header
-    return None
-
-
-def cookie_value(response) -> str:
-    header = session_cookie_header(response)
-    assert header is not None
-    return header.split(";", 1)[0].split("=", 1)[1]
-
-
 def session_rows(app, user_id=TEST_USER_ID) -> list[UserSession]:
     with app.app_context():
         return list(
             db.session.scalars(
                 db.select(UserSession).where(UserSession.user_id == user_id)
             )
-        )
-
-
-def failure_count(app) -> int:
-    with app.app_context():
-        return db.session.scalar(
-            db.select(db.func.count()).select_from(LoginFailure)
         )
 
 
@@ -345,7 +296,14 @@ def test_failed_login_bodies_do_not_reveal_whether_id_exists(
 
 
 def test_login_without_form_fields_is_a_failure(anonymous_client):
-    response = anonymous_client.post("/login", data={}, headers=FORM_HEADERS)
+    # 空のフォームの送信（ブラウザは、本文が空でも、長さ0を付ける。
+    # test_client は、本文が空だと、長さを付けない）
+    response = anonymous_client.post(
+        "/login",
+        data=b"",
+        content_type="application/x-www-form-urlencoded",
+        headers={**FORM_HEADERS, "Content-Length": "0"},
+    )
 
     assert response.status_code == 401
 

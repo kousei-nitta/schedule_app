@@ -91,7 +91,7 @@ def test_repeated_single_character_is_rejected():
 
 @pytest.mark.parametrize(
     "password",
-    ["ab12 ab12 ab12 ab12", "kumo sakura densha 2099", "9876 5432 10 abc"],
+    ["midori no tokei 42", "kumo sakura densha 2099", "9876 5432 10 abc"],
 )
 def test_varied_passwords_are_accepted(password):
     # 文字の種類が5つ以上で、連番だけでないもの
