@@ -35,6 +35,10 @@ import {
 const WEEK_VIEW = "timeGridWeek";
 const MONTH_VIEW = "dayGridMonth";
 const LIST_VIEW = "listFourWeeks";
+// 幅の狭い画面（スマホ。Bootstrap の sm（576px）より狭い）。最初の表示を
+// 一覧にし、週表示の日付の見出しを短くする（docs/ui_ux.md の
+// 「カレンダーモード」）。開いたときの幅で決める（回転しても変えない）
+const NARROW_SCREEN_QUERY = "(max-width: 575.98px)";
 // 一覧表示の期間の日数（今日から4週間）。前後への移動も、この日数ずつ。
 const LIST_DAYS = 28;
 // 「直近の締切」欄に載せる範囲。期限切れと、締切日が今日からこの日数後
@@ -621,11 +625,15 @@ export function initCalendar() {
   }
 
   renderFilter();
+  const isNarrowScreen = window.matchMedia(NARROW_SCREEN_QUERY).matches;
+  const initialView = isNarrowScreen ? LIST_VIEW : WEEK_VIEW;
+  // 一覧表示では、締切を出さない（switchView と同じ）
+  deadlinesShown = initialView !== LIST_VIEW;
   calendar = new window.FullCalendar.Calendar(getElement("calendar-view"), {
     locale: "ja",
     // 日曜始まり
     firstDay: 0,
-    initialView: WEEK_VIEW,
+    initialView,
     headerToolbar: {
       left: "prev,next today",
       center: "title",
@@ -676,6 +684,13 @@ export function initCalendar() {
     allDayText: "締切",
     scrollTime: "08:00:00",
     views: {
+      [WEEK_VIEW]: {
+        // 狭い画面では、日付の見出しを短くする（例：2(月)。7日分が
+        // 横に並ぶため、11/2(月) では重なる）
+        ...(isNarrowScreen
+          ? { dayHeaderFormat: { day: "numeric", weekday: "short" } }
+          : {}),
+      },
       [MONTH_VIEW]: {
         // 時間型の予定は、時刻を出さず、タイトルだけを表示する。
         displayEventTime: false,

@@ -13,6 +13,7 @@
   （ふだんの page は、Playwright の既定で、bfcache を使わない）
 - ブラウザの時間帯は、日本（Asia/Tokyo。利用者のスマホ・Macと同じ。
   アプリの「今日」も日本時間。app/clock.py）
+- phone_page：スマホの幅（390px）の画面のページ
 - page_errors：ページで起きたJavaScriptの例外の一覧
 - csp_violations：ブラウザが、CSP（app/security.py）に反するとして
   止めた読み込み・実行の一覧
@@ -152,6 +153,29 @@ def bfcache_page(playwright: Playwright):
         page.route(CDN_PREFIX + "**", answer_from_node_modules)
     yield page
     browser.close()
+
+
+# スマホ（iPhone）の画面の大きさ（CSS の画素。Task 026 の「スマホでの
+# 最低限の表示」）。ブラウザは Chromium のまま（Safari の確認は、Koma が
+# iPhone で行う）
+PHONE_VIEWPORT = {"width": 390, "height": 844}
+
+
+@pytest.fixture
+def phone_page(browser, live_server: str):
+    """スマホの幅の画面のページ（タッチ操作・高い画素密度）。"""
+    context = browser.new_context(
+        viewport=PHONE_VIEWPORT,
+        device_scale_factor=3,
+        is_mobile=True,
+        has_touch=True,
+        timezone_id=BROWSER_TIMEZONE,
+    )
+    page = context.new_page()
+    if os.environ.get("E2E_CDN_FROM_NPM") == "1":
+        page.route(CDN_PREFIX + "**", answer_from_node_modules)
+    yield page
+    context.close()
 
 
 @pytest.fixture
