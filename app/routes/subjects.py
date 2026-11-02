@@ -5,6 +5,9 @@ from flask import Blueprint, jsonify
 
 from app import clock
 from app.api_helpers import (
+    NOTES_LENGTH_MESSAGE,
+    NOTES_MAX_LENGTH,
+    NOTES_TYPE_MESSAGE,
     MAX_ID,
     api_error_response,
     format_time,
@@ -164,7 +167,9 @@ def validate_subject_values(
         notes, error = validate_optional_string(
             payload,
             "notes",
-            "詳細・メモは文字列で指定してください",
+            NOTES_TYPE_MESSAGE,
+            max_length=NOTES_MAX_LENGTH,
+            length_message=NOTES_LENGTH_MESSAGE,
         )
         if error is None:
             values["notes"] = notes

@@ -36,6 +36,13 @@ INVALID_JSON_MESSAGE = (
 UNUSABLE_CHARACTER_MESSAGE = "使用できない文字が含まれています"
 EMPTY_PATCH_MESSAGE = "変更する項目を指定してください"
 
+# 授業・予定・課題の「詳細・メモ」（notes）の決まり（3つのAPIで同じ）。
+# 長さの上限は、大きなメモで、DB・バックアップ・ディスクを使わせないため
+# （docs/architecture/api_endpoints.md。Task 026）
+NOTES_MAX_LENGTH = 2000
+NOTES_TYPE_MESSAGE = "詳細・メモは文字列で指定してください"
+NOTES_LENGTH_MESSAGE = f"詳細・メモは{NOTES_MAX_LENGTH}文字以内にしてください"
+
 
 def contains_unusable_character(value: str) -> bool:
     """UTF-8に変換できない孤立サロゲートが含まれるか確認する。"""
