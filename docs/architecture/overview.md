@@ -7,7 +7,7 @@
 |---|---|---|
 | 言語 | Python 3.14 | プロジェクト専用の仮想環境 `.venv` を使用。版を選んだ理由は `docs/decisions/0003-python-3-14.md`、開発の環境の方針は `architecture/security.md` の「開発の環境」 |
 | バックエンド | Flask | |
-| DB | SQLite | ローカル1ファイル。利用者は少数（ログインして使う。Task 025）。同時の要求は、ログインの試行の制限で考える（`architecture/security.md` の「ログインの試行の制限」）。使うDBは、環境変数で切り替えられる（「DBの切り替え（環境変数）」）。実データのDBは、自動でバックアップする（「データの保護（バックアップ）」） |
+| DB | SQLite | 1つのファイル（Mac では `instance/app.db`、本番では `~/schedule_data/app.db`）。利用者は少数（ログインして使う。Task 025）。同時の要求は、ログインの試行の制限で考える（`architecture/security.md` の「ログインの試行の制限」）。使うDBは、環境変数で切り替えられる（「DBの切り替え（環境変数）」）。実データのDBは、自動でバックアップする（「データの保護（バックアップ）」） |
 | ORM | Flask-SQLAlchemy | |
 | DBスキーマ変更 | Flask-Migrate（内部でAlembicを使用） | モデルの変更をmigrationファイルとして記録し、既存データを保ったままテーブルを更新する。方式の詳細は「DBスキーマ変更の方式」を参照 |
 | テンプレート | Jinja2（Flask標準） | |
@@ -19,8 +19,9 @@
 | 自動テスト | pytest | APIのテストに使う。配置・DB・実行方法は「自動テスト（pytest）」を参照 |
 | 検査・CI | ruff・ESLint・GitHub Actions | 開発のときだけ使う（`requirements-dev.txt`・`package.json`）。設定と実行は `docs/development/testing.md` の「検査の道具」「CI」 |
 | E2Eテスト | Playwright（pytest-playwright。ブラウザは Chromium） | 開発のときだけ使う（`requirements-dev.txt`。CDNの代用のファイルは `package.json`）。画面の主な流れを確かめる。`docs/development/testing.md` の「E2Eテスト」 |
-| 起動 | `run.py` | 開発用サーバーを `127.0.0.1:5001` で起動する。デバッグモードは、環境変数 `FLASK_DEBUG=1` のときだけ（`architecture/security.md` の「debug（デバッグモード）」）。5001番を使うのは、macOSではAirPlayレシーバーが5000番を使うことがあるため。起動のとき、使っているDBを表示し、実データのDBの自動バックアップを作る（「データの保護（バックアップ）」） |
-| 自作のコマンド | Flaskのコマンド（`app/cli.py`） | `flask --app app backup-db`（手動のバックアップ）、`flask --app app create-demo-db`（デモ用の架空のデータ。`docs/development/database.md` の「デモ用の架空のデータ」）、`create-user`・`set-password`・`rename-user`・`unlock-login`（利用者の管理。`docs/development/database.md` の「利用者の管理」）。`create_app` で登録する |
+| 公開先（本番） | alwaysdata の Free（Python WSGI。uWSGI のワーカーは1つ） | `wsgi.py` が入口。本番の設定は `architecture/security.md` の「本番の設定」、手順は `development/deploy.md`、選んだ理由は `docs/decisions/0005-public-hosting-and-device-cookie.md` |
+| 起動 | `run.py` | Mac の中だけ。開発用サーバーを `127.0.0.1:5001` で起動する（本番の設定では起動しない）。デバッグモードは、環境変数 `FLASK_DEBUG=1` のときだけ（`architecture/security.md` の「debug（デバッグモード）」）。5001番を使うのは、macOSではAirPlayレシーバーが5000番を使うことがあるため。起動のとき、使っているDBを表示し、実データのDBの自動バックアップを作る（「データの保護（バックアップ）」） |
+| 自作のコマンド | Flaskのコマンド（`app/cli.py`） | どのコマンドも、最初にローカルか本番かと、使うDBを表示する。`flask --app app backup-db`（手動のバックアップ）、`daily-backup`（毎日のバックアップ。本番の定期実行）、`make-transfer-copy`（移行の写し。`development/deploy.md`）、`show-settings`（今の設定の表示）、`flask --app app create-demo-db`（デモ用の架空のデータ。`docs/development/database.md` の「デモ用の架空のデータ」）、`create-user`・`set-password`・`rename-user`・`unlock-login`（利用者の管理。`docs/development/database.md` の「利用者の管理」）。`create_app` で登録する |
 
 制約：費用をかけない（大学の授業の一環のため）。
 
@@ -51,11 +52,12 @@
 - 独自のスタイル（`app/static/css/style.css`）は、`base.html` の `<head>` で、BootstrapのCSSのあとに読み込む（Bootstrapの指定を、上書きできるようにするため）。
 
 ## DBの切り替え（環境変数）
-- 使うDBは、環境変数 `DATABASE_URL`（SQLAlchemyの形のURL）で決める。設定がない・空のときは、`sqlite:///app.db`（`instance/app.db`。KomaのMacでは、実データのDB）。値は `app/config.py` の `database_uri()` で読む（前後の空白は取り除く）
+- 使うDBは、環境変数 `DATABASE_URL`（SQLAlchemyの形のURL）で決める。設定がない・空のときは、`sqlite:///app.db`（`instance/app.db`。KomaのMacでは、実データのDB）。値は `app/config.py` の `database_uri()` で読む（前後の空白は取り除く）。`create_app` の時点で読む
+- 本番（`APP_ENV=production`）では、`DATABASE_URL` は必須で、SQLite のファイルの絶対パス（リポジトリの外）。本番では、使うDBが、いつも実データのDB（`architecture/security.md` の「本番の設定」）
 - SQLiteの相対パスは、`instance/` からのパスになる（Flask-SQLAlchemyの扱い）。例：`DATABASE_URL=sqlite:///demo.db python run.py` は、`instance/demo.db` を使う
 - `python run.py`・`flask --app app db …`・自作のコマンドの、すべてに効く（テストは、`create_app` に渡す設定でDBを決めるため、影響しない）
 - `run.py` は、起動のとき、使っているDBと、実データのDBかどうかを表示する（例：「DB：…/instance/app.db（実データのDB）」）。URLにパスワードがあれば、隠す。SQLiteのファイルでないDB（`file:` の形のURL、将来のPostgreSQLなど）は、実データのDBかどうかを判定しない（そう表示し、自動のバックアップも作らない）
-- 実データのDBかどうかは、ファイルが `instance/app.db` と同じかで決める（`app/database_files.py`。別の書き方のパスでも、同じファイルなら実データのDB。パスの文字が違っても、両方のファイルがあれば、ファイルそのもので比べる。macOSの既定のファイルシステムは大文字・小文字を区別しないため、`APP.db` も実データのDB。実データのDBがまだなく、ファイルで比べられないときも、`instance/` の中の、大文字・小文字だけが違う名前は、実データのDBとして扱う）
+- 実データのDBかどうかは、ローカルでは、ファイルが `instance/app.db` と同じかで決める（本番では、`DATABASE_URL` のファイル。`app/database_files.py`。別の書き方のパスでも、同じファイルなら実データのDB。パスの文字が違っても、両方のファイルがあれば、ファイルそのもので比べる。macOSの既定のファイルシステムは大文字・小文字を区別しないため、`APP.db` も実データのDB。実データのDBがまだなく、ファイルで比べられないときも、`instance/` の中の、大文字・小文字だけが違う名前は、実データのDBとして扱う）
 - 実データのDBのバックアップのフォルダ（`instance/backups/`。下のフォルダを含む）の中かどうかも、同じように、フォルダそのもので比べて決める（デモデータを、その中に作らないため）
 
 ## データの保護（バックアップ）
@@ -73,6 +75,8 @@ DB（SQLiteのファイル）のバックアップ。処理は `app/backup.py`�
   - 自動のものは、新しいものから30個を残し、それより古い自動のものを消す（名前が上の自動の形のファイルだけ。手動のものと、ほかのファイルは消さない）。名前の日付が今日より後のもの（時計がずれていた場合など）は、数えず、消さない（今日作ったものが、古いものとして消えないため）
   - 失敗しても、警告を表示して、起動を続ける（アプリを使えなくしないため。警告を見たら、手動で取る）
   - 起動したまま日をまたいでも、次の起動まで作らない（必要なら、手動で取る）
+  - 「その日」は、日本時間（`app/clock.py` の `japan_today`）。手動の名前の日時も、日本時間
+- **毎日**（本番）：`flask --app app daily-backup` を、ホストの定期実行のタスクから、1日1回動かす。自動と同じ名前・同じ整理（新しい30個）で、作れなければ終了コード1。対象は、実データのDBだけ。ほかに、ホスト（alwaysdata）が3日分を持ち、Koma が毎週 Mac に取り寄せる（`development/deploy.md` の「バックアップ」）
 - **手動**：`flask --app app backup-db [--label <ラベル>]`。対象は、使っているDB（環境変数 `DATABASE_URL` で決まる。SQLiteのファイルだけ）。作ったファイルと、各テーブルの件数を表示する。失敗したら、理由を表示して、終了コード1で終わる
 - **戻すコマンドは作らない**（実データのDBを上書きする操作のため、人が手順で行う。`docs/development/database.md` の「バックアップから戻す」）
 
@@ -83,7 +87,10 @@ DB（SQLiteのファイル）のバックアップ。処理は `app/backup.py`�
 schedule_app/
 ├── app/
 │   ├── __init__.py          # Flaskアプリの作成（`create_app(test_config=None)`）
-│   ├── config.py            # 設定（使うDB：環境変数 DATABASE_URL。「DBの切り替え（環境変数）」。受け付ける Host：TRUSTED_HOSTS。ログインの Cookie。公開の設定で Secure の付け忘れを断る check_cookie_security）
+│   ├── config.py            # 設定（ローカルか本番か：APP_ENV。本番の必須の設定と、そこから決まる Host・Cookie。使うDB：DATABASE_URL。設定の付け忘れを断る check_security_settings）
+│   ├── env_file.py          # 本番の設定のファイル（SCHEDULE_ENV_FILE）を読む
+│   ├── production.py        # 本番の起動のときの確かめ（デバッグモード・ワーカーの数・DBのフォルダの権限）と umask
+│   ├── proxy.py             # 本番：プロキシの後ろで、接続元とスキームを決める WSGI の層
 │   ├── security.py          # セキュリティのヘッダー（CSPと、要求ごとのnonce。architecture/security.md）
 │   ├── auth.py              # ほかのサイトからの要求の拒否、ログインしている利用者の読み込み、既定で拒否（current_user・current_user_id）
 │   ├── ownership.py         # 認可：IDと持ち主の両方でデータを探す get_owned（architecture/api.md の「利用者ごとのデータ（認可）」）
@@ -91,11 +98,13 @@ schedule_app/
 │   ├── login_limits.py      # ログインの試行の制限（失敗の記録は HMAC だけ）
 │   ├── user_sessions.py     # ログイン中の端末（トークンの SHA-256 だけを保存。期限・ログアウト・Cookie）
 │   ├── secret_key.py        # SECRET_KEY（環境変数か instance/secret_key）
-│   ├── clock.py             # ログインの処理が使う「今」（UTC。テストで差し替える）
+│   ├── clock.py             # 「今」と「今日」（ログインの処理は UTC、予定とバックアップの名前は日本時間。テストで差し替える）
+│   ├── trusted_devices.py   # 一度ログインした端末の印（印の SHA-256 だけを保存。印ごとの失敗の数）
+│   ├── transfer.py          # 移行の写し（ログイン中の端末・失敗・印と、空き領域を持ち込まない）
 │   ├── database_files.py    # 使っているDBのファイルの場所と、実データのDBかどうかの判定
 │   ├── backup.py            # DBのバックアップ（「データの保護（バックアップ）」）
 │   ├── demo_data.py         # デモ用の架空のデータ（docs/development/database.md の「デモ用の架空のデータ」）
-│   ├── cli.py               # 自作のコマンド（backup-db・create-demo-db・create-user・set-password・rename-user・unlock-login）
+│   ├── cli.py               # 自作のコマンド（backup-db・daily-backup・make-transfer-copy・show-settings・create-demo-db・create-user・set-password・rename-user・unlock-login）
 │   ├── extensions.py        # db = SQLAlchemy(命名規則つきのMetaData)、migrate = Migrate() など
 │   ├── api_helpers.py       # API共通処理（エラー応答、エラーハンドラー、JSON本文の受け取り（PATCHの空の本文の検査 read_patch_object を含む）、一覧のクエリのIDの読み取り read_id_query、項目の検査（使用できない文字の検査、真偽値、決まった値から選ぶ文字列を含む）、日付・時刻・日時の変換と検証、IDの上限 MAX_ID、メッセージの定数 UNUSABLE_CHARACTER_MESSAGE・EMPTY_PATCH_MESSAGE）。DBの操作は行わない
 │   ├── categories.py        # カテゴリの保存値の定数と、APIで受け付ける値の一覧（EVENT_CATEGORIES・TASK_CATEGORIES）。定数だけを持つ
@@ -109,6 +118,7 @@ schedule_app/
 │   │   ├── closure.py       # 学期の休講日
 │   │   ├── user.py          # 利用者
 │   │   ├── user_session.py  # ログイン中の端末
+│   │   ├── trusted_device.py # 一度ログインした端末の印
 │   │   └── login_failure.py # ログインの失敗の記録
 │   ├── routes/
 │   │   ├── __init__.py      # routesをパッケージにする（空のファイル）
@@ -147,6 +157,9 @@ schedule_app/
 │   ├── secret_key           # SECRET_KEY（環境変数がないとき。初回に作る。持ち主だけが読める）
 │   ├── backups/             # DBのバックアップ（自動・手動。「データの保護（バックアップ）」）
 │   └── demo.db              # デモのDB（例。create-demo-db で作る）
+├── scripts/                 # 手元で動かす道具（アプリには含まない）
+│   ├── check_public.py      # 本番のURLの点検（Mac から。標準のライブラリだけ）
+│   └── echo_headers_wsgi.py # 下見の道具（受け取ったヘッダーを返すだけ）
 ├── docs/                    # 資料（何がどこにあるかは docs/README.md）
 ├── .github/
 │   ├── workflows/ci.yml     # CI（GitHub Actions。docs/development/testing.md の「CI」）
@@ -169,14 +182,22 @@ schedule_app/
 │   ├── test_database_files.py # DBの切り替えと、DBのファイルの場所の確認
 │   ├── test_backup.py       # バックアップと、コマンド backup-db の確認
 │   ├── test_demo_data.py    # デモデータと、コマンド create-demo-db の確認
-│   ├── test_security.py     # Hostの検査・セキュリティのヘッダー（CSP）・深い入れ子のJSON・テンプレートの書き方の確認
+│   ├── test_security.py     # Hostの検査・セキュリティのヘッダー（CSP）・深い入れ子のJSON・本文の上限・テンプレートの書き方の確認
+│   ├── production_support.py # 本番の設定のアプリをテストで作る補助（fixture は conftest.py の production_app）
+│   ├── test_production.py   # 本番の設定・設定のファイル・起動のときの確かめ・接続元の層・HSTS・壊す操作の拒否
+│   ├── test_trusted_devices.py # 端末の印・失敗の全体の上限・確かめの枠
+│   ├── test_clock.py        # 日本時間の「今日」と、サーバーの時刻を直接使わないこと
+│   ├── test_transfer.py     # 毎日のバックアップと、移行の写し
+│   ├── test_limits.py       # メモと学期の期間の上限
+│   ├── test_check_public.py # 本番の点検のスクリプトと、下見の道具
 │   ├── test_<リソース名>_api.py  # APIのテスト（リソースごと）
 │   ├── test_subjects_update_delete_api.py  # 授業の編集・削除と、1件取得の件数のAPIのテスト（授業のテストが大きくなるため、分けた）
 │   ├── test_events_create_update_delete_api.py  # 予定の登録・編集・削除のAPIのテスト（予定の一覧・1件取得・派遣会社の候補は test_events_api.py）
 │   ├── test_semesters_update_delete_api.py  # 学期の編集・削除（期間の変更の、予定・休講日への反映を含む）と、1件取得の件数のAPIのテスト（学期の登録・一覧と、405の Allow などのAPI共通の確認は test_semesters_api.py）
 │   └── e2e/                 # E2Eテスト（Playwright。docs/development/testing.md の「E2Eテスト」）
 │       ├── conftest.py      # E2Eの共通のfixture（一時ディレクトリのDBでのアプリの起動、CDNの代用、JavaScriptの例外とCSPの違反の記録）
-│       └── test_main_flow.py # 主な流れ（ログイン → 学期 → 休講日 → 授業 → カレンダー → 課題 → 完了 → ログアウト）と、ログインが切れたときの移動
+│       ├── test_main_flow.py # 主な流れ（ログイン → 学期 → 休講日 → 授業 → カレンダー → 課題 → 完了 → ログアウト）と、ログインが切れたときの移動
+│       └── test_mobile.py   # スマホの幅での最低限の表示
 ├── pytest.ini               # pytestの設定（E2Eテストを、ふだんの実行から外す設定を含む）
 ├── ruff.toml                # ruff（Pythonの検査）の設定
 ├── eslint.config.js         # ESLint（JavaScriptの検査）の設定（セキュリティのための禁止の規則を含む）
@@ -189,7 +210,8 @@ schedule_app/
 ├── CLAUDE.md                # 実装の規則（Claudeが作業の始めに読む）
 ├── README.md                # リポジトリの表紙（概要・機能・技術・起動方法・開発体制）
 ├── SECURITY.md              # 脆弱性の報告のしかた
-└── run.py                   # 起動スクリプト（127.0.0.1:5001。使っているDBの表示と、実データのDBの自動バックアップ）
+├── run.py                   # 起動スクリプト（Mac の中だけ。127.0.0.1:5001。使っているDBの表示と、実データのDBの自動バックアップ）
+└── wsgi.py                  # 本番の入口（ホストの uWSGI が読む）
 ```
 
 注意：

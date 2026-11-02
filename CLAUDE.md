@@ -15,11 +15,14 @@
 | デモのDB | `DATABASE_URL=sqlite:///demo.db flask --app app create-demo-db`（`instance/demo.db` を作る。利用者 `demo` のパスワードの入力を求める） |
 | 利用者の管理 | `flask --app app create-user <ID>`・`set-password <ID>`・`rename-user <ID> <新しいID>`・`unlock-login <ID>`（`docs/development/database.md` の「利用者の管理」） |
 | 手動のバックアップ | `flask --app app backup-db --label <ラベル>` |
+| 設定の確かめ | `flask --app app show-settings`（ローカルか本番か・使うDB。秘密の値は出さない） |
+| 本番（alwaysdata） | 手順は `docs/development/deploy.md`（Komaが行う）。本番だけで使うコマンド：`daily-backup`（定期実行）。Macで使うもの：`make-transfer-copy <出力先>`（移行の写し）、`python3 scripts/check_public.py <URL>`（点検） |
 
 PRを作る前に、テスト・E2Eテスト・2つの検査が、すべて通ることを確かめる（CIも、同じことを確かめる）。
 
 ## データを守る（最も重要）
 - KomaのMacの `instance/app.db` は、実データ。Claudeは触れない。リンクしたMacのファイルは、Komaに頼まれたときだけ扱う
+- 本番（alwaysdata）の実データのDB・アカウント・SSHにも、Claudeは触れない（Komaが行う）。本番のURL・アカウント名・ログインID・設定のファイルの中身（`SECRET_KEY` など）・パスワードを、リポジトリ・Issue・PRに書かない
 - テストは、pytestの一時ディレクトリのDBだけを使う。テストで `create_app()` を引数なしで呼ばない（`SQLALCHEMY_DATABASE_URI` を、一時ディレクトリのDBにして渡す）。テストで、`instance/` の中にファイルを作らない
 - バックアップ・デモデータ・DBの切り替えの処理を変えるときは、実データのDB（`instance/app.db`）を変えない・消さないことを、テストで確かめる。バックアップから戻すコマンドは作らない（手順は `docs/development/database.md`）
 - DBの構造の変更は、migrationで行う。`db.create_all()` は使わない。migrationは、一時的なDBと比べて生成する。手順は `docs/development/database.md`

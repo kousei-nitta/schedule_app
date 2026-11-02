@@ -43,7 +43,7 @@
   - `client` は、ログインの画面を通らず、DBにログイン中の端末の行を作って、Cookie を入れる（`tests/auth_support.py` の `log_in`。scrypt の計算を、テストごとにしないため）。パスワードのハッシュは、テスト全体で1回だけ計算する
   - ログインしていない状態は、fixture `anonymous_client`。ほかの利用者は、`create_user` と `logged_in_client`（`tests/auth_support.py`）
   - テストのために、ログインを外す設定や分岐を、`app/` に作らない
-  - 時刻（ログインの期限・試行の制限）は、`app/clock.py` の `utc_now` を、`monkeypatch` で差し替える（`tests/test_auth.py` の `FakeClock`）
+  - 時刻（ログインの期限・試行の制限・端末の印の期限）は、`app/clock.py` の `utc_now` を、`monkeypatch` で差し替える（`tests/test_auth.py` の `FakeClock`）
   - 試行の制限のテストで、失敗の記録を前もって作るときは、本物の `reserve_attempt` を通す（`tests/test_auth.py` の `add_failures`・`fail_as_soon_as_allowed`）。期限の決め方をテストの中に写さない（写すと、本体が壊れても、テストが気づけない。別の目のレビューで、本体を壊しても全テストが通ることが分かった）。断られる時刻の記録は作れない（本物では起きない状態のため）
   - 画面のフォームの送信（`/login`・`/logout` など）は、ブラウザが付けるヘッダー（`Origin` か `Sec-Fetch-Site`）がないと403になる。テストでは、`headers` に付ける（`tests/test_auth.py` の `FORM_HEADERS`）
   - APIを足したら、`tests/test_authorization.py` の `CASES` に、ほかの利用者のデータに触れられないことを確かめる関数を足す（足し忘れると、テストが失敗する）
@@ -61,6 +61,12 @@
   - 学期の削除：授業がある学期は409で、何も変わらない。授業がない学期は、学期と、その休講日の行が0件になる（`semester_id` が `NULL` の休講日が増えていない）。ほかの学期の行は変わらない
   - 予定の登録・編集・削除（予定API）：その予定の行だけが、作られる・変わる・消える。ほかの予定（自動生成の予定を含む）は変わらない。登録した予定は `is_generated=False`、編集した自動生成の予定は `is_generated=True` のまま。カレンダーから操作した予定と、休講日の追加・授業全体の編集・授業の削除との関係（「カレンダーからの授業の予定の操作」）
 - 「今日」に依存する処理のテストでは、routeが「今日」を求める関数（`routes/subjects.py` の `current_date`）を、`monkeypatch` で置き換えて、日付を固定する（実行した日によって、結果が変わらないようにするため）。置き換える場所は、routeのモジュールの名前
+  - 「今日」は日本時間（`app/clock.py` の `japan_today`。Task 026）。サーバーの時刻（`date.today()`・`datetime.now()` など）を、`app/clock.py` の外で使っていないことを、`tests/test_clock.py` が、コードを読んで確かめる
+- 本番の設定のテスト（Task 026）
+  - fixture `production_app`（`tests/conftest.py`）：本番の設定（`tests/production_support.py` の架空の公開のURL・秘密の値・一時ディレクトリの中のDB）でアプリを作る。本番の起動のときの確かめ（ワーカーの数など）と、接続元の層（`app/proxy.py`）も、ふだんどおりに通る
+  - 本番のアプリへの要求は、プロキシが付けるヘッダー（接続元・`X-Forwarded-Proto`）と、公開のURLの Host が要る（ないと400）。`tests/test_production.py` の `PublicClient` を使う
+  - 本番は `umask` を変えるので、fixture `keep_umask` で、テストのあとに戻す
+  - 本番の点検のスクリプト（`scripts/check_public.py`）は、`tests/test_check_public.py` で、`production_app` に、プロキシの代わりの層をかぶせて確かめる
 - migrationでテーブルを追加・変更したタスクでは、`tests/test_setup.py` で、そのテーブルの列（名前・型・NULL可否）と制約の名前が、「データ設計」と「制約の命名規則」のとおりであることを確かめる（テスト用DBはmigrationで作るため、migrationの内容の確認になる）
 - 各テストは独立させる（実行順に依存しない）。1つのテストで確認することは、1つにする
 
@@ -93,6 +99,7 @@
 
 ### 対象
 - 主な流れ（`tests/e2e/test_main_flow.py`）：ログイン（ログインしていないと、ログインの画面に移る）→ 学期の登録 → 休講日の追加 → 授業の登録（休講日を除いて予定ができる）→ カレンダーの週表示（休講日に授業の予定がなく、次の週にはある）→ 課題の登録（「直近の締切」欄に出る）→ 完了（完了の一覧に移り、「直近の締切」欄から消える）→ ログアウト（トップを開き直しても、ログインの画面）。ほかのタブでログアウトしたあと、次の操作で、ログインの画面へ移ること（`api.js` の401の扱い）も確かめる。流れの全体で、JavaScriptの例外と、CSPの違反（ブラウザが、CSPに反するとして止めた読み込み・実行）が起きていないこと
+- スマホの幅（`tests/e2e/test_mobile.py`。Task 026）：幅390pxで、どのモードでも横にはみ出さないこと・カレンダーが一覧表示で始まること・課題の表の課題名が読めること。Safari での見た目と操作は、Koma が iPhone で確かめる（`development/deploy.md` の「下見」）
 - E2Eテストは、主な流れと、新しい画面の重要な操作に絞る。細かな入力の検査は、APIのテスト（pytest）で確かめる
 
 ### 配置と実行
@@ -100,8 +107,10 @@
 - 実行：`python -m pytest -m e2e`。ファイルを指定するときも、`-m e2e` を付ける（例：`python -m pytest -m e2e tests/e2e/test_main_flow.py`。付けないと、外されて何も動かない）。初めて動かす前と、Playwright の版を上げたときに、ブラウザを入れる：`python -m playwright install chromium`
 - 操作を目で見るとき：`python -m pytest -m e2e --headed --slowmo 500`（ブラウザの画面を出し、1つの操作ごとに0.5秒待つ）
 - Claudeの作業環境：`E2E_CDN_FROM_NPM=1 python -m pytest -m e2e`。CDN（jsDelivr）に届かないため、この環境変数があるときだけ、CDNへの読み込みに、`node_modules` の同じ版のファイル（`npm ci` で入る）で答える（`tests/e2e/conftest.py`）。ブラウザが `integrity`（SRI）を確かめるので、違うファイルなら読み込まれない。CIとKomaのMacでは、付けない（CDNから読む）
+  - Claudeの作業環境では、Playwright のブラウザを取得できないことがある（Task 026 では、`requirements-dev.txt` の版の Chromium を取得できなかった）。そのときは、作業環境に入っている Chromium に合う版の Playwright を、リポジトリの外の別の venv に入れて、E2Eだけをそこで動かす（`requirements-dev.txt` は変えない。CIは、固定した版で動かす）
 
 ### 仕組み（`tests/e2e/conftest.py`）
+- ブラウザの時間帯は、日本時間（`Asia/Tokyo`）に固定する（アプリの「今日」が日本時間のため。CIのブラウザは UTC で動く）。fixture `phone_page` は、スマホの幅（390×844）のページ
 - テストごとに、migrationで作った雛形のDB（`tests/conftest.py` の `template_db`）を一時ディレクトリにコピーし、E2Eの利用者（`tests/auth_support.py` の `E2E_USERNAME`・`TEST_PASSWORD`。架空）を作って、そのDBで、アプリを別のスレッドで起動する（空いているポート）。ログインは、テストが画面から行う。実データのDBに触れない（「開発用DB（`instance/app.db`）を触らない仕組み」も、そのまま効く）
 - アプリは、ふだんと同じく、サーバーの中の例外を外へ出さない設定（`PROPAGATE_EXCEPTIONS` を `False`）で動かす（APIの500を、JSONで返すため）
 - ページで起きたJavaScriptの例外を、fixture `page_errors` に集める。CSPの違反を、fixture `csp_violations` に集める（ブラウザの `securitypolicyviolation` のイベントと、Chromiumがコンソールに記録する「Content Security Policy」を含むエラーの、両方。片方の仕組みが変わっても、空振りしないように）。テストの最後に、どちらも空であることを確かめる
