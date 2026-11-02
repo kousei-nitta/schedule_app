@@ -12,8 +12,8 @@ import pytest
 
 from app.extensions import db
 from app.login_limits import GLOBAL_FAILURE_LIMIT
-from app.models.login_failure import LoginFailure
 from app.models.trusted_device import TrustedDevice
+from app.passwords import MAX_PASSWORD_INPUT_LENGTH
 from app.routes import auth as auth_routes
 from app.trusted_devices import (
     DEVICE_LIFETIME,
@@ -30,6 +30,7 @@ from tests.auth_support import (
     TEST_PASSWORD,
     TEST_USER_ID,
     TEST_USERNAME,
+    add_recent_failures,
     create_user,
     device_cookie_header,
     device_cookie_value,
@@ -233,6 +234,47 @@ def test_device_is_disabled_after_failures(app, clock_now, caplog):
     assert failure_count(app) == 1
 
 
+def test_device_is_disabled_after_too_long_passwords(app, clock_now, caplog):
+    # 長すぎるパスワードは、確かめずに失敗にする（利用者を読まない）。
+    # 印のある道では、それでも、印の持ち主でログに残し、5回で無効にする
+    # （別の目のレビューで、5回目が500になることが分かった）
+    owner = owner_with_device(app, clock_now)
+    too_long = "a" * (MAX_PASSWORD_INPUT_LENGTH + 1)
+
+    with caplog.at_level(logging.WARNING, logger="app.auth"):
+        for _ in range(MAX_DEVICE_FAILURES):
+            response = post_login(
+                owner, TEST_USERNAME, too_long, OWNER_ADDRESS
+            )
+            assert response.status_code == 401
+
+    assert devices_of(app) == []
+    assert (
+        "端末の印を、続けての失敗で無効にしました"
+        f"（利用者：{TEST_USER_ID}、" in caplog.text
+    )
+    assert "不明なID" not in caplog.text
+
+
+def test_device_with_other_login_ids_is_used_up(app, clock_now, caplog):
+    # 有効な印が、持ち主と違うIDと一緒に届いたら、印のない道で扱い、
+    # 印の失敗にも数える（盗まれた印で、持ち主のIDを探るのは、5回まで。
+    # 攻撃のテストで見つけた）
+    owner = owner_with_device(app, clock_now)
+
+    with caplog.at_level(logging.WARNING, logger="app.auth"):
+        for number in range(MAX_DEVICE_FAILURES):
+            response = post_login(
+                owner, f"guess-{number}", WRONG_PASSWORD, OWNER_ADDRESS
+            )
+            assert response.status_code == 401
+
+    assert devices_of(app) == []
+    assert "端末の印を、続けての失敗で無効にしました" in caplog.text
+    # 印のない道でも扱ったので、ふつうの失敗としても記録された
+    assert failure_count(app) == MAX_DEVICE_FAILURES
+
+
 def test_success_resets_device_failures(app, clock_now):
     owner = owner_with_device(app, clock_now)
     for _ in range(MAX_DEVICE_FAILURES - 1):
@@ -343,23 +385,10 @@ def test_set_password_removes_devices(app, clock_now, monkeypatch):
 # --- 全体の上限 ---
 
 
-def add_failures(app, count, failed_at):
-    with app.app_context():
-        for number in range(count):
-            db.session.add(
-                LoginFailure(
-                    login_id_digest=f"{number:064x}",
-                    client_digest=f"{number:064x}",
-                    failed_at=failed_at,
-                    login_id_locked_until=failed_at,
-                    client_locked_until=failed_at,
-                )
-            )
-        db.session.commit()
-
-
 def test_global_limit_refuses_without_recording(app, clock_now, caplog):
-    add_failures(app, GLOBAL_FAILURE_LIMIT, START - timedelta(minutes=59))
+    add_recent_failures(
+        app, GLOBAL_FAILURE_LIMIT, START - timedelta(minutes=59)
+    )
 
     with caplog.at_level(logging.WARNING, logger="app.auth"):
         response = post_login(
@@ -372,9 +401,11 @@ def test_global_limit_refuses_without_recording(app, clock_now, caplog):
 
 
 def test_below_global_limit_is_accepted(app, clock_now):
-    add_failures(app, GLOBAL_FAILURE_LIMIT - 1, START - timedelta(minutes=59))
+    add_recent_failures(
+        app, GLOBAL_FAILURE_LIMIT - 1, START - timedelta(minutes=59)
+    )
     # 1時間より前の失敗は、数えない
-    add_failures(app, 10, START - timedelta(hours=1))
+    add_recent_failures(app, 10, START - timedelta(hours=1))
 
     response = post_login(app.test_client(), TEST_USERNAME, TEST_PASSWORD)
 
@@ -383,7 +414,7 @@ def test_below_global_limit_is_accepted(app, clock_now):
 
 def test_device_can_log_in_over_global_limit(app, clock_now):
     owner = owner_with_device(app, clock_now)
-    add_failures(app, GLOBAL_FAILURE_LIMIT, START)
+    add_recent_failures(app, GLOBAL_FAILURE_LIMIT, START)
 
     response = post_login(owner, TEST_USERNAME, TEST_PASSWORD, OWNER_ADDRESS)
 

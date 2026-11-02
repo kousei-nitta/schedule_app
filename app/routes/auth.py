@@ -156,6 +156,21 @@ def login():
     return render_login(reload_once=opened_from_other_site())
 
 
+def remove_exhausted_device(device_id: int, user_id: int) -> None:
+    """印の失敗が上限に達していれば、印を消し、ログに残す。
+
+    印で続けて失敗した。印が盗まれ、パスワードやIDを試されているかも
+    しれない。この印は、もう使えない。
+    """
+    if remove_device_if_exhausted(device_id):
+        auth_logger.warning(
+            "端末の印を、続けての失敗で無効にしました"
+            "（利用者：%s、接続元：%r）",
+            user_id,
+            client_address(),
+        )
+
+
 def attempt_login():
     """ログインを試す（POST /login）。
 
@@ -188,9 +203,17 @@ def attempt_login():
         current_app.config["DEVICE_COOKIE_NAME"]
     )
 
-    device_id = find_trusted_device(device_token, login_id, now)
-    trusted = device_id is not None and reserve_device_attempt(
-        device_id, now
+    device = find_trusted_device(device_token, login_id, now)
+    if device is not None and not device.login_id_matches:
+        # 有効な印が、持ち主と違うIDと一緒に届いた（打ち間違い、または
+        # 盗まれた印）。印のない道で扱うが、印の失敗にも数える（印の
+        # ある道とそうでない道の応答の違いから、持ち主のIDを探らせない。
+        # 試せる候補は、印の5回まで）
+        if reserve_device_attempt(device.device_id, now):
+            remove_exhausted_device(device.device_id, device.user_id)
+        device = None
+    trusted = device is not None and reserve_device_attempt(
+        device.device_id, now
     )
     failure = None
     if trusted:
@@ -229,7 +252,7 @@ def attempt_login():
         if not slots.acquire(timeout=PASSWORD_CHECK_WAIT_SECONDS):
             # 確かめなかったので、失敗に数えない
             if trusted:
-                cancel_device_attempt(device_id)
+                cancel_device_attempt(device.device_id)
             else:
                 cancel_attempt(failure)
             auth_logger.warning(
@@ -249,21 +272,22 @@ def attempt_login():
 
     path_text = "印のある端末" if trusted else "印のない端末"
     if not password_matches:
+        # ログに出す利用者。印のある道では、長すぎるパスワードで確かめを
+        # 飛ばしても（user が None）、印の持ち主が分かっている
+        if trusted:
+            user_text = device.user_id
+        elif user is not None:
+            user_text = user.id
+        else:
+            user_text = "不明なID"
         auth_logger.warning(
             "ログインに失敗しました（利用者：%s、%s、接続元：%r）",
-            user.id if user is not None else "不明なID",
+            user_text,
             path_text,
             client_address(),
         )
-        if trusted and remove_device_if_exhausted(device_id):
-            # 印で続けて失敗した。印が盗まれ、パスワードを試されて
-            # いるかもしれない。この印は、もう使えない
-            auth_logger.warning(
-                "端末の印を、続けての失敗で無効にしました"
-                "（利用者：%s、接続元：%r）",
-                user.id,
-                client_address(),
-            )
+        if trusted:
+            remove_exhausted_device(device.device_id, device.user_id)
         return render_login(LOGIN_FAILED_MESSAGE, 401)
 
     # 成功：印のない道では、この接続元からの、このIDの失敗の記録を消す。

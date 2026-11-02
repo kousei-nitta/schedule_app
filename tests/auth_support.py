@@ -140,3 +140,19 @@ def failure_count(app) -> int:
         return db.session.scalar(
             db.select(db.func.count()).select_from(LoginFailure)
         )
+
+
+def add_recent_failures(app, count, failed_at):
+    """ほかの接続元・IDの失敗の行を、count 行作る（全体の上限のテスト）。"""
+    with app.app_context():
+        for number in range(count):
+            db.session.add(
+                LoginFailure(
+                    login_id_digest=f"{number:064x}",
+                    client_digest=f"{number:064x}",
+                    failed_at=failed_at,
+                    login_id_locked_until=failed_at,
+                    client_locked_until=failed_at,
+                )
+            )
+        db.session.commit()

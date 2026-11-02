@@ -5,6 +5,7 @@
 触れない（DBは、すべて pytest の一時ディレクトリ）。
 """
 import hashlib
+import os
 import sqlite3
 import stat
 from contextlib import closing
@@ -15,6 +16,8 @@ import pytest
 from app import clock
 from app.backup import BackupError
 from app.config import PROJECT_ROOT
+from app.extensions import db
+from app import transfer
 from app.transfer import make_transfer_copy
 from tests.auth_support import TEST_PASSWORD, TEST_USERNAME, post_login
 
@@ -74,6 +77,20 @@ def test_daily_backup_keeps_thirty(production_app, monkeypatch):
     assert auto[-1] == "app-20261101-auto.db"
     assert manual.name in names
     assert "消しました" in result.output
+
+
+def test_daily_backup_fails_with_exit_code_one(production_app):
+    # 作れないとき（例：DBのファイルがない）は、終了コード1（定期実行の
+    # タスクの記録に残る）。バックアップのファイルは残らない
+    with production_app.app_context():
+        db.engine.dispose()
+    app_database_path(production_app).unlink()
+
+    result = production_app.test_cli_runner().invoke(args=["daily-backup"])
+
+    assert result.exit_code == 1, result.output
+    assert "Error:" in result.output
+    assert [n for n in backups_of(production_app) if n.endswith(".db")] == []
 
 
 def test_daily_backup_refuses_other_databases(app):
@@ -145,6 +162,35 @@ def source_database(app):
     with app.app_context():
         db.engine.dispose()
     return path
+
+
+def test_transfer_work_files_are_private(
+    source_database, tmp_path, monkeypatch, keep_umask
+):
+    # 途中のファイル（.work・.partial）も、600 で作る（作る間に、ほかの
+    # 人に読まれない）。終わったら、umask を元に戻す
+    seen = {}
+    original_check = transfer.check_transfer_copy
+
+    def check_and_record_modes(partial_path, source_counts):
+        work_path = partial_path.with_name(
+            partial_path.name.replace(".partial", ".work")
+        )
+        for name, path in (("work", work_path), ("partial", partial_path)):
+            seen[name] = stat.S_IMODE(path.stat().st_mode)
+        return original_check(partial_path, source_counts)
+
+    monkeypatch.setattr(
+        transfer, "check_transfer_copy", check_and_record_modes
+    )
+    os.umask(0o022)
+    output = tmp_path / "transfer.db"
+
+    make_transfer_copy(source_database, output)
+
+    assert seen == {"work": 0o600, "partial": 0o600}
+    current = os.umask(0o022)
+    assert current == 0o022
 
 
 def test_transfer_copy_leaves_out_sessions_failures_and_free_space(

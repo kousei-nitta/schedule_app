@@ -12,6 +12,8 @@ deploy.md の「下見」）で、サイトの「Application path」を、一時
 - uWSGI のワーカーの数、Python と SQLite の版、ホームのフォルダの
   ファイルシステムの種類（SQLite は、ネットワークのファイルシステムで
   壊れうる）
+- uWSGI が、どこで待ち受けているか（共有のサーバーの、ほかの利用者が
+  プロキシを通らずに直接つなげると、接続元のヘッダーを偽れる）
 Cookie と Authorization の値は、返さない。
 """
 import json
@@ -21,6 +23,17 @@ import sqlite3
 
 # 値を返さないヘッダー（秘密を含みうる）
 HIDDEN_HEADERS = {"HTTP_COOKIE", "HTTP_AUTHORIZATION"}
+# uWSGI の待ち受けの設定の名前
+SOCKET_OPTIONS = (
+    "socket",
+    "uwsgi-socket",
+    "http-socket",
+    "https-socket",
+    "fastcgi-socket",
+    "shared-socket",
+    "http",
+    "chmod-socket",
+)
 
 
 def filesystem_type(path: str) -> str:
@@ -57,6 +70,27 @@ def worker_count() -> int | None:
     return uwsgi.numproc
 
 
+def as_text(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def uwsgi_sockets() -> dict[str, list[str]] | None:
+    """uWSGI の待ち受けの設定（uWSGI の外では None）。"""
+    try:
+        import uwsgi
+    except ImportError:
+        return None
+    sockets = {}
+    for key, value in getattr(uwsgi, "opt", {}).items():
+        name = as_text(key)
+        if name in SOCKET_OPTIONS:
+            values = value if isinstance(value, list) else [value]
+            sockets[name] = [as_text(item) for item in values]
+    return sockets
+
+
 def application(environ, start_response):
     headers = {
         key: ("（表示しません）" if key in HIDDEN_HEADERS else value)
@@ -72,6 +106,7 @@ def application(environ, start_response):
         "python": platform.python_version(),
         "sqlite": sqlite3.sqlite_version,
         "home_filesystem": filesystem_type(home),
+        "uwsgi_sockets": uwsgi_sockets(),
     }
     body = json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8")
     start_response(

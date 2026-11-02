@@ -176,6 +176,7 @@ schedule_app/
 │   ├── test_migration_users.py # 利用者とデータの持ち主の migration（既存のデータが owner のものになる）
 │   ├── test_attacks_auth.py # 攻撃のテスト（ログイン・試行の制限・ほかのサイト・既定で拒否。受け入れた弱さは xfail）
 │   ├── test_attacks_data.py # 攻撃のテスト（認可・DBに残る値・デモのDB・パスワードの決まり）
+│   ├── test_attacks_public.py # 攻撃のテスト（公開：接続元・Host・本番の設定・端末の印・全体の上限・移行の写し・点検のスクリプト。Task 026）
 │   ├── test_setup.py        # テスト基盤そのものの確認（migrationで作られるテーブル・列・制約の確認と、モデルとmigrationのずれの確認を含む）
 │   ├── test_api_helpers.py  # api_helpers.py の共通関数の単体テスト
 │   ├── test_class_events.py # class_events.py の単体テスト（日付の計算、Eventの値）

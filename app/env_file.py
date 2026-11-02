@@ -22,7 +22,10 @@ import stat
 from collections.abc import Mapping
 from pathlib import Path
 
-from app.config import ConfigError
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
+
+from app.config import PROJECT_ROOT, ConfigError
 
 ENV_FILE_VARIABLE = "SCHEDULE_ENV_FILE"
 ALLOWED_NAMES = {
@@ -76,6 +79,41 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def sqlite_directory(database_url: str) -> Path | None:
+    """DATABASE_URL が SQLite のファイルなら、そのフォルダ（でなければ None）。
+
+    形の確かめは、app/config.py の production_database_uri が行う。
+    """
+    try:
+        path_text = make_url(database_url.strip()).database or ""
+    except ArgumentError:
+        return None
+    if not Path(path_text).is_absolute():
+        return None
+    return Path(path_text).resolve().parent
+
+
+def check_env_file_location(path: Path, database_url: str) -> None:
+    """設定のファイルが、リポジトリとDBのフォルダの外にあることを確かめる。
+
+    リポジトリの中だと、Git に入れてしまいうる。DBのフォルダの中だと、
+    DBやバックアップのフォルダを写すときに、秘密の鍵も写しうる。
+    """
+    real_path = path.resolve()
+    if real_path.is_relative_to(PROJECT_ROOT):
+        raise ConfigError(
+            "設定のファイルは、リポジトリのフォルダの外に置いてください"
+        )
+    database_directory = sqlite_directory(database_url)
+    if database_directory is not None and real_path.is_relative_to(
+        database_directory
+    ):
+        raise ConfigError(
+            "設定のファイルは、DBのフォルダの外に置いてください"
+            "（docs/development/deploy.md）"
+        )
+
+
 def environment_with_env_file(
     environment: Mapping[str, str],
 ) -> dict[str, str]:
@@ -91,4 +129,7 @@ def environment_with_env_file(
                 "（どちらか1つにしてください）"
             )
         merged[name] = value
+    check_env_file_location(
+        Path(path_text), merged.get("DATABASE_URL", "")
+    )
     return merged

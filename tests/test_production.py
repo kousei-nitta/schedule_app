@@ -6,12 +6,16 @@
 """
 import logging
 import os
+import runpy
 import subprocess
 import sys
 from types import SimpleNamespace
 
+import click
 import pytest
-from flask_migrate import downgrade, stamp, upgrade
+from alembic.runtime.environment import EnvironmentContext
+from alembic.script import ScriptDirectory
+from flask_migrate import check, current, downgrade, stamp, upgrade
 
 from app import create_app
 from app.config import (
@@ -21,61 +25,22 @@ from app.config import (
     settings_from_environment,
 )
 from app.env_file import environment_with_env_file, read_env_file
+from app.extensions import db
 from app.proxy import PublicProxyMiddleware
-from tests.auth_support import TEST_PASSWORD, TEST_USERNAME
+from tests.auth_support import TEST_USERNAME
 from tests.production_support import (
-    OWNER_ADDRESS,
+    FORM,
     PUBLIC_HOST,
     PUBLIC_ORIGIN,
     SECRET,
+    post_public_login,
     production_environment,
+    public_client,
+    seen_environ,
+    table_names,
 )
 
 MIGRATIONS = str(PROJECT_ROOT / "migrations")
-
-
-class PublicClient:
-    """プロキシの後ろの本番に、ブラウザから届いた要求のように送る client。
-
-    ブラウザ → プロキシ（HTTPS を終える）→ アプリ（HTTP）。プロキシが付ける
-    ヘッダー（X-Real-IP・X-Forwarded-Proto）を付け、Host を本番の名前にする。
-    """
-
-    def __init__(self, app, address=OWNER_ADDRESS):
-        self.client = app.test_client()
-        self.client.environ_base.update(
-            {
-                "HTTP_X_REAL_IP": address,
-                "HTTP_X_FORWARDED_PROTO": "https",
-                # アプリが直接見る接続元は、プロキシのアドレス
-                "REMOTE_ADDR": "10.0.0.1",
-            }
-        )
-
-    def open(self, path, **kwargs):
-        kwargs.setdefault("base_url", f"http://{PUBLIC_HOST}")
-        return self.client.open(path, **kwargs)
-
-    def get(self, path, **kwargs):
-        return self.open(path, method="GET", **kwargs)
-
-    def post(self, path, **kwargs):
-        return self.open(path, method="POST", **kwargs)
-
-
-def public_client(app, address=OWNER_ADDRESS):
-    return PublicClient(app, address)
-
-
-FORM = {"Origin": PUBLIC_ORIGIN, "Sec-Fetch-Site": "same-origin"}
-
-
-def post_public_login(client, password=TEST_PASSWORD, headers=None):
-    return client.post(
-        "/login",
-        data={"login_id": TEST_USERNAME, "password": password},
-        headers=FORM if headers is None else headers,
-    )
 
 
 # --- 環境変数から設定を決める ---
@@ -339,6 +304,86 @@ def test_missing_database_directory_refuses_to_start(tmp_path, keep_umask):
         create_app({"TESTING": True, **settings})
 
 
+WSGI_FILE = str(PROJECT_ROOT / "wsgi.py")
+# create_app が読む環境変数（テストの前に、すべて消す）
+SETTING_VARIABLES = (
+    "SCHEDULE_ENV_FILE",
+    "APP_ENV",
+    "PUBLIC_ORIGIN",
+    "SECRET_KEY",
+    "DATABASE_URL",
+    "CLIENT_ADDRESS_HEADER",
+)
+
+
+def clear_setting_variables(monkeypatch):
+    for name in SETTING_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_wsgi_refuses_to_start_without_production_settings(monkeypatch):
+    # サイトの設定で、設定のファイルを付け忘れた。ローカルの扱いで
+    # 起動せず、アプリを作る前に止まる（instance/ にファイルを作らない。
+    # 作れば、tests/conftest.py の守りで、テストの全体が失敗する）
+    clear_setting_variables(monkeypatch)
+
+    with pytest.raises(ConfigError, match="SCHEDULE_ENV_FILE"):
+        runpy.run_path(WSGI_FILE)
+
+
+def test_wsgi_starts_with_the_env_file(tmp_path, monkeypatch, keep_umask):
+    # 設定のファイルから、本番のアプリができる（サイトと同じ読み方）
+    environment = production_environment(tmp_path)
+    path = write_env_file(
+        tmp_path / "production.env",
+        "".join(f"{name}={value}\n" for name, value in environment.items()),
+    )
+    clear_setting_variables(monkeypatch)
+    monkeypatch.setenv("SCHEDULE_ENV_FILE", str(path))
+
+    flask_app = runpy.run_path(WSGI_FILE)["application"]
+
+    assert flask_app.config["PRODUCTION"] is True
+    assert flask_app.config["SECRET_KEY"] == SECRET
+    assert flask_app.config["SQLALCHEMY_DATABASE_URI"] == (
+        environment["DATABASE_URL"]
+    )
+    # 接続元の層が付いている
+    assert isinstance(flask_app.wsgi_app, PublicProxyMiddleware)
+    with flask_app.app_context():
+        db.engine.dispose()
+
+
+def test_flask_run_refuses_production(tmp_path, keep_umask):
+    # flask run の中（コマンドの名前が run）では、本番のアプリを作らない
+    settings = production_settings(production_environment(tmp_path))
+
+    with click.Context(click.Command("run"), info_name="run"):
+        with pytest.raises(ConfigError, match="flask run"):
+            create_app({"TESTING": True, **settings})
+
+
+def test_flask_run_command_refuses_production(tmp_path):
+    # 本物の flask run でも、サーバーを起動せずに終わる（断れなければ、
+    # サーバーが起動したまま、timeout で失敗する）
+    environment = {
+        "PATH": os.environ.get("PATH", ""),
+        **production_environment(tmp_path),
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-m", "flask", "--app", "app", "run"],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode != 0
+    assert "flask run（開発用のサーバー）を使いません" in result.stderr
+
+
 def test_run_py_refuses_production(tmp_path):
     # run.py（Flask の開発用のサーバー）は、本番では起動しない
     environment = {
@@ -360,21 +405,6 @@ def test_run_py_refuses_production(tmp_path):
 
 
 # --- プロキシの後ろの接続元（app/proxy.py） ---
-
-
-def seen_environ(header="X-Real-IP", **environ):
-    """層を通ったあとに、アプリが受け取る environ（断られたら None）。"""
-    seen = {}
-
-    def inner_app(inner_environ, start_response):
-        seen.update(inner_environ)
-        start_response("200 OK", [])
-        return [b""]
-
-    statuses = []
-    middleware = PublicProxyMiddleware(inner_app, header)
-    middleware(environ, lambda status, headers: statuses.append(status))
-    return seen if statuses == ["200 OK"] else None
 
 
 def test_client_address_comes_from_the_chosen_header():
@@ -504,6 +534,23 @@ def test_logged_in_production_client_can_use_the_api(production_app):
     assert response.status_code == 200
 
 
+def test_device_cookie_works_with_production_names(production_app):
+    # 本番の名前（__Host-schedule_device）の印でも、ログインIDが制限
+    # されている間に、印のある道でログインできる
+    owner = public_client(production_app)
+    assert post_public_login(owner).status_code == 303
+    assert owner.post("/logout", headers=FORM).status_code == 303
+    attacker = public_client(production_app, "203.0.113.9")
+    for _ in range(5):
+        post_public_login(attacker, password="wrong password for test")
+    stranger = public_client(production_app, "198.51.100.99")
+    assert post_public_login(stranger).status_code == 429
+
+    response = post_public_login(owner)
+
+    assert response.status_code == 303
+
+
 def test_other_host_is_rejected_in_production(production_app):
     client = public_client(production_app)
 
@@ -533,13 +580,6 @@ def test_upgrade_is_allowed_in_production(production_app):
         upgrade(directory=MIGRATIONS)
 
 
-def table_names(app) -> set[str]:
-    from app.extensions import db
-
-    with app.app_context():
-        return set(db.inspect(db.engine).get_table_names())
-
-
 def test_downgrade_is_refused_in_production(production_app, capsys):
     tables_before = table_names(production_app)
 
@@ -556,6 +596,32 @@ def test_stamp_is_refused_in_production(production_app, capsys):
         stamp(directory=MIGRATIONS, revision="base")
 
     assert "この操作" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", [current, check])
+def test_reading_operations_are_allowed_in_production(
+    production_app, capsys, operation
+):
+    # 本番で通す操作の一覧（migrations/env.py）にある、読むだけの操作
+    with production_app.app_context():
+        operation(directory=MIGRATIONS)
+
+    assert "この操作" not in capsys.readouterr().err
+
+
+def test_unknown_operation_is_refused_in_production(production_app):
+    # 一覧にない名前の操作は、断る（Alembic の更新で増えた操作を、
+    # 黙って通さない）。Alembic のコマンドと同じ形で、env.py を動かす
+    def new_operation(rev, context):
+        return []
+
+    with production_app.app_context():
+        migrate = production_app.extensions["migrate"].migrate
+        config = migrate.get_config(MIGRATIONS)
+        script = ScriptDirectory.from_config(config)
+        with EnvironmentContext(config, script, fn=new_operation):
+            with pytest.raises(RuntimeError, match="この操作"):
+                script.run_env()
 
 
 def test_downgrade_is_allowed_locally(app):

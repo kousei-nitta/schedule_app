@@ -28,6 +28,7 @@ from app.backup import (
     remove_partial_files,
     table_row_counts,
 )
+from app.demo_data import DEMO_USERNAME
 
 # 写しで空にする表（上の説明）
 TRANSIENT_TABLES = ("user_sessions", "login_failures", "trusted_devices")
@@ -108,19 +109,33 @@ def check_transfer_copy(
     return counts, version
 
 
+def has_user(connection: sqlite3.Connection, username: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM users WHERE username = ?", (username,)
+    ).fetchone()
+    return row is not None
+
+
 def check_no_public_username(path: Path) -> None:
-    """公開のリポジトリに書かれたID（owner）の利用者がいれば、止める。"""
+    """公開のリポジトリに書かれたID（owner・demo）の利用者がいれば止める。"""
     with closing(read_only_connection(path)) as connection:
         if "users" not in existing_tables(connection):
             return
-        row = connection.execute(
-            "SELECT 1 FROM users WHERE username = ?", (PUBLIC_USERNAME,)
-        ).fetchone()
-    if row is not None:
+        has_owner = has_user(connection, PUBLIC_USERNAME)
+        has_demo = has_user(connection, DEMO_USERNAME)
+    if has_owner:
         raise BackupError(
             f"ログインIDが {PUBLIC_USERNAME} のままの利用者がいます。"
             "公開のリポジトリに書かれたIDのため、先に rename-user で、"
             "推測されにくいIDに変えてください"
+        )
+    if has_demo:
+        # 本番のDBには、デモの利用者を置かない（ADR 0005）。デモのDBを
+        # 選んでいる（DATABASE_URL）おそれもある
+        raise BackupError(
+            f"デモの利用者（{DEMO_USERNAME}）がいます。本番には、デモの"
+            "利用者を持ち込みません（実データのDBを選んでいるか、"
+            "確かめてください）"
         )
 
 
@@ -141,6 +156,9 @@ def make_transfer_copy(source: Path, output: Path) -> dict:
     process = os.getpid()
     work_path = output.with_name(f"{output.name}.{process}.work")
     partial_path = output.with_name(f"{output.name}.{process}.partial")
+    # 途中のファイル（ログイン中の端末なども入っている）も、最初から、
+    # 持ち主だけが読み書きできる権限で作る（umask。終わったら元に戻す）
+    previous_umask = os.umask(0o077)
     try:
         source_counts = copy_and_verify(source, work_path)
         check_no_public_username(work_path)
@@ -160,4 +178,5 @@ def make_transfer_copy(source: Path, output: Path) -> dict:
     finally:
         remove_partial_files(work_path)
         remove_partial_files(partial_path)
+        os.umask(previous_umask)
     return {"counts": counts, "removed": removed, "version": version}

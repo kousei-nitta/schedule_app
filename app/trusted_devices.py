@@ -16,10 +16,13 @@ Cookie で渡し、印のある端末からの試行は、IDごと・接続元�
   ログインに成功するたびに、作り替える
 - 利用者ごとに10個まで（古いものから消す）
 - 印は、打ち込まれたログインIDが、印の持ち主のIDと完全に一致するときだけ
-  使う（ほかの人の印を持ち込んでも、ほかのIDには効かない）
+  使う（ほかの人の印を持ち込んでも、ほかのIDには効かない）。違うIDと
+  一緒に届いたときも、その印の失敗に数える（盗まれた印で、ログインIDを
+  探らせない）
 """
 import secrets
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 from flask import Response, current_app
 
@@ -36,14 +39,24 @@ MAX_DEVICE_FAILURES = 5
 MAX_DEVICES_PER_USER = 10
 
 
+class TrustedDeviceMatch(NamedTuple):
+    """有効な印（行の id、印の持ち主の利用者の id、打ち込まれたIDが、
+    持ち主のIDと一致したか）。一致したときだけ、印のある道で扱う。"""
+
+    device_id: int
+    user_id: int
+    login_id_matches: bool
+
+
 def find_trusted_device(
     token: str | None, login_id: str, now: datetime
-) -> int | None:
-    """印のある道で扱える印の行の id を返す（扱えなければ None）。
+) -> TrustedDeviceMatch | None:
+    """この端末の、有効な印を返す（なければ None）。
 
-    扱えないもの：印がない・形が違う・見つからない・期限切れ・失敗が
-    上限に達した・印の持ち主がいない・パスワードのない利用者・持ち主の
-    ログインIDが、打ち込まれたIDと違う（大文字・空白の違いも、違うとする）。
+    有効でないもの：印がない・形が違う・見つからない・期限切れ・失敗が
+    上限に達した・印の持ち主がいない・パスワードのない利用者。
+    持ち主のログインIDが、打ち込まれたIDと違うとき（大文字・空白の違いも、
+    違うとする）は、login_id_matches を False にして返す。
     行は、ORM のオブジェクトとしてでなく、列の値だけで読む（このあと、
     行を消して作り直すとき、古いオブジェクトが残らないように）。
     """
@@ -64,13 +77,11 @@ def find_trusted_device(
     ):
         return None
     user = db.session.get(User, device.user_id)
-    if (
-        user is None
-        or user.password_hash is None
-        or user.username != login_id
-    ):
+    if user is None or user.password_hash is None:
         return None
-    return device.id
+    return TrustedDeviceMatch(
+        device.id, device.user_id, user.username == login_id
+    )
 
 
 def reserve_device_attempt(device_id: int, now: datetime) -> bool:

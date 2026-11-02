@@ -1,18 +1,21 @@
 """本番のURLを、外（KomaのMac）から点検する（Task 026）。
 
 Claude の作業環境からは、本番に届かないため、Koma が Mac で動かす。
-Python の標準のライブラリだけを使う（.venv がなくても動く）。
-手順は docs/development/deploy.md。
+Python の標準のライブラリだけを使う（.venv がなくても動く）。Python 3.10
+以上が要る（Mac に最初から入っている python3 は 3.9 のため、python3.14 で
+動かす）。手順は docs/development/deploy.md。
 
 使い方（URL は、PUBLIC_ORIGIN と同じ形。https://<名前>.alwaysdata.net）：
-    python scripts/check_public.py URL
+    python3.14 scripts/check_public.py URL
         ふだんの点検（ログインなし）
-    python scripts/check_public.py --login URL
-        ログインして、Cookie・本文の上限・ログアウトも
-    python scripts/check_public.py --rate-limit URL
+    python3.14 scripts/check_public.py --login URL
+        ログインして、Cookie・本文の上限・ログアウトも（本番に、端末の印が
+        1つ増える）
+    python3.14 scripts/check_public.py --rate-limit URL
         接続元の偽装（Mac の接続元が、1時間ログインできなくなる）
-    python scripts/check_public.py --probe URL
-        下見：scripts/echo_headers_wsgi.py を置いたとき
+    python3.14 scripts/check_public.py --probe URL
+        下見：scripts/echo_headers_wsgi.py を置いたとき（Mac の公開の
+        アドレスを尋ねる）
 
 それぞれの確かめは「✓」「✗」で表示し、1つでも ✗ なら、終了コード1で終わる。
 本番のURLは、リポジトリ・Issue・PRに書かない。
@@ -20,6 +23,7 @@ Python の標準のライブラリだけを使う（.venv がなくても動く�
 import argparse
 import getpass
 import http.client
+import ipaddress
 import json
 import re
 import secrets
@@ -67,8 +71,37 @@ HIDDEN_PATHS = [
     "/console",
     "/?__debugger__=yes&cmd=resource&f=debugger.js",
 ]
+# CSP の script-src（ないときは default-src）に、あってはいけない値
+# （どこからでも・インラインのスクリプトを許すもの）
+WIDE_SCRIPT_SOURCES = {
+    "*",
+    "https:",
+    "http:",
+    "data:",
+    "blob:",
+    "'unsafe-inline'",
+    "'unsafe-eval'",
+    "'unsafe-hashes'",
+    "'strict-dynamic'",
+}
 ORIGIN_PATTERN = re.compile(r"https://([a-z0-9.-]+)")
 LOGIN_FORM = "application/x-www-form-urlencoded"
+# 接続元を偽るときの値は、資料の例のためのアドレスの範囲（192.0.2.0/24）
+# から選ぶ（本物の接続元には、ならない）
+FAKE_ADDRESS_PREFIX = "192.0.2."
+# 接続元に使えるかを見るヘッダー
+ADDRESS_HEADERS = ("X-Real-IP", "X-Forwarded-For", "X-Client-IP")
+# 下線の名前。WSGI では、X-Real-IP と X_Real_IP が、どちらも
+# HTTP_X_REAL_IP になる。プロキシが下線の名前を消さないと、偽の値が
+# 届きうる（同じ種類の弱さ：CVE-2015-0219）
+UNDERSCORE_NAMES = {
+    "X-Real-IP": "X_Real_IP",
+    "X-Forwarded-For": "X_Forwarded_For",
+    "X-Client-IP": "X_Client_IP",
+    "X-Forwarded-Proto": "X_Forwarded_Proto",
+}
+# Python の版の下限（docs/architecture/security.md の「開発の環境」）
+MIN_PYTHON = (3, 14, 10)
 
 
 @dataclass
@@ -104,6 +137,65 @@ class Report:
 # --- 判定（応答の中身だけを見る。tests/test_check_public.py） ---
 
 
+def csp_directives(csp: str) -> dict[str, list[str]]:
+    """CSP を、指示ごとの値の一覧にする（同じ指示の2つ目は、ブラウザと
+    同じく無視する）。"""
+    directives: dict[str, list[str]] = {}
+    for part in csp.split(";"):
+        words = part.split()
+        if words:
+            directives.setdefault(words[0].lower(), words[1:])
+    return directives
+
+
+def is_narrow_script_source(source: str) -> bool:
+    """スクリプトの出どころとして、狭い（1つのファイルまで決まる）か。
+
+    'self'・'none' と、https のファイルのURL（パスまで。* を含まず、
+    / で終わらない）だけを狭いとする。
+    """
+    if source in ("'self'", "'none'"):
+        return True
+    if not source.startswith("https://") or "*" in source:
+        return False
+    path = source.removeprefix("https://").partition("/")[2]
+    return path != "" and not source.endswith("/")
+
+
+def csp_problems(csp: str, *, login_page: bool = False) -> list[str]:
+    """CSP の問題の一覧（指示ごとに、値を比べる）。"""
+    problems = []
+    directives = csp_directives(csp)
+    for name, expected in (
+        ("default-src", ["'self'"]),
+        ("object-src", ["'none'"]),
+        ("frame-ancestors", ["'none'"]),
+    ):
+        if directives.get(name) != expected:
+            problems.append(
+                f"CSP の {name} が {directives.get(name)!r}（{expected!r} の"
+                "はず）"
+            )
+    scripts = directives.get("script-src", directives.get("default-src", []))
+    for source in scripts:
+        if source in WIDE_SCRIPT_SOURCES or not is_narrow_script_source(
+            source
+        ):
+            problems.append(f"CSP の script-src に {source} がある")
+    for name, values in directives.items():
+        for weak in ("'unsafe-inline'", "'unsafe-eval'"):
+            if weak in values:
+                problems.append(f"CSP の {name} に {weak} がある")
+    if login_page and directives.get("script-src") != ["'none'"]:
+        problems.append("ログインの画面の CSP に script-src 'none' がない")
+    return problems
+
+
+def answered_by_app(response: "Response") -> bool:
+    """応答が、アプリのもの（アプリだけが付ける CSP がある）か。"""
+    return response.header("Content-Security-Policy") is not None
+
+
 def security_header_problems(
     headers: dict[str, str], *, login_page: bool = False
 ) -> list[str]:
@@ -118,19 +210,11 @@ def security_header_problems(
     match = re.search(r"max-age=(\d+)", hsts)
     if match is None or int(match.group(1)) < HSTS_MIN_SECONDS:
         problems.append(f"Strict-Transport-Security が {hsts!r}")
-    csp = lowered.get("content-security-policy", "")
-    for directive in (
-        "default-src 'self'",
-        "frame-ancestors 'none'",
-        "object-src 'none'",
-    ):
-        if directive not in csp:
-            problems.append(f"CSP に {directive} がない")
-    for weak in ("'unsafe-inline'", "'unsafe-eval'"):
-        if weak in csp:
-            problems.append(f"CSP に {weak} がある")
-    if login_page and "script-src 'none'" not in csp:
-        problems.append("ログインの画面の CSP に script-src 'none' がない")
+    problems.extend(
+        csp_problems(
+            lowered.get("content-security-policy", ""), login_page=login_page
+        )
+    )
     if "camera=()" not in lowered.get("permissions-policy", ""):
         problems.append("Permissions-Policy がない")
     server = lowered.get("server", "")
@@ -169,11 +253,42 @@ def leaked_markers(body: bytes) -> list[str]:
     ]
 
 
-def single_address(value: str | None) -> bool:
-    """値が、1つの IP アドレスに見えるか（数字・a〜f・. と : だけ）。"""
+def parse_address(value: str | None):
+    """値が1つの IP アドレスなら、そのアドレス（でなければ None）。"""
     if value is None:
-        return False
-    return re.fullmatch(r"[0-9a-fA-F.:]+", value) is not None
+        return None
+    try:
+        return ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+
+
+def environ_key(header_name: str) -> str:
+    """ヘッダーの名前に対応する WSGI の environ の名前（HTTP_X_REAL_IP）。"""
+    return "HTTP_" + header_name.upper().replace("-", "_")
+
+
+def address_header_state(received: list[str | None], my_address) -> str:
+    """接続元のヘッダーに届いた値（偽りかたごと）から、使えるかを決める。
+
+    使える（"使える"）のは、どの要求でも、偽の値が混ざらず、値が1つの
+    アドレスで、この Mac の公開のアドレスと同じとき。
+    """
+    if any(v is not None and FAKE_ADDRESS_PREFIX in v for v in received):
+        return "偽の値が届く（使えない）"
+    if any(v is None for v in received):
+        return "届かないことがある（使えない）"
+    if any(parse_address(v) != my_address for v in received):
+        return "この Mac のアドレスと違う（使えない）"
+    return "使える"
+
+
+def version_tuple(text: str) -> tuple[int, ...]:
+    """「3.14.10」→ (3, 14, 10)。読めなければ空。"""
+    try:
+        return tuple(int(part) for part in text.split("."))
+    except ValueError:
+        return ()
 
 
 # --- 通信 ---
@@ -284,6 +399,19 @@ def check_basics(target: Target, report: Report) -> None:
         "ほかの名前の Host は受け付けない",
         str(other_host.status),
     )
+    # プロキシが、ほかの名前に自分で答えると、アプリの Host の確かめは、
+    # 外からは確かめられない（そのときは、tests/test_security.py で確かめて
+    # いる）。どちらが答えたかを表示する
+    if answered_by_app(other_host):
+        print(
+            f"  （ほかの名前の Host に、アプリが {other_host.status} で"
+            "答えた）"
+        )
+    else:
+        print(
+            f"  （ほかの名前の Host に、プロキシが {other_host.status} で"
+            "答えた。アプリには届かない）"
+        )
     forwarded_host = target.request(
         "GET", "/", {"X-Forwarded-Host": "evil.example"}
     )
@@ -410,18 +538,17 @@ def check_rate_limit(target: Target, report: Report) -> None:
         return
     statuses = []
     for _ in range(11):
-        fake = f"192.0.2.{secrets.randbelow(250) + 1}"
+        fake = f"{FAKE_ADDRESS_PREFIX}{secrets.randbelow(250) + 1}"
+        spoofed = {"Forwarded": f"for={fake}"}
+        for name in ADDRESS_HEADERS:
+            spoofed[name] = fake
+            spoofed[UNDERSCORE_NAMES[name]] = fake
         response = target.request(
             "POST",
             "/login",
             target.same_origin_headers()
-            | {
-                "Content-Type": LOGIN_FORM,
-                "X-Real-IP": fake,
-                "X-Forwarded-For": fake,
-                "X-Client-IP": fake,
-                "Forwarded": f"for={fake}",
-            },
+            | {"Content-Type": LOGIN_FORM}
+            | spoofed,
             login_form(f"check-{secrets.token_hex(6)}", secrets.token_hex(8)),
         )
         statuses.append(response.status)
@@ -433,60 +560,85 @@ def check_rate_limit(target: Target, report: Report) -> None:
 
 
 def probe_headers(target: Target, report: Report) -> None:
-    """下見：echo_headers_wsgi.py を置いた状態で、プロキシの振る舞いを見る。"""
-    spoofed = {
-        "X-Real-IP": "192.0.2.10",
-        "X-Forwarded-For": "192.0.2.11",
-        "X-Client-IP": "192.0.2.12",
-        "Forwarded": "for=192.0.2.13",
+    """下見：echo_headers_wsgi.py を置いた状態で、プロキシの振る舞いを見る。
+
+    偽の接続元を、ふつうの名前と、下線の名前で、別々に送る。どちらでも、
+    偽の値が混ざらず、この Mac の公開のアドレスになるヘッダーだけを、
+    CLIENT_ADDRESS_HEADER の候補にする。
+    """
+    my_address = parse_address(
+        input(
+            "この Mac の公開のアドレス"
+            "（ターミナルで curl https://api64.ipify.org の結果）："
+        )
+    )
+    if my_address is None:
+        report.check(False, "この Mac の公開のアドレス", "アドレスの形でない")
+        return
+    hyphen = {
+        "X-Real-IP": f"{FAKE_ADDRESS_PREFIX}10",
+        "X-Forwarded-For": f"{FAKE_ADDRESS_PREFIX}11",
+        "X-Client-IP": f"{FAKE_ADDRESS_PREFIX}12",
+        "Forwarded": f"for={FAKE_ADDRESS_PREFIX}13",
         "X-Forwarded-Proto": "http",
     }
-    response = target.request("GET", "/", spoofed)
-    try:
-        seen = json.loads(response.body)
-    except ValueError:
-        report.check(False, "下見のアプリの応答（JSON）", str(response.status))
-        return
-    headers = seen.get("headers", {})
+    underscore = {
+        UNDERSCORE_NAMES[name]: f"{FAKE_ADDRESS_PREFIX}2{number}"
+        for number, name in enumerate(ADDRESS_HEADERS)
+    }
+    underscore["X_Forwarded_Proto"] = "http"
+    reports = []
+    for spoofed in (hyphen, underscore):
+        response = target.request("GET", "/", spoofed)
+        try:
+            reports.append(json.loads(response.body))
+        except ValueError:
+            report.check(
+                False, "下見のアプリの応答（JSON）", str(response.status)
+            )
+            return
+    seen = reports[0]
     print(f"REMOTE_ADDR：{seen.get('REMOTE_ADDR')!r}")
-    for name, value in spoofed.items():
-        key = "HTTP_" + name.upper().replace("-", "_")
-        received = headers.get(key)
-        if received is None:
-            state = "届かない"
-        elif value in received:
-            state = "偽の値がそのまま届く（使えない）"
-        else:
-            state = "上書きされる"
-        print(f"{name}：{received!r} … {state}")
     candidates = []
-    for name in ("X-Real-IP", "X-Forwarded-For", "X-Client-IP"):
-        received = headers.get("HTTP_" + name.upper().replace("-", "_"))
-        if single_address(received) and spoofed[name] not in received:
+    for name in ADDRESS_HEADERS:
+        received = [
+            r.get("headers", {}).get(environ_key(name)) for r in reports
+        ]
+        state = address_header_state(received, my_address)
+        print(f"{name}：{received!r} … {state}")
+        if state == "使える":
             candidates.append(name)
-    print(
-        f"CLIENT_ADDRESS_HEADER の候補：{candidates or 'なし'}"
-        "（値が、この Mac の公開のアドレスと同じかも確かめる）"
+    print(f"CLIENT_ADDRESS_HEADER の候補：{candidates or 'なし'}")
+    protos = [
+        r.get("headers", {}).get("HTTP_X_FORWARDED_PROTO") for r in reports
+    ]
+    report.check(
+        all(proto == "https" for proto in protos),
+        "X-Forwarded-Proto が https に上書きされる（下線の名前を含む）",
+        repr(protos),
     )
     report.check(
-        headers.get("HTTP_X_FORWARDED_PROTO") == "https",
-        "X-Forwarded-Proto が https に上書きされる",
-        repr(headers.get("HTTP_X_FORWARDED_PROTO")),
+        bool(candidates),
+        "接続元のヘッダーに、偽の値が届かず、この Mac のアドレスになる",
     )
-    report.check(bool(candidates), "上書きされる接続元のヘッダーがある")
     report.check(seen.get("workers") == 1, "uWSGI のワーカーが1つ",
                  repr(seen.get("workers")))
-    print(f"Python：{seen.get('python')}、SQLite：{seen.get('sqlite')}")
+    python = str(seen.get("python", ""))
+    print(f"Python：{python}、SQLite：{seen.get('sqlite')}")
     report.check(
-        str(seen.get("python", "")).startswith("3.14."),
-        "Python 3.14",
-        repr(seen.get("python")),
+        version_tuple(python) >= MIN_PYTHON,
+        "Python 3.14.10 以上",
+        repr(python),
     )
     filesystem = str(seen.get("home_filesystem"))
     report.check(
         not filesystem.startswith(("nfs", "cifs", "smb", "fuse", "9p")),
         f"ホームのファイルシステムがローカル（{filesystem}）",
         "ネットワークのファイルシステムでは、SQLite が壊れうる",
+    )
+    print(
+        f"uWSGI の待ち受け：{seen.get('uwsgi_sockets')!r}"
+        "（この行を Claude に伝える。ほかの利用者から届くかを判断する）"
     )
 
 

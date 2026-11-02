@@ -4,16 +4,20 @@
 - セキュリティのヘッダー（CSPを含む）と、要求ごとのnonce
 - 入れ子が深すぎるJSON
 - テンプレートに、CSPで止まる書き方（インラインのスクリプトなど）がないこと
+- SQL の例外の文に、利用者のデータを入れないこと（hide_parameters）
 """
 import re
+from datetime import date
 from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api_helpers import INVALID_JSON_MESSAGE
 from app.extensions import db
 from app.models.semester import Semester
+from tests.auth_support import TEST_USER_ID
 
 
 TEMPLATE_DIRECTORY = (
@@ -408,3 +412,33 @@ def test_cdn_files_in_templates_are_allowed_by_policy(client):
             assert match.group(1) in allowed[directive], tag
 
     assert len(cdn_urls) == 3  # Bootstrap（CSS・JS）と FullCalendar
+
+
+def test_sql_errors_do_not_show_parameters(app):
+    # SQL の例外の文に、SQL の引数（利用者のデータ）を入れない
+    # （hide_parameters。エラーのログから漏らさない）。同じ id の学期を
+    # 2回入れて、一意の制約の例外を起こす
+    secret_name = "secret-name-in-sql-error"
+    with app.app_context():
+        semester = Semester(
+            user_id=TEST_USER_ID,
+            name="学期",
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 7, 31),
+        )
+        db.session.add(semester)
+        db.session.commit()
+        with pytest.raises(IntegrityError) as error:
+            db.session.execute(
+                db.insert(Semester).values(
+                    id=semester.id,
+                    user_id=TEST_USER_ID,
+                    name=secret_name,
+                    start_date=date(2026, 4, 1),
+                    end_date=date(2026, 7, 31),
+                )
+            )
+        db.session.rollback()
+
+    assert secret_name not in str(error.value)
+    assert "hide_parameters" in str(error.value)

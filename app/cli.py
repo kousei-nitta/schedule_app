@@ -22,6 +22,7 @@ import platform
 import sqlite3
 import stat
 from pathlib import Path
+
 import click
 from flask import Flask, current_app
 from flask.cli import with_appcontext
@@ -53,7 +54,6 @@ from app.env_file import ENV_FILE_VARIABLE
 from app.extensions import db
 from app.login_limits import keyed_digest, unlock_login_id
 from app.models.user import User
-from app.transfer import make_transfer_copy
 from app.passwords import (
     MIN_PASSWORD_LENGTH,
     BreachCheckError,
@@ -62,6 +62,7 @@ from app.passwords import (
     is_valid_username,
     password_rule_errors,
 )
+from app.transfer import make_transfer_copy
 from app.trusted_devices import end_all_devices
 from app.user_sessions import end_all_sessions
 
@@ -404,7 +405,8 @@ def make_transfer_copy_command(output: Path) -> None:
 
     元のDBは変えない。写しには、ログイン中の端末・ログインの失敗・端末の
     印の行と、ファイルの空き領域を持ち込まない（app/transfer.py）。
-    OUTPUT は、リポジトリのフォルダの外のパス（例：~/Desktop/transfer.db）。
+    OUTPUT は、リポジトリのフォルダの外のパス（例：
+    ~/schedule-transfer/app.db。iCloud Drive などの、同期するフォルダの外）。
     """
     echo_environment()
     if current_app.config["PRODUCTION"]:
@@ -420,7 +422,7 @@ def make_transfer_copy_command(output: Path) -> None:
     if output.resolve().is_relative_to(PROJECT_ROOT):
         raise click.ClickException(
             "写しは、リポジトリのフォルダの外に作ってください"
-            "（Git に入れないため。例：~/Desktop/transfer.db）"
+            "（Git に入れないため。例：~/schedule-transfer/app.db）"
         )
     try:
         result = make_transfer_copy(source, output)

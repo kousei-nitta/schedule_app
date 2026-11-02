@@ -685,7 +685,7 @@ export function initCalendar() {
     scrollTime: "08:00:00",
     views: {
       [WEEK_VIEW]: {
-        // 狭い画面では、日付の見出しを短くする（例：2(月)。7日分が
+        // 狭い画面では、日付の見出しを短くする（例：2日(月)。7日分が
         // 横に並ぶため、11/2(月) では重なる）
         ...(isNarrowScreen
           ? { dayHeaderFormat: { day: "numeric", weekday: "short" } }

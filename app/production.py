@@ -6,6 +6,7 @@
 import os
 import stat
 
+import click
 from flask import Flask
 
 from app.config import ConfigError
@@ -22,6 +23,22 @@ def check_not_debug(app: Flask) -> None:
     if app.debug:
         raise ConfigError(
             "本番では、デバッグモード（FLASK_DEBUG）を使えません"
+        )
+
+
+def check_not_development_server() -> None:
+    """flask run（Flask の開発用のサーバー）の中なら起動しない。
+
+    開発用のサーバーには、プロキシを通らずに、直接つながる。共有の
+    サーバーでは、ほかの利用者も、そのポートにつなぎ、接続元のヘッダーを
+    偽れる。本番は uWSGI（wsgi.py）で動かす（run.py も、本番では断る）。
+    flask run は、コマンドの「run」の中で、アプリを作る。
+    """
+    command = click.get_current_context(silent=True)
+    if command is not None and command.info_name == "run":
+        raise ConfigError(
+            "本番では、flask run（開発用のサーバー）を使いません"
+            "（本番は uWSGI で動かします。docs/development/deploy.md）"
         )
 
 
@@ -78,6 +95,7 @@ def check_database_directory(app: Flask) -> None:
 def prepare_production(app: Flask) -> None:
     """本番の起動のときに、確かめる・整える（create_app から呼ぶ）。"""
     check_not_debug(app)
+    check_not_development_server()
     check_single_worker()
     check_database_directory(app)
     # これから作るファイル（DBの記録・バックアップ）を、持ち主だけが

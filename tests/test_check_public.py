@@ -5,6 +5,8 @@
 アプリの振る舞いが合っていることを確かめる。判定の関数は、作った応答で
 確かめる。
 """
+import json
+
 import pytest
 
 from scripts import check_public
@@ -16,42 +18,17 @@ from scripts.check_public import (
     check_logged_in,
     check_rate_limit,
     cookie_problems,
+    probe_headers,
     leaked_markers,
     security_header_problems,
 )
 from tests.auth_support import TEST_PASSWORD, TEST_USERNAME
-from tests.production_support import OWNER_ADDRESS, PUBLIC_HOST, PUBLIC_ORIGIN
-
-
-class ProxyTarget(Target):
-    """ホストのプロキシの代わり：http は https へ移し、https はアプリへ
-    渡す（X-Real-IP を、本当の接続元で上書きし、X-Forwarded-Proto を付ける）。
-    """
-
-    def __init__(self, app):
-        super().__init__(PUBLIC_ORIGIN)
-        self.client = app.test_client(use_cookies=False)
-
-    def request(self, method, path, headers=None, body=None, *, https=True):
-        if not https:
-            location = f"https://{self.host}{path}"
-            return Response(301, [("Location", location)], b"")
-        sent = dict(headers or {})
-        sent["X-Real-IP"] = OWNER_ADDRESS
-        sent["X-Forwarded-Proto"] = "https"
-        response = self.client.open(
-            path,
-            method=method,
-            headers=sent,
-            data=body,
-            base_url=f"http://{PUBLIC_HOST}",
-        )
-        return Response(
-            response.status_code,
-            list(response.headers.items()),
-            response.get_data(),
-            "TLSv1.3",
-        )
+from tests.production_support import (
+    OWNER_ADDRESS,
+    PUBLIC_HOST,
+    PUBLIC_ORIGIN,
+    ProxyTarget,
+)
 
 
 def test_basic_checks_pass_against_production_app(production_app, capsys):
@@ -229,4 +206,134 @@ def test_echo_app_reports_headers_but_hides_cookies():
     assert report["headers"]["HTTP_X_REAL_IP"] == "203.0.113.5"
     assert b"secret" not in body
     assert report["workers"] is None
+    assert report["uwsgi_sockets"] is None
     assert isinstance(report["home_filesystem"], str)
+
+
+# --- 下見（--probe） ---
+
+MAC_ADDRESS = "198.51.100.77"
+
+
+class ProbeTarget(Target):
+    """下見の道具を置いたサイトの代わり。proxy（送ったヘッダー → アプリに
+    届くヘッダー）で、プロキシの振る舞いを決める。"""
+
+    def __init__(self, proxy, python="3.14.10"):
+        super().__init__(PUBLIC_ORIGIN)
+        self.proxy = proxy
+        self.python = python
+
+    def request(self, method, path, headers=None, body=None, *, https=True):
+        received = {}
+        for name, value in self.proxy(dict(headers or {})).items():
+            received["HTTP_" + name.upper().replace("-", "_")] = value
+        report = {
+            "REMOTE_ADDR": "10.0.0.1",
+            "headers": received,
+            "workers": 1,
+            "python": self.python,
+            "sqlite": "3.50.0",
+            "home_filesystem": "ext4",
+            "uwsgi_sockets": {"socket": ["/run/uwsgi/site.sock"]},
+        }
+        return Response(200, [], json.dumps(report).encode())
+
+
+def good_proxy(headers):
+    # 下線の名前を捨て、X-Real-IP と X-Forwarded-Proto を上書きする
+    kept = {k: v for k, v in headers.items() if "_" not in k}
+    return kept | {"X-Real-IP": MAC_ADDRESS, "X-Forwarded-Proto": "https"}
+
+
+def proxy_keeping_underscores(headers):
+    # 下線の名前を、そのまま渡す（アプリには、同じ HTTP_X_REAL_IP に見える）
+    kept = good_proxy(headers)
+    for name, value in headers.items():
+        if "_" in name:
+            kept[name.replace("_", "-")] = value
+    return kept
+
+
+def proxy_trusting_forwarded_for(headers):
+    # 利用者が送った X-Forwarded-For から、X-Real-IP を作る
+    kept = good_proxy(headers)
+    kept["X-Real-IP"] = headers.get("X-Forwarded-For", MAC_ADDRESS)
+    return kept
+
+
+def run_probe(monkeypatch, target, address=MAC_ADDRESS):
+    monkeypatch.setattr("builtins.input", lambda _: address)
+    report = Report()
+    probe_headers(target, report)
+    return report
+
+
+def test_probe_passes_with_good_proxy(monkeypatch, capsys):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy))
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "CLIENT_ADDRESS_HEADER の候補：['X-Real-IP']" in output
+    assert "/run/uwsgi/site.sock" in output
+
+
+@pytest.mark.parametrize(
+    "proxy", [proxy_keeping_underscores, proxy_trusting_forwarded_for]
+)
+def test_probe_finds_fake_addresses(monkeypatch, capsys, proxy):
+    # 偽の値が届くヘッダーは、候補にしない（M3。別の目のレビュー）
+    report = run_probe(monkeypatch, ProbeTarget(proxy))
+
+    assert "候補：なし" in capsys.readouterr().out
+    assert report.failures
+
+
+def test_probe_needs_the_mac_address(monkeypatch, capsys):
+    # 値が、この Mac の公開のアドレスでなければ、候補にしない
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy), "203.0.113.1")
+
+    assert "候補：なし" in capsys.readouterr().out
+    assert report.failures
+
+
+def test_probe_refuses_text_that_is_not_an_address(monkeypatch):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy), "my mac")
+
+    assert report.failures == ["この Mac の公開のアドレス"]
+
+
+def test_probe_needs_new_enough_python(monkeypatch):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy, "3.14.9"))
+
+    assert report.failures == ["Python 3.14.10 以上"]
+
+
+def test_rate_limit_check_finds_proxy_keeping_underscores(
+    production_app, monkeypatch, capsys
+):
+    # 下線の名前を捨てないプロキシでは、偽の接続元が届き、11回目も
+    # 429 にならない
+    class UnderscoreTarget(ProxyTarget):
+        def request(self, method, path, headers=None, body=None, **kwargs):
+            sent = dict(headers or {})
+            response = self.client.open(
+                path,
+                method=method,
+                headers={"X-Forwarded-Proto": "https"}
+                | {k: v for k, v in sent.items() if "_" in k}
+                | {k: v for k, v in sent.items() if k == "Origin"},
+                data=body,
+                content_type=sent.get("Content-Type"),
+                base_url=f"http://{PUBLIC_HOST}",
+            )
+            return Response(response.status_code, [], b"")
+
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    report = Report()
+
+    check_rate_limit(UnderscoreTarget(production_app), report)
+
+    assert len(report.failures) == 1
+    # 断られた（400）のではなく、偽の接続元で、試せてしまった（401）
+    assert "[401, 401, 401" in capsys.readouterr().out
