@@ -110,7 +110,7 @@
 - 日付は、今日からの相対で決める（下の「画面の確認」）。週表示は日曜始まり。ブラウザの「今」は、`page.clock.set_fixed_time` で、テストの「今日」の正午に固定する（テストの途中で日付をまたいでも、Pythonとブラウザの「今日」がずれないように）
 - 「ないこと」を確かめる前に、同じ画面で「あること」を確かめて、読み込みが終わったことを確かめる（読み込みの前に「ない」と判定されて、確認が空振りになるのを防ぐ）。例：主な流れでは、同じ週の木曜日の授業の予定が出てから、休講日の水曜日に授業の予定がないことを確かめる
 - 要素は、`id` か、読み上げの名前（`get_by_role` の `name`）で探す。見た目のための class には、なるべく頼らない（FullCalendarの日付の列など、ほかに手がかりがない場合を除く）
-- Playwright の既定の `page` は、戻る・進むのキャッシュ（bfcache）を使わない（Playwright が `--disable-back-forward-cache` を付け、既定の headless の Chromium も bfcache を使わない）。「戻る」で前の画面がそのまま出るかを確かめるときは、fixture `bfcache_page`（新しい headless の `channel="chromium"` で、その設定を外して起動する）を使い、「戻る」は `page.go_back(wait_until="commit")` で待つ（bfcache から戻ると、読み込み（load）が起きない）。例：`test_back_after_logout_with_bfcache`（Task 025）
+- Playwright の既定の `page` は、戻る・進むのキャッシュ（bfcache）を使わない（Playwright が `--disable-back-forward-cache` を付け、既定の headless の Chromium も bfcache を使わない）。「戻る」で前の画面がそのまま出るかを確かめるときは、fixture `bfcache_page`（新しい headless の `channel="chromium"` で、その設定を外して起動する）を使い、「戻る」は `page.go_back(wait_until="commit")` で待つ（bfcache から戻ると、読み込み（load）が起きない）。例：`test_back_after_logout_with_bfcache`・`test_page_restored_from_bfcache_is_reloaded`（Task 025）。Safari（WebKit）は、Claudeの作業環境では動かせない（Playwright の WebKit を取得できない）ため、Safari での「戻る」は、Mac・iPhone で確かめる
 
 ## 画面の確認
 画面が変わるタスクでは、Komaが、Macで触って確かめる。Claudeがブラウザで確かめるときも含めて、次の知見を使う（Task 008〜021で分かったこと）。

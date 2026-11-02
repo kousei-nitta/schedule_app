@@ -1,9 +1,13 @@
 import { initCalendar } from "./calendar.js";
 import { initClosures } from "./closures.js";
+import { initPageRestore } from "./page_restore.js";
 import { initSemesters } from "./semesters.js";
 import { initSubjects } from "./subjects.js";
 import { initTasks } from "./tasks.js";
 
+// 「戻る」で、ログアウトの前の画面が出ないようにする守りは、ほかの
+// 初期化で例外が起きても効くように、最初に登録する。
+initPageRestore();
 // 今後のモードの初期化も、ここに足す。
 // semester-selectedを購読する側を、イベントを発行する側より先に初期化する。
 initSubjects();

@@ -16,8 +16,10 @@
 import re
 from datetime import date, datetime, time, timedelta
 
+import pytest
 from playwright.sync_api import Page, expect
 
+from app import security
 from app.demo_data import semester_name
 from tests.auth_support import E2E_USERNAME, TEST_PASSWORD
 
@@ -222,39 +224,73 @@ def test_expired_login_moves_to_login_page(
     assert csp_violations == []
 
 
+def not_restored_reasons_of(page: Page) -> list[str]:
+    """bfcache を使わなかった（「戻る」で開き直した）ときに、Chrome が
+    知らせる理由の一覧（あとから増える）。"""
+    reasons = []
+    devtools = page.context.new_cdp_session(page)
+    devtools.send("Page.enable")
+    devtools.on(
+        "Page.backForwardCacheNotUsed",
+        lambda event: reasons.extend(
+            explanation["reason"]
+            for explanation in event["notRestoredExplanations"]
+        ),
+    )
+    return reasons
+
+
+def log_out_and_go_back(page: Page, app_url: str) -> None:
+    """ログインし、カレンダーを読み込んでから、ログアウトして「戻る」。"""
+    log_in(page, app_url)
+    # カレンダーの読み込み（APIの取得）が終わってから、ログアウトする
+    expect(page.locator(".fc-timegrid")).to_be_visible()
+    page.locator("#user-menu-button").click()
+    page.locator("#logout-button").click()
+    expect(page).to_have_url(app_url + "/login")
+    # bfcache から戻ると、読み込み（load）が起きないため、commit まで待つ
+    page.go_back(wait_until="commit")
+
+
 def test_back_after_logout_with_bfcache(bfcache_page: Page, live_server: str):
     """ログアウトのあとの「戻る」で、ログイン中の画面が bfcache から
     戻らない（共用のPCで、次の人に見られない）。
 
-    守っているのは、画面とAPIの Cache-Control: no-store（app/security.py）。
+    1つ目の守りは、画面とAPIの Cache-Control: no-store（app/security.py）。
     Chrome は、no-store のページを bfcache に入れない（入れる場合も、
     HttpOnly の Cookie が変わると追い出す）。no-store を外すと、ログイン中の
     画面が、サーバーへの要求なしに、そのまま戻る（Task 025で確かめた）。
     """
     page = bfcache_page
-    # bfcache を使わなかったときに、Chrome が知らせる理由
-    not_restored_reasons = []
-    devtools = page.context.new_cdp_session(page)
-    devtools.send("Page.enable")
-    devtools.on(
-        "Page.backForwardCacheNotUsed",
-        lambda event: not_restored_reasons.extend(
-            explanation["reason"]
-            for explanation in event["notRestoredExplanations"]
-        ),
-    )
+    not_restored_reasons = not_restored_reasons_of(page)
 
-    log_in(page, live_server)
-    # カレンダーの読み込み（APIの取得）が終わってから、ログアウトする
-    expect(page.locator(".fc-timegrid")).to_be_visible()
-    page.locator("#user-menu-button").click()
-    page.locator("#logout-button").click()
-    expect(page).to_have_url(live_server + "/login")
-
-    page.go_back(wait_until="commit")
+    log_out_and_go_back(page, live_server)
 
     expect(page).to_have_url(live_server + "/login")
     expect(page.locator("#login-password")).to_be_visible()
     expect(page.locator("#user-menu-button")).to_have_count(0)
     # bfcache が使えないから（空振り）でなく、no-store のため、戻らなかった
     assert "MainResourceHasCacheControlNoStore" in not_restored_reasons
+
+
+def test_page_restored_from_bfcache_is_reloaded(
+    bfcache_page: Page, live_server: str, monkeypatch: pytest.MonkeyPatch
+):
+    """bfcache から画面が戻っても、読み込み直して、ログインの画面になる。
+
+    2つ目の守り（app/static/js/page_restore.js）。Safari は、HTTP の
+    ページでは、no-store でも bfcache に残す（Task 025で、KomaのMacで
+    見つけた）。ここでは、Chromium で同じ状況を作るため、no-store を
+    no-cache に替える（bfcache に入る）。
+    """
+    monkeypatch.setattr(security, "NO_STORE", "no-cache")
+    page = bfcache_page
+    not_restored_reasons = not_restored_reasons_of(page)
+
+    log_out_and_go_back(page, live_server)
+
+    expect(page).to_have_url(live_server + "/login")
+    expect(page.locator("#login-password")).to_be_visible()
+    expect(page.locator("#user-menu-button")).to_have_count(0)
+    # 画面は、bfcache から戻っていた（このテストが空振りしていない）
+    assert not_restored_reasons == []
