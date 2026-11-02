@@ -4,11 +4,20 @@
 - create-demo-db：デモ用の架空のデータのDBを作る
 - create-user・set-password・rename-user・unlock-login：利用者の管理
   （docs/development/database.md の「利用者の管理」）
+- show-settings：今の設定（ローカルか本番か、使うDBなど）を表示する
+  （秘密の値は表示しない）
+
+どのコマンドも、最初に、ローカルか本番か、と使うDBを表示する（本番の
+SSH で、設定のファイルを読み忘れて、別のDBを変えてしまわないため）。
 
 使うDBは、アプリと同じ設定（環境変数 DATABASE_URL）で決まる。
 パスワードは、引数でなく、表示しない入力で受け取る（コマンドの履歴に
 残さないため）。
 """
+import os
+import platform
+import sqlite3
+import stat
 from datetime import date, datetime
 
 import click
@@ -18,13 +27,14 @@ from flask.cli import with_appcontext
 from app import clock
 from app.auth import auth_logger
 from app.backup import BackupError, create_backup, manual_backup_path
-from app.database_files import database_file_path
+from app.database_files import database_file_path, describe_database
 from app.demo_data import (
     DEMO_USERNAME,
     DemoDataError,
     check_demo_target,
     create_demo_database,
 )
+from app.env_file import ENV_FILE_VARIABLE
 from app.extensions import db
 from app.login_limits import keyed_digest, unlock_login_id
 from app.models.user import User
@@ -45,6 +55,28 @@ SKIP_BREACH_CHECK_HELP = (
 USERNAME_RULE = (
     "ログインIDは、半角英小文字・数字・_・- の3〜32文字にしてください"
 )
+
+
+def echo_environment() -> None:
+    """ローカルか本番か、と使うDBを表示する（どのコマンドも、最初に呼ぶ）。"""
+    if current_app.config["PRODUCTION"]:
+        mode = "本番（APP_ENV=production）"
+    else:
+        mode = "ローカル"
+    click.echo(f"環境：{mode}。{describe_database(current_app)}")
+
+
+def refuse_demo_username_in_production(username: str) -> None:
+    """本番で、デモの利用者のID（demo）を断る。
+
+    demo は、公開のリポジトリに書かれたIDで、見せるためにパスワードを
+    教えることがある。本番のDBに置くと、だれでもログインして、ログインの
+    あとの機能を使えるようになる（ADR 0005）。
+    """
+    if current_app.config["PRODUCTION"] and username == DEMO_USERNAME:
+        raise click.ClickException(
+            f"本番では、デモの利用者のID（{DEMO_USERNAME}）を使えません"
+        )
 
 
 def prompt_new_password(username: str, skip_breach_check: bool) -> str:
@@ -105,6 +137,7 @@ def check_new_username(username: str) -> None:
 @with_appcontext
 def backup_db_command(label: str) -> None:
     """使っているDB（SQLiteのファイル）のバックアップを取る。"""
+    echo_environment()
     database_path = database_file_path(current_app)
     if database_path is None:
         raise click.ClickException(
@@ -143,6 +176,7 @@ def create_demo_db_command(replace: bool, skip_breach_check: bool) -> None:
     入力を求める）。例：
     DATABASE_URL=sqlite:///demo.db flask --app app create-demo-db
     """
+    echo_environment()
     try:
         # パスワードを入れてもらう前に、作れる場所かを確かめる
         check_demo_target(current_app, replace)
@@ -175,6 +209,8 @@ def create_demo_db_command(replace: bool, skip_breach_check: bool) -> None:
 @with_appcontext
 def create_user_command(username: str, skip_breach_check: bool) -> None:
     """利用者を作る（パスワードの入力を求める）。"""
+    echo_environment()
+    refuse_demo_username_in_production(username)
     check_new_username(username)
     password = prompt_new_password(username, skip_breach_check)
     user = User(
@@ -194,6 +230,7 @@ def create_user_command(username: str, skip_breach_check: bool) -> None:
 @with_appcontext
 def set_password_command(username: str, skip_breach_check: bool) -> None:
     """利用者のパスワードを決める・変える。すべての端末からログアウトする。"""
+    echo_environment()
     user = find_user(username)
     password = prompt_new_password(username, skip_breach_check)
     user.password_hash = hash_password(password)
@@ -218,6 +255,8 @@ def set_password_command(username: str, skip_breach_check: bool) -> None:
 @with_appcontext
 def rename_user_command(username: str, new_username: str) -> None:
     """利用者のログインIDを変える（推測されにくいIDにするときなど）。"""
+    echo_environment()
+    refuse_demo_username_in_production(new_username)
     user = find_user(username)
     check_new_username(new_username)
     user.username = new_username
@@ -240,11 +279,55 @@ def unlock_login_command(username: str) -> None:
     他人にわざと失敗され、締め出されたときに使う。何度も締め出される
     なら、rename-user で、推測されにくいIDに変える。
     """
+    echo_environment()
     count = unlock_login_id(keyed_digest("login_id", username))
     db.session.commit()
     click.echo(
         f"ログインID {username} の失敗の記録を、{count}件消しました"
     )
+
+
+def permission_text(path) -> str:
+    """ファイル・フォルダの権限（例：700）。ないときは「ありません」。"""
+    try:
+        return f"{stat.S_IMODE(path.stat().st_mode):o}"
+    except OSError:
+        return "ありません"
+
+
+@click.command("show-settings")
+@with_appcontext
+def show_settings_command() -> None:
+    """今の設定を表示する（秘密の値は表示しない）。
+
+    本番の準備（下見）と、SSH で設定のファイルを読めているかの確かめに
+    使う（docs/development/deploy.md）。
+    """
+    echo_environment()
+    config = current_app.config
+    database_path = database_file_path(current_app)
+    lines = [
+        f"PUBLIC_ORIGIN：{config['PUBLIC_ORIGIN'] or 'なし（ローカル）'}",
+        f"受け付ける Host：{'・'.join(config['TRUSTED_HOSTS'])}",
+        "接続元のヘッダー："
+        f"{config['CLIENT_ADDRESS_HEADER'] or 'なし（ローカル）'}",
+        f"ログインの Cookie：{config['AUTH_COOKIE_NAME']}"
+        f"（Secure：{'オン' if config['AUTH_COOKIE_SECURE'] else 'オフ'}）",
+        f"端末の印の Cookie：{config['DEVICE_COOKIE_NAME']}",
+        # 秘密の鍵そのものは表示しない（長さだけ）
+        f"SECRET_KEY：あり（{len(config['SECRET_KEY'])}文字）",
+        "設定のファイル："
+        + (os.environ.get(ENV_FILE_VARIABLE, "").strip() or "なし"),
+        f"本文の上限：{config['MAX_CONTENT_LENGTH']}バイト",
+        f"Python：{platform.python_version()}、SQLite：{sqlite3.sqlite_version}",
+    ]
+    if database_path is not None:
+        lines.append(
+            f"DBのファイルの権限：{permission_text(database_path)}、"
+            f"DBのフォルダの権限：{permission_text(database_path.parent)}"
+        )
+    for line in lines:
+        click.echo(line)
 
 
 def register_commands(app: Flask) -> None:
@@ -255,3 +338,4 @@ def register_commands(app: Flask) -> None:
     app.cli.add_command(set_password_command)
     app.cli.add_command(rename_user_command)
     app.cli.add_command(unlock_login_command)
+    app.cli.add_command(show_settings_command)

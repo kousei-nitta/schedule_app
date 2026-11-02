@@ -138,11 +138,16 @@ def is_demo_database_file(path: Path) -> bool:
 def check_demo_target(app: Flask, replace: bool) -> Path:
     """デモデータを作るDBのファイルを確かめ、そのパスを返す。
 
-    実データのDB、実データのDBのバックアップのフォルダ（instance/backups/）
+    本番、実データのDB、実データのDBのバックアップのフォルダ（instance/backups/）
     の中のファイル、SQLite以外のDB、すでにあるファイル（replace でないとき）
     、このコマンドで作ったデモのDBでないファイル（replace のとき）では、
     DemoDataError（何も変えない）。
     """
+    if app.config.get("PRODUCTION"):
+        # 本番のDBは、いつも実データのDB。デモの利用者も置かない（ADR 0005）
+        raise DemoDataError(
+            "本番（APP_ENV=production）では、デモデータを作れません"
+        )
     database_path = database_file_path(app)
     if database_path is None:
         raise DemoDataError(

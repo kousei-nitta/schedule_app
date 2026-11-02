@@ -272,8 +272,16 @@ def test_nonce_changes_within_one_app_context(app):
 # --- 入れ子が深すぎるJSON ---
 
 
+# 本文の上限（MAX_CONTENT_LENGTH の64KiB）の中では、Python 3.14 の json が
+# 読める深さ（3万段ほど）までしか送れず、RecursionError にならない。
+# 上限を超える本文は、読む前に413になる（下の test_body_over_limit_…）。
+# ここでは、上限を外して、read_json_object の守り（RecursionError を
+# 400 にする）そのものを確かめる（上限を変えたときの備え）
+
+
 @pytest.mark.parametrize("opening", ["[", '{"name":'])
 def test_too_deeply_nested_json_is_invalid_json(app, client, opening):
+    app.config["MAX_CONTENT_LENGTH"] = None
     # 100万段：Pythonの版（3.14 は 1万段でも読める）によらず、
     # json が RecursionError になる深さ
     depth = 1_000_000
@@ -293,8 +301,9 @@ def test_too_deeply_nested_json_is_invalid_json(app, client, opening):
     assert semester_count(app) == 0
 
 
-def test_too_deeply_nested_json_is_invalid_json_for_patch(client):
+def test_too_deeply_nested_json_is_invalid_json_for_patch(app, client):
     # PATCH（read_patch_object）も、read_json_object を通る
+    app.config["MAX_CONTENT_LENGTH"] = None
     created = client.post("/api/semesters", json=SEMESTER_PAYLOAD)
     semester_id = created.json["id"]
     depth = 1_000_000
@@ -310,6 +319,38 @@ def test_too_deeply_nested_json_is_invalid_json_for_patch(client):
     assert client.get(f"/api/semesters/{semester_id}").json["name"] == (
         SEMESTER_PAYLOAD["name"]
     )
+
+
+def test_body_over_limit_is_too_large_without_reading(app, client):
+    # 本文の上限（64KiB）を超える要求は、読まずに413（APIはJSON）
+    body = "[" * 40_000 + "]" * 40_000
+
+    response = client.post(
+        "/api/semesters", data=body, content_type="application/json"
+    )
+
+    assert response.status_code == 413
+    assert response.json == {
+        "error": {
+            "code": "too_large",
+            "message": "リクエストの本文が大きすぎます",
+        }
+    }
+    assert semester_count(app) == 0
+
+
+def test_body_within_limit_is_read(client):
+    # 上限ちょうどまでは読む（決まりに合わない JSON として400）
+    limit = 64 * 1024
+    body = '{"name": "' + "a" * (limit - 12) + '"}'
+    assert len(body.encode()) == limit
+
+    response = client.post(
+        "/api/semesters", data=body, content_type="application/json"
+    )
+
+    assert response.status_code == 400
+    assert response.json["error"]["code"] == "validation_error"
 
 
 # --- テンプレートの書き方 ---

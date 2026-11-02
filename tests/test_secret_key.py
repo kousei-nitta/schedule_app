@@ -6,7 +6,7 @@ import stat
 import pytest
 
 from app import create_app
-from app.config import check_cookie_security
+from app.config import check_security_settings
 from app.secret_key import SecretKeyError, load_secret_key
 
 LONG_KEY = "k" * 32
@@ -61,7 +61,7 @@ def test_test_apps_get_a_random_key_without_files(tmp_path):
 
 
 def test_local_hosts_may_use_cookies_without_secure():
-    check_cookie_security(
+    check_security_settings(
         {
             "TRUSTED_HOSTS": ["127.0.0.1", "localhost"],
             "AUTH_COOKIE_SECURE": False,

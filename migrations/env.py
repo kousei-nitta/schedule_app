@@ -107,6 +107,36 @@ def run_migrations_online():
             context.run_migrations()
 
 
+# 本番で断る操作（Alembic が env.py に渡す処理の名前）。downgrade：DBを
+# 古い形に戻す（列や表を消し、データが消える）。do_stamp：DBを変えずに、
+# 「どこまで当てたか」の記録だけを書き換える（次の upgrade が、当てるべき
+# migration を飛ばしうる）
+PRODUCTION_REFUSED_OPERATIONS = {"downgrade", "do_stamp"}
+
+
+def refuse_destructive_operation_in_production():
+    """本番（APP_ENV=production）で、DBを壊しうる操作を断る。
+
+    Flask-Migrate の db コマンドは、このアプリのコマンドと違い、中を
+    変えられないため、ここ（すべての db コマンドが通る場所）で断る。
+    どの操作かは、Alembic が渡す処理の名前で見分ける（公開の仕組みで
+    ないため、Alembic の更新で変わりうる。名前が分からないときは、
+    本番では断る。tests/test_production.py が、upgrade が通り、downgrade・
+    stamp が断られることを確かめる）。
+    """
+    if not current_app.config.get("PRODUCTION"):
+        return
+    operation = context._proxy.context_opts.get("fn")
+    name = getattr(operation, "__name__", None)
+    if name is None or name in PRODUCTION_REFUSED_OPERATIONS:
+        raise RuntimeError(
+            "本番では、この操作（db downgrade・db stamp など）はできません。"
+            "戻すときは、バックアップから戻します（docs/development/deploy.md）"
+        )
+
+
+refuse_destructive_operation_in_production()
+
 if context.is_offline_mode():
     run_migrations_offline()
 else:

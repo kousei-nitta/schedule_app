@@ -17,7 +17,16 @@ BACKUP_DIRECTORY_NAME = "backups"
 
 
 def real_database_path(app: Flask) -> Path:
-    """実データのDB（instance/app.db）のパスを返す。"""
+    """実データのDBのパスを返す。
+
+    ローカルは instance/app.db。本番（APP_ENV=production）は、設定の
+    DATABASE_URL のファイル（本番では、使うDBが、いつも実データのDB）。
+    """
+    if app.config.get("PRODUCTION"):
+        path = database_file_path(app)
+        if path is None:
+            raise RuntimeError("本番のDBは、SQLite のファイルにしてください")
+        return path
     return Path(app.instance_path) / REAL_DATABASE_FILE_NAME
 
 
@@ -111,6 +120,8 @@ def describe_database(app: Flask) -> str:
             "（SQLiteのファイルではないため、実データのDBかどうかは"
             "判定しません。自動のバックアップは作りません）"
         )
+    if app.config.get("PRODUCTION"):
+        return f"DB：{path}（本番の実データのDB）"
     if is_real_database(path, app):
         return f"DB：{path}（実データのDB）"
     return f"DB：{path}（実データのDBではありません。DATABASE_URL で指定）"

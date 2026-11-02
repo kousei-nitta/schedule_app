@@ -57,6 +57,13 @@ NO_STORE = "no-store"
 # スクリプトを1つも許さない画面（routeの名前）
 NO_SCRIPT_ENDPOINTS = {"auth.login"}
 
+# 本番（HTTPS）だけで付ける：このサイトを、これから1年、HTTPS だけで開く
+# よう、ブラウザに覚えさせる（HSTS）。一度開いたあとは、http:// と打っても、
+# ブラウザが通信の前に https:// に変える（途中で盗み見・書き換えされる
+# 最初の HTTP の通信をなくす）。includeSubDomains は付けない（このアプリの
+# ホストの下に、ほかのサイトはないため）
+STRICT_TRANSPORT_SECURITY = "max-age=31536000"
+
 
 def content_security_policy(nonce: str, allow_scripts: bool = True) -> str:
     """CSP（ページが読み込んでよいものの一覧）の値を作る。
@@ -141,4 +148,8 @@ def register_security_headers(app: Flask) -> None:
         )
         if request.endpoint != "static":
             response.headers["Cache-Control"] = NO_STORE
+        if app.config["PRODUCTION"]:
+            response.headers["Strict-Transport-Security"] = (
+                STRICT_TRANSPORT_SECURITY
+            )
         return response
