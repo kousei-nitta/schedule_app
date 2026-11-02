@@ -80,6 +80,14 @@ def log_out(page: Page, app_url: str) -> None:
     page.locator("#user-menu-button").click()
     page.locator("#logout-button").click()
     expect(page).to_have_url(app_url + "/login")
+    # 「戻る」でも、ログイン中の画面（データ）は見えない（開き直して、
+    # ログインの画面になる）。Playwright の Chromium は、戻る・進むの
+    # キャッシュ（bfcache）を使わないため、そこから戻る場合は、ここでは
+    # 確かめられない。その場合の守りは、Cache-Control: no-store（pytest の
+    # tests/test_auth.py で確かめる）と、Mac での確認
+    page.go_back()
+    expect(page).to_have_url(app_url + "/login")
+    expect(page.locator("#user-menu-button")).to_have_count(0)
     # ログアウトのあとは、トップを開いても、ログインの画面になる
     page.goto(app_url + "/")
     expect(page).to_have_url(app_url + "/login")

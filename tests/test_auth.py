@@ -815,7 +815,7 @@ def test_logout_ends_only_this_session(app, client):
 
     assert response.status_code == 303
     assert response.headers["Location"] == "/login"
-    assert response.headers["Clear-Site-Data"] == '"cache", "storage"'
+    assert response.headers["Clear-Site-Data"] == '"storage"'
     assert "Max-Age=0" in session_cookie_header(response)
     assert len(session_rows(app)) == 1
     # 盗まれたCookie（同じトークン）も、もう使えない
@@ -835,7 +835,7 @@ def test_logout_all_ends_every_session_of_the_user(app, client):
     response = client.post("/logout-all", headers=FORM_HEADERS)
 
     assert response.status_code == 303
-    assert response.headers["Clear-Site-Data"] == '"cache", "storage"'
+    assert response.headers["Clear-Site-Data"] == '"storage"'
     assert session_rows(app) == []
     assert other_device.get("/api/semesters").status_code == 401
     # ほかの利用者は、ログインしたまま
