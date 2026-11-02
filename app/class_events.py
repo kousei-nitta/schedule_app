@@ -50,6 +50,8 @@ def build_class_event(subject: Subject, event_date: date) -> Event:
     """
     return Event(
         subject=subject,
+        # 予定の持ち主は、授業の持ち主と同じ（子の行は、親の user_id を写す）
+        user_id=subject.user_id,
         category=EVENT_CATEGORY_CLASS,
         date=event_date,
         start_time=subject.start_time,

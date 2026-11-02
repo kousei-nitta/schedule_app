@@ -9,6 +9,7 @@
 | ファイル | 役割 |
 |---|---|
 | `main.js` | 入口。各モードの初期化を呼ぶ |
+| `logout_protection.js` | ログアウトのあとに、ログイン中の画面（取得済みのデータ）が見えないようにする守り（Task 025。理由は `security.md` の「ログアウト」）。①ログアウトのフォーム（`logout-form`・`logout-all-form`）を送る前に、画面を隠し（`body` に `d-none`）、`requestAnimationFrame` を2回待って、隠した画面が描かれてから送る ②画面を離れて、戻る・進むのキャッシュ（bfcache）に入るとき（`pagehide` の `persisted`）に、画面を隠す ③bfcache から戻ったとき（`pageshow` の `persisted`）に、隠したまま読み込み直す（ログアウトしていれば、サーバーがログインの画面に移す）。公開する関数は `initLogoutProtection` の1つで、`main.js` が、ほかの初期化より先に呼ぶ（ほかの初期化で例外が起きても効くように） |
 | `api.js` | `fetch` の共通処理。JSONの送受信を行い、`204` のときは `null` を返す。エラーは `ApiError`（`status`・`code`・`message`・`fields`）として投げる。画面のコードは、APIを呼ぶときに必ずこれを使い、`fetch` を直接呼ばない。仕様は、下の「`api.js` の仕様」 |
 | `ui.js` | 複数のモードで使う、表示とフォームの共通処理（DOM要素の取得、表示・非表示の切り替え、フォームのエラーの表示と消去、送信中の表示（フォーカスの扱いを含む。下の規則）、エラーメッセージの取得、JavaScriptからモーダルを閉じる処理）。公開する関数は、`getElement`・`setVisible`・`errorMessageOf`・`clearFormErrors`・`showApiError`・`setSubmitting`・`trackModalShowing`・`hideModal` の8つ（各関数の直前に、引数の形を日本語のコメントで書く。モーダルの2つは、下の規則）。`getElement` は、要素が見つからない場合、`null` を返さず、「要素が見つかりません：<id>」のエラーを投げる（idの書き間違いに、すぐ気づけるようにするため）。日付の補助（`dates.js`）や、リソース固有の処理は持たない |
 | `dates.js` | 複数のモードで使う、日付の補助処理。今日の日付の文字列（`localDateString`：「2026-09-21」）、今の日時の文字列（`localDateTimeString`：「2026-10-20T23:59」。課題・タスクのAPIの日時と同じ形。秒は持たない）、日付の表示（`formatJapaneseDate`：「2026年9月21日」、`formatJapaneseDateWithWeekday`：「2026年5月15日（金）」）、日時の表示（`formatJapaneseDateTime`：「2026年10月20日（火） 23:59」）。公開する関数は、この5つ。DOMとAPIは扱わない |
@@ -104,6 +105,7 @@
   - `body` が `undefined` でないときだけ、`Content-Type: application/json` を付けて、`JSON.stringify(body)` を送る（`GET`・`DELETE` には付けない。サーバーも、これらには要求しない）
   - 成功（2xx）：`204` なら `null`、それ以外は、JSONを解析した値を返す
   - 失敗：応答の `{"error": {"code", "message", "fields"}}` から `ApiError` を作って投げる
+  - 401（ログインが切れた。`unauthorized`）のときは、ログインの画面（`/login`）へ移る（`window.location.assign`）。そのうえで、ほかの失敗と同じく `ApiError` を投げる（呼び出し側の処理を止める）
   - サーバーに接続できない場合（`fetch` が例外）：`status: 0`、`code: "network_error"`、`message: "サーバーに接続できませんでした。時間をおいて、もう一度お試しください"` の `ApiError` を投げる
   - 応答がJSONとして読めない、または `{"error": {...}}` の形でない場合：`code: "invalid_response"`、`message: "サーバーから想定外の応答がありました。時間をおいて、もう一度お試しください"` の `ApiError` を投げる（`status` は、実際の値）
 - `network_error` と `invalid_response` は、サーバーが返すコードではなく、`api.js` が作る（「エラー」の表には含めない）

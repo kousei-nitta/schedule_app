@@ -9,6 +9,9 @@ docs/development/database.md の「デモ用の架空のデータ」。
 起動しない）。日付は、すべて今日からの相対で決める（いつ作っても、
 今日を含む学期・直近の締切・期限切れが表示されるように）。
 登場する授業・教室・派遣会社などは、すべて架空のもの。
+
+データは、利用者 demo のものにする。パスワードは、コマンドが入力を
+求める（決まったパスワードを、公開のリポジトリに書かないため）。
 """
 from datetime import date, timedelta
 from pathlib import Path
@@ -17,13 +20,19 @@ from flask import Flask
 from flask.testing import FlaskClient
 from flask_migrate import upgrade
 
+from app import clock
 from app.database_files import (
     database_file_path,
     is_in_real_backup_directory,
     is_real_database,
 )
 from app.extensions import db
-from app.models import Closure, Event, Semester, Subject, Task
+from app.models import Closure, Event, Semester, Subject, Task, User
+from app.passwords import hash_password, password_rule_errors
+from app.user_sessions import end_all_sessions, start_session
+
+# デモの利用者のログインID
+DEMO_USERNAME = "demo"
 
 # デモのDBの印。SQLiteのファイルの見出しの application_id（ファイルの
 # 69〜72バイト目。アプリは使わない欄）に書く値。「DEMO」の4文字を、
@@ -377,16 +386,42 @@ def count_rows(model) -> int:
     return db.session.scalar(db.select(db.func.count()).select_from(model))
 
 
+def demo_client(app: Flask, password: str) -> FlaskClient:
+    """利用者 demo を作り、その利用者でログインした test_client を返す。
+
+    ログインの画面は通らず、ログイン中の端末の行を、直接作る（パスワードの
+    確かめは、ログインのテストで行う）。この行は、登録のあとで消す
+    （create_demo_database）。
+    """
+    user = User(
+        username=DEMO_USERNAME,
+        password_hash=hash_password(password),
+        created_at=clock.utc_now(),
+    )
+    db.session.add(user)
+    db.session.commit()
+    token = start_session(user.id)
+    db.session.commit()
+    client = app.test_client()
+    client.set_cookie(app.config["AUTH_COOKIE_NAME"], token)
+    return client
+
+
 def create_demo_database(
-    app: Flask, today: date, replace: bool = False
+    app: Flask, today: date, replace: bool = False, *, password: str
 ) -> dict[str, int]:
     """使っているDBのファイルに、デモデータのDBを作る。各件数を返す。
 
     replace が True なら、すでにあるデモのDBを消して、作り直す
     （消してよいかは、check_demo_target で確かめる）。途中で失敗したら、
     作りかけのDBを消してから、例外を出し直す（半端なデモのDBを残さない）。
+    password は、利用者 demo のパスワード（パスワードの決まりに合わない
+    ときは、何も変えずに DemoDataError）。
     """
     database_path = check_demo_target(app, replace)
+    password_errors = password_rule_errors(password, DEMO_USERNAME)
+    if password_errors:
+        raise DemoDataError("。".join(password_errors))
 
     with app.app_context():
         # 開いている接続を閉じてから、ファイルを消す
@@ -402,7 +437,16 @@ def create_demo_database(
                 )
             # 空のDBに、migrationで、テーブルを作る
             upgrade(directory=str(MIGRATIONS_DIRECTORY))
-            register_demo_data(app.test_client(), today)
+            register_demo_data(demo_client(app, password), today)
+            # 登録に使ったログイン中の端末の行を消す（だれも使わない行が
+            # 残ると、利用者のメニューの「ログイン中の端末」の数が、
+            # 本当より多く見えるため）
+            end_all_sessions(
+                db.session.scalar(
+                    db.select(User.id).where(User.username == DEMO_USERNAME)
+                )
+            )
+            db.session.commit()
         except BaseException:
             db.session.remove()
             db.engine.dispose()
@@ -410,6 +454,7 @@ def create_demo_database(
             raise
 
         return {
+            "利用者": count_rows(User),
             "学期": count_rows(Semester),
             "授業": count_rows(Subject),
             "休講日": count_rows(Closure),

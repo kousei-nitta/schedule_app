@@ -50,9 +50,14 @@ def source_db(template_db: Path, tmp_path: Path) -> Path:
     database_path = tmp_path / "app.db"
     shutil.copy2(template_db, database_path)
     with closing(sqlite3.connect(database_path)) as connection:
+        # データの持ち主の利用者（id 1。パスワードなし）
         connection.execute(
-            "INSERT INTO semesters (name, start_date, end_date)"
-            " VALUES ('2026年度 後期', '2026-09-21', '2026-12-27')"
+            "INSERT INTO users (username, password_hash, created_at)"
+            " VALUES ('test-user', NULL, '2026-10-30 00:00:00')"
+        )
+        connection.execute(
+            "INSERT INTO semesters (user_id, name, start_date, end_date)"
+            " VALUES (1, '2026年度 後期', '2026-09-21', '2026-12-27')"
         )
         connection.commit()
     return database_path
@@ -248,8 +253,8 @@ def make_hot_journal(database_path: Path, target_path: Path) -> None:
         # 今ある行を変えて、記録に、元のページの中身を控えさせる
         connection.execute("UPDATE semesters SET name = name || '+'")
         connection.execute(
-            "INSERT INTO closures (semester_id, date, name)"
-            " VALUES (1, '2026-10-01', '書きかけの休講日')"
+            "INSERT INTO closures (user_id, semester_id, date, name)"
+            " VALUES (1, 1, '2026-10-01', '書きかけの休講日')"
         )
         shutil.copy2(database_path, target_path)
         shutil.copy2(journal_path, target_journal)
@@ -345,8 +350,8 @@ def test_backup_copies_only_committed_rows_while_app_writes(
     with closing(sqlite3.connect(source_db)) as writer:
         writer.execute("BEGIN IMMEDIATE")
         writer.execute(
-            "INSERT INTO semesters (name, start_date, end_date)"
-            " VALUES ('2027年度 前期', '2027-04-01', '2027-07-31')"
+            "INSERT INTO semesters (user_id, name, start_date, end_date)"
+            " VALUES (1, '2027年度 前期', '2027-04-01', '2027-07-31')"
         )
         backup_path = tmp_path / "backups" / "app-copy.db"
 

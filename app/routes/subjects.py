@@ -16,6 +16,7 @@ from app.api_helpers import (
     validate_required_string,
     validate_required_time,
 )
+from app.auth import current_user_id
 from app.class_events import build_class_events, build_class_events_from
 from app.extensions import db
 from app.models.closure import Closure
@@ -23,6 +24,7 @@ from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
 from app.models.task import Task
+from app.ownership import get_owned
 
 
 subjects_bp = Blueprint(
@@ -175,7 +177,10 @@ def semester_closure_dates(semester_id: int) -> set[date]:
     """学期の休講日の日付を返す（予定を作らない日）。"""
     return set(
         db.session.scalars(
-            db.select(Closure.date).where(Closure.semester_id == semester_id)
+            db.select(Closure.date).where(
+                Closure.user_id == current_user_id(),
+                Closure.semester_id == semester_id,
+            )
         )
     )
 
@@ -188,6 +193,7 @@ def delete_generated_events_from(subject_id: int, from_date: date) -> None:
     """
     db.session.execute(
         db.delete(Event).where(
+            Event.user_id == current_user_id(),
             Event.subject_id == subject_id,
             Event.is_generated.is_(True),
             Event.date >= from_date,
@@ -200,7 +206,10 @@ def count_subject_events(subject_id: int) -> int:
     return db.session.scalar(
         db.select(db.func.count())
         .select_from(Event)
-        .where(Event.subject_id == subject_id)
+        .where(
+            Event.user_id == current_user_id(),
+            Event.subject_id == subject_id,
+        )
     )
 
 
@@ -209,7 +218,10 @@ def count_subject_tasks(subject_id: int) -> int:
     return db.session.scalar(
         db.select(db.func.count())
         .select_from(Task)
-        .where(Task.subject_id == subject_id)
+        .where(
+            Task.user_id == current_user_id(),
+            Task.subject_id == subject_id,
+        )
     )
 
 
@@ -227,7 +239,9 @@ def get_subjects():
             {"semester_id": query_error},
         )
 
-    statement = db.select(Subject)
+    statement = db.select(Subject).where(
+        Subject.user_id == current_user_id()
+    )
     if specified:
         if semester_id is None:
             # 範囲外のIDに当たる学期はないため、空の一覧を返す。
@@ -245,7 +259,7 @@ def get_subjects():
 
 @subjects_bp.get(f"/<int(max={MAX_ID}):subject_id>")
 def get_subject(subject_id: int):
-    subject = db.session.get(Subject, subject_id)
+    subject = get_owned(Subject, subject_id)
     if subject is None:
         return api_error_response("not_found", "授業が見つかりません")
 
@@ -279,7 +293,7 @@ def create_subject():
         if not 1 <= semester_id <= MAX_ID:
             fields["semester_id"] = "指定された学期が存在しません"
         else:
-            semester = db.session.get(Semester, semester_id)
+            semester = get_owned(Semester, semester_id)
             if semester is None:
                 fields["semester_id"] = "指定された学期が存在しません"
 
@@ -309,6 +323,8 @@ def create_subject():
     excluded_dates = semester_closure_dates(semester.id)
 
     subject = Subject(
+        # 授業の持ち主は、学期の持ち主と同じ（子の行は、親の user_id を写す）
+        user_id=semester.user_id,
         semester_id=semester_id,
         subject_name=values["subject_name"],
         room=values["room"],
@@ -336,7 +352,7 @@ def create_subject():
 @subjects_bp.patch(f"/<int(max={MAX_ID}):subject_id>")
 def update_subject(subject_id: int):
     # 対象の授業がなければ、本文を読む前に404にする。
-    subject = db.session.get(Subject, subject_id)
+    subject = get_owned(Subject, subject_id)
     if subject is None:
         return api_error_response("not_found", "授業が見つかりません")
 
@@ -389,15 +405,25 @@ def update_subject(subject_id: int):
 
 @subjects_bp.delete(f"/<int(max={MAX_ID}):subject_id>")
 def delete_subject(subject_id: int):
-    subject = db.session.get(Subject, subject_id)
+    subject = get_owned(Subject, subject_id)
     if subject is None:
         return api_error_response("not_found", "授業が見つかりません")
 
     # 授業に結びつく予定（自動生成・単発とも、過去分を含む）と課題を、
     # 授業より先に、明示的に削除する（「データ設計」の「共通の約束」）。
     # 授業だけを削除すると、予定と課題が、subject_id が NULL の行として残る。
-    db.session.execute(db.delete(Event).where(Event.subject_id == subject.id))
-    db.session.execute(db.delete(Task).where(Task.subject_id == subject.id))
+    db.session.execute(
+        db.delete(Event).where(
+            Event.user_id == subject.user_id,
+            Event.subject_id == subject.id,
+        )
+    )
+    db.session.execute(
+        db.delete(Task).where(
+            Task.user_id == subject.user_id,
+            Task.subject_id == subject.id,
+        )
+    )
     db.session.delete(subject)
     # 予定・課題・授業の削除を、1回のcommitで保存する。
     db.session.commit()

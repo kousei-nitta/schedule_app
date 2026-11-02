@@ -4,17 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>スケジュール帳</title>
+  {% block head_extra %}{% endblock %}
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
   <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
 <body>
   {% block content %}{% endblock %}
+  {# CDNのライブラリ。ログインの画面（login.html）は、この block を空にして、
+     JavaScriptを読み込まない（パスワードを入れる画面に、外部のスクリプトを
+     置かない。docs/architecture/security.md） #}
+  {% block library_scripts %}
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
   {# nonce：FullCalendarは、自分のCSSを <style> として差し込み、そのとき、
      nonce の付いた <script> から値を読んで、<style> に付ける。CSPは、
      この値の <style> だけを許す（app/security.py。CDNのURLを変えるときは、
      app/security.py も変える） #}
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.21/index.global.min.js" integrity="sha384-WDvnzcla8X1CQM97EnYyl4OoTCvmMFp5lBiVNO3IjVdvLMOUjwt+iuYb/Mru5A9v" crossorigin="anonymous" nonce="{{ csp_nonce }}"></script>
+  {% endblock %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

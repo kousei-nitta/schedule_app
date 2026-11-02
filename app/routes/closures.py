@@ -14,12 +14,14 @@ from app.api_helpers import (
     validate_required_date,
     validate_required_integer,
 )
+from app.auth import current_user_id
 from app.class_events import build_class_event
 from app.extensions import db
 from app.models.closure import Closure
 from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
+from app.ownership import get_owned
 
 
 closures_bp = Blueprint(
@@ -44,11 +46,14 @@ def delete_generated_class_events(semester_id: int, event_date: date) -> None:
 
     休講日の追加で使う。単発の予定（is_generated=False）は削除しない。
     """
+    user_id = current_user_id()
     semester_subject_ids = db.select(Subject.id).where(
-        Subject.semester_id == semester_id
+        Subject.user_id == user_id,
+        Subject.semester_id == semester_id,
     )
     db.session.execute(
         db.delete(Event).where(
+            Event.user_id == user_id,
             Event.subject_id.in_(semester_subject_ids),
             Event.date == event_date,
             Event.is_generated.is_(True),
@@ -66,9 +71,11 @@ def build_missing_class_events(
     同じ授業。同じ授業・同じ日付の自動生成の予定を2件にしないため、
     すでにある授業は除く。単発の予定（is_generated=False）の有無は見ない。
     """
+    user_id = current_user_id()
     subjects = db.session.scalars(
         db.select(Subject)
         .where(
+            Subject.user_id == user_id,
             Subject.semester_id == semester_id,
             Subject.weekday == event_date.weekday(),
         )
@@ -77,6 +84,7 @@ def build_missing_class_events(
     subject_ids_with_event = set(
         db.session.scalars(
             db.select(Event.subject_id).where(
+                Event.user_id == user_id,
                 Event.subject_id.in_([subject.id for subject in subjects]),
                 Event.date == event_date,
                 Event.is_generated.is_(True),
@@ -104,7 +112,9 @@ def get_closures():
             {"semester_id": query_error},
         )
 
-    statement = db.select(Closure)
+    statement = db.select(Closure).where(
+        Closure.user_id == current_user_id()
+    )
     if specified:
         if semester_id is None:
             return jsonify([])
@@ -136,7 +146,7 @@ def create_closure():
         if not 1 <= semester_id <= MAX_ID:
             fields["semester_id"] = "指定された学期が存在しません"
         else:
-            semester = db.session.get(Semester, semester_id)
+            semester = get_owned(Semester, semester_id)
             if semester is None:
                 fields["semester_id"] = "指定された学期が存在しません"
 
@@ -156,6 +166,7 @@ def create_closure():
         else:
             duplicate = db.session.scalars(
                 db.select(Closure).where(
+                    Closure.user_id == semester.user_id,
                     Closure.semester_id == semester.id,
                     Closure.date == closure_date,
                 )
@@ -185,6 +196,9 @@ def create_closure():
         )
 
     closure = Closure(
+        # 休講日の持ち主は、学期の持ち主と同じ（子の行は、親の user_id を
+        # 写す）
+        user_id=semester.user_id,
         semester_id=semester_id,
         date=closure_date,
         name=name,
@@ -199,7 +213,7 @@ def create_closure():
 
 @closures_bp.delete(f"/<int(max={MAX_ID}):closure_id>")
 def delete_closure(closure_id: int):
-    closure = db.session.get(Closure, closure_id)
+    closure = get_owned(Closure, closure_id)
     if closure is None:
         return api_error_response("not_found", "休講日が見つかりません")
 

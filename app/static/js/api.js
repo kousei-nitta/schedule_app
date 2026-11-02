@@ -1,3 +1,6 @@
+// ログインの画面（ログインが切れたときに移る。docs/architecture/frontend.md）
+const LOGIN_URL = "/login";
+
 const NETWORK_ERROR_MESSAGE =
   "サーバーに接続できませんでした。時間をおいて、もう一度お試しください";
 const INVALID_RESPONSE_MESSAGE =
@@ -64,6 +67,12 @@ export async function apiRequest(method, url, body) {
     } catch {
       throw invalidResponse(response.status);
     }
+  }
+
+  if (response.status === 401) {
+    // ログインが切れた（期限が過ぎた・ほかの端末からログアウトした）。
+    // ログインの画面へ移る。呼び出し側の処理は、例外で止める
+    window.location.assign(LOGIN_URL);
   }
 
   let payload;

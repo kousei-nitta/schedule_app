@@ -17,6 +17,7 @@ from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
 from app.models.task import Task
+from tests.auth_support import TEST_USER_ID
 
 
 # 学期の期間（2026-04-01（水）〜2026-07-31（金））。
@@ -62,7 +63,12 @@ MONDAYS = days_of_weekday(START, END, 0)
 
 def make_semester(app, name="2026年度 前期", start=START, end=END):
     with app.app_context():
-        semester = Semester(name=name, start_date=start, end_date=end)
+        semester = Semester(
+            user_id=TEST_USER_ID,
+            name=name,
+            start_date=start,
+            end_date=end,
+        )
         db.session.add(semester)
         db.session.commit()
         return semester.id
@@ -87,7 +93,13 @@ def create_subject(client, semester_id, **overrides):
 
 def make_closure(app, semester_id, closure_date):
     with app.app_context():
-        db.session.add(Closure(semester_id=semester_id, date=closure_date))
+        db.session.add(
+            Closure(
+                user_id=TEST_USER_ID,
+                semester_id=semester_id,
+                date=closure_date,
+            )
+        )
         db.session.commit()
 
 
@@ -95,6 +107,7 @@ def make_one_off_event(app, subject_id, event_date):
     """授業の単発の予定（is_generated=False）を、ORMで直接作る。"""
     with app.app_context():
         event = Event(
+            user_id=TEST_USER_ID,
             subject_id=subject_id,
             category="class",
             date=event_date,
@@ -112,6 +125,7 @@ def make_part_time_event(app, event_date):
     """授業に結びつかない予定（アルバイト）を、ORMで直接作る。"""
     with app.app_context():
         event = Event(
+            user_id=TEST_USER_ID,
             category="part_time",
             date=event_date,
             start_time=time(17, 0),
@@ -127,6 +141,7 @@ def make_task(app, subject_id):
     """課題（授業がなければ、その他）を、ORMで直接作る。"""
     with app.app_context():
         task = Task(
+            user_id=TEST_USER_ID,
             subject_id=subject_id,
             category="assignment" if subject_id is not None else "other",
             title="レポート",

@@ -16,6 +16,7 @@ from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
 from app.models.task import Task
+from tests.auth_support import TEST_USER_ID
 
 
 # 「今日」は、2026-06-15（月）に固定する（授業全体の編集による作り直しとの
@@ -74,6 +75,7 @@ def fixed_today(monkeypatch):
 def make_semester(app):
     with app.app_context():
         semester = Semester(
+            user_id=TEST_USER_ID,
             name="2026年度 前期",
             start_date=date(2026, 4, 1),
             end_date=date(2026, 7, 31),
@@ -87,6 +89,7 @@ def make_subject(app, semester_id, subject_name="プログラミング基礎"):
     """授業を、ORMで直接作る（自動生成の予定は作らない）。"""
     with app.app_context():
         subject = Subject(
+            user_id=TEST_USER_ID,
             semester_id=semester_id,
             subject_name=subject_name,
             room="3号館201",
@@ -421,7 +424,13 @@ def test_create_class_event_on_closure_date_is_accepted(
     client, app, semester_id, subject_id
 ):
     with app.app_context():
-        db.session.add(Closure(semester_id=semester_id, date=FUTURE_MONDAY))
+        db.session.add(
+            Closure(
+                user_id=TEST_USER_ID,
+                semester_id=semester_id,
+                date=FUTURE_MONDAY,
+            )
+        )
         db.session.commit()
 
     created = create_event(
@@ -1340,7 +1349,11 @@ def test_delete_event_keeps_subject_closures_and_tasks(
 ):
     with app.app_context():
         db.session.add(
-            Closure(semester_id=semester_id, date=date(2026, 6, 29))
+            Closure(
+                user_id=TEST_USER_ID,
+                semester_id=semester_id,
+                date=date(2026, 6, 29),
+            )
         )
         db.session.commit()
     task = client.post(

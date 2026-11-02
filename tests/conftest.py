@@ -5,8 +5,16 @@ from pathlib import Path
 import pytest
 from flask_migrate import upgrade
 
-from app import create_app
+from app import clock, create_app
 from app.extensions import db
+from tests.auth_support import (
+    START,
+    TEST_USER_ID,
+    TEST_USERNAME,
+    FakeClock,
+    create_user,
+    logged_in_client,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -91,6 +99,9 @@ def app(template_db: Path, tmp_path: Path):
             "SQLALCHEMY_DATABASE_URI": f"sqlite:///{resolved_database_path}",
         }
     )
+    # テストの利用者（id 1）。テストのデータは、この利用者のものにする
+    # （tests/auth_support.py の TEST_USER_ID）
+    assert create_user(test_app, TEST_USERNAME) == TEST_USER_ID
     yield test_app
 
     with test_app.app_context():
@@ -100,4 +111,19 @@ def app(template_db: Path, tmp_path: Path):
 
 @pytest.fixture
 def client(app):
+    # テストの利用者で、ログインした状態
+    return logged_in_client(app, TEST_USER_ID)
+
+
+@pytest.fixture
+def anonymous_client(app):
+    # ログインしていない状態
     return app.test_client()
+
+
+@pytest.fixture
+def clock_now(monkeypatch) -> FakeClock:
+    # 時計（app/clock.py の utc_now）を、テストで動かせる時計に替える
+    fake = FakeClock(START)
+    monkeypatch.setattr(clock, "utc_now", fake)
+    return fake

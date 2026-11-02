@@ -15,6 +15,7 @@ from app.models.event import Event
 from app.models.semester import Semester
 from app.models.subject import Subject
 from app.models.task import Task
+from tests.auth_support import TEST_USER_ID
 
 
 # 「今日」は、2026-06-15（月）に固定する（実行した日によって、結果が
@@ -81,6 +82,7 @@ def fixed_today(monkeypatch):
 def make_semester(app, name="2026年度 前期"):
     with app.app_context():
         semester = Semester(
+            user_id=TEST_USER_ID,
             name=name,
             start_date=date(2026, 4, 1),
             end_date=date(2026, 7, 31),
@@ -116,7 +118,13 @@ def create_subject(client, semester_id, **overrides):
 
 def make_closure(app, semester_id, closure_date):
     with app.app_context():
-        db.session.add(Closure(semester_id=semester_id, date=closure_date))
+        db.session.add(
+            Closure(
+                user_id=TEST_USER_ID,
+                semester_id=semester_id,
+                date=closure_date,
+            )
+        )
         db.session.commit()
 
 
@@ -124,6 +132,7 @@ def make_one_off_event(app, subject_id, event_date, title="補講"):
     """授業の単発の予定（is_generated=False）を、ORMで直接作る。"""
     with app.app_context():
         event = Event(
+            user_id=TEST_USER_ID,
             subject_id=subject_id,
             category="class",
             date=event_date,
@@ -141,6 +150,7 @@ def make_part_time_event(app, event_date):
     """授業に結びつかない予定（アルバイト）を、ORMで直接作る。"""
     with app.app_context():
         event = Event(
+            user_id=TEST_USER_ID,
             category="part_time",
             date=event_date,
             start_time=time(17, 0),
@@ -156,6 +166,7 @@ def make_task(app, subject_id, title="レポート"):
     """課題を、ORMで直接作る（課題のAPIは、まだないため）。"""
     with app.app_context():
         task = Task(
+            user_id=TEST_USER_ID,
             subject_id=subject_id,
             category="assignment" if subject_id is not None else "other",
             title=title,
@@ -263,6 +274,7 @@ def test_subject_get_counts_are_zero_without_events_and_tasks(client, app):
     with app.app_context():
         # 2026-04-01（水）〜2026-04-02（木）の学期に、月曜日はない。
         semester = Semester(
+            user_id=TEST_USER_ID,
             name="2026年度 前期",
             start_date=date(2026, 4, 1),
             end_date=date(2026, 4, 2),

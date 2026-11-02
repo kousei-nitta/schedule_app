@@ -5,6 +5,11 @@ class Task(db.Model):
     __tablename__ = "tasks"
 
     id = db.Column(db.Integer, primary_key=True)
+    # このデータの持ち主（利用者）。APIは、ログインした利用者の
+    # データだけを扱う（app/ownership.py）
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("users.id"), nullable=False
+    )
     subject_id = db.Column(
         db.Integer, db.ForeignKey("subjects.id"), nullable=True
     )

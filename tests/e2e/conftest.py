@@ -1,12 +1,16 @@
 """E2Eテスト（Playwright）の共通の準備。
 
 - live_server：一時ディレクトリのDB（migrationで作った雛形のコピー）で、
-  アプリを別のスレッドで起動し、URLを返す（実データのDBに触れない）
+  アプリを別のスレッドで起動し、URLを返す（実データのDBに触れない）。
+  E2Eの利用者（E2E_USERNAME・tests/auth_support.py の TEST_PASSWORD）を
+  作っておく。ログインは、テストが画面から行う
 - app_url：ブラウザで開くアプリのURL。環境変数 E2E_CDN_FROM_NPM=1 の
   ときは、CDN（jsDelivr）への読み込みに、node_modules の同じ版の
   ファイルで答える（CDNに届かない、Claudeの作業環境のため。CIは、
   CDNから読む）。ブラウザが integrity（SRI）を確かめるので、違う
   ファイルなら読み込まれない
+- bfcache_page：戻る・進むのキャッシュ（bfcache）を使うブラウザのページ
+  （ふだんの page は、Playwright の既定で、bfcache を使わない）
 - page_errors：ページで起きたJavaScriptの例外の一覧
 - csp_violations：ブラウザが、CSP（app/security.py）に反するとして
   止めた読み込み・実行の一覧
@@ -24,11 +28,12 @@ import threading
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import ConsoleMessage, Page, Route
+from playwright.sync_api import ConsoleMessage, Page, Playwright, Route
 from werkzeug.serving import make_server
 
 from app import create_app
 from app.extensions import db
+from tests.auth_support import E2E_USERNAME, create_user
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +64,7 @@ def live_server(template_db: Path, tmp_path: Path):
             "SQLALCHEMY_DATABASE_URI": f"sqlite:///{database_path}",
         }
     )
+    create_user(server_app, E2E_USERNAME)
     # 番号0：空いているポートを、OSに選んでもらう
     server = make_server("127.0.0.1", 0, server_app, threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -110,6 +116,29 @@ def app_url(page: Page, live_server: str) -> str:
     if os.environ.get("E2E_CDN_FROM_NPM") == "1":
         page.route(CDN_PREFIX + "**", answer_from_node_modules)
     return live_server
+
+
+@pytest.fixture
+def bfcache_page(playwright: Playwright):
+    """戻る・進むのキャッシュ（bfcache）を使うブラウザのページ。
+
+    Playwright は、Chromium を、bfcache を切って起動する
+    （--disable-back-forward-cache）。また、既定の headless の
+    Chromium（headless shell）は、bfcache を使わない。そのため、
+    新しい headless（channel="chromium"）で、切る設定を外して起動する
+    （python -m playwright install chromium で、両方が入る）。
+    bfcache から戻るときは、読み込み（load）が起きないため、「戻る」は
+    page.go_back(wait_until="commit") で待つ。
+    """
+    browser = playwright.chromium.launch(
+        channel="chromium",
+        ignore_default_args=["--disable-back-forward-cache"],
+    )
+    page = browser.new_page()
+    if os.environ.get("E2E_CDN_FROM_NPM") == "1":
+        page.route(CDN_PREFIX + "**", answer_from_node_modules)
+    yield page
+    browser.close()
 
 
 @pytest.fixture

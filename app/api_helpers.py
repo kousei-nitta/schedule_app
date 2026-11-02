@@ -20,6 +20,8 @@ ERROR_STATUS_CODES = {
     "bad_request": 400,
     "invalid_json": 400,
     "validation_error": 400,
+    "unauthorized": 401,
+    "forbidden": 403,
     "not_found": 404,
     "method_not_allowed": 405,
     "conflict": 409,
