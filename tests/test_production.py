@@ -1,13 +1,11 @@
 """本番の設定（APP_ENV=production）と、プロキシの後ろの接続元（Task 026）。
 
-仕様は docs/architecture/security.md の「本番の設定」。
-本番のアプリは、production_settings で作った設定を、test_config で渡して
-作る（環境変数を変えずに済むため）。DBは、一時ディレクトリの中の、
-持ち主だけのフォルダ（700）に置く。
+仕様は docs/architecture/security.md の「本番の設定」。本番のアプリの
+作り方は、tests/production_support.py と、fixture production_app
+（tests/conftest.py）。
 """
 import logging
 import os
-import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -24,51 +22,16 @@ from app.config import (
 )
 from app.env_file import environment_with_env_file, read_env_file
 from app.proxy import PublicProxyMiddleware
-from tests.auth_support import TEST_PASSWORD, TEST_USERNAME, create_user
+from tests.auth_support import TEST_PASSWORD, TEST_USERNAME
+from tests.production_support import (
+    OWNER_ADDRESS,
+    PUBLIC_HOST,
+    PUBLIC_ORIGIN,
+    SECRET,
+    production_environment,
+)
 
-PUBLIC_HOST = "schedule.example"
-PUBLIC_ORIGIN = f"https://{PUBLIC_HOST}"
-SECRET = "s" * 40
-OWNER_ADDRESS = "198.51.100.20"
 MIGRATIONS = str(PROJECT_ROOT / "migrations")
-
-
-def production_environment(tmp_path) -> dict[str, str]:
-    """本番の環境変数（DBのフォルダは、持ち主だけの 700 で作る）。"""
-    data_directory = tmp_path / "data"
-    data_directory.mkdir(mode=0o700, exist_ok=True)
-    return {
-        "APP_ENV": "production",
-        "PUBLIC_ORIGIN": PUBLIC_ORIGIN,
-        "SECRET_KEY": SECRET,
-        "DATABASE_URL": f"sqlite:///{data_directory / 'app.db'}",
-        "CLIENT_ADDRESS_HEADER": "X-Real-IP",
-    }
-
-
-@pytest.fixture
-def keep_umask():
-    # 本番のアプリは、umask を 077 にする。テストのあとで元に戻す
-    previous = os.umask(0o022)
-    os.umask(previous)
-    yield
-    os.umask(previous)
-
-
-@pytest.fixture
-def production_app(template_db, tmp_path, keep_umask):
-    environment = production_environment(tmp_path)
-    shutil.copy2(template_db, tmp_path / "data" / "app.db")
-    test_app = create_app(
-        {"TESTING": True, **production_settings(environment)}
-    )
-    create_user(test_app, TEST_USERNAME)
-    yield test_app
-    from app.extensions import db
-
-    with test_app.app_context():
-        db.session.remove()
-        db.engine.dispose()
 
 
 class PublicClient:

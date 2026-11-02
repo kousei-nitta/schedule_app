@@ -6,6 +6,9 @@
   （docs/development/database.md の「利用者の管理」）
 - show-settings：今の設定（ローカルか本番か、使うDBなど）を表示する
   （秘密の値は表示しない）
+- daily-backup：実データのDBの、その日のバックアップ（本番の定期実行の
+  タスクから。新しい30個を残す）
+- make-transfer-copy：クラウドへ移すための、実データのDBの写し（Mac で）
 
 どのコマンドも、最初に、ローカルか本番か、と使うDBを表示する（本番の
 SSH で、設定のファイルを読み忘れて、別のDBを変えてしまわないため）。
@@ -18,14 +21,28 @@ import os
 import platform
 import sqlite3
 import stat
+from pathlib import Path
 import click
 from flask import Flask, current_app
 from flask.cli import with_appcontext
 
 from app import clock
 from app.auth import auth_logger
-from app.backup import BackupError, create_backup, manual_backup_path
-from app.database_files import database_file_path, describe_database
+from app.backup import (
+    AUTO_BACKUP_KEEP_COUNT,
+    BackupError,
+    backup_directory,
+    create_backup,
+    create_daily_backup,
+    manual_backup_path,
+    remove_old_auto_backups,
+)
+from app.config import PROJECT_ROOT
+from app.database_files import (
+    database_file_path,
+    describe_database,
+    is_real_database,
+)
 from app.demo_data import (
     DEMO_USERNAME,
     DemoDataError,
@@ -36,6 +53,7 @@ from app.env_file import ENV_FILE_VARIABLE
 from app.extensions import db
 from app.login_limits import keyed_digest, unlock_login_id
 from app.models.user import User
+from app.transfer import make_transfer_copy
 from app.passwords import (
     MIN_PASSWORD_LENGTH,
     BreachCheckError,
@@ -332,6 +350,99 @@ def show_settings_command() -> None:
         click.echo(line)
 
 
+def folder_size_text(directory: Path) -> str:
+    """フォルダの中のファイルの大きさの合計（MB）。"""
+    if not directory.is_dir():
+        return "0MB"
+    total = sum(
+        path.stat().st_size for path in directory.iterdir() if path.is_file()
+    )
+    return f"{total / 1024 / 1024:.1f}MB"
+
+
+@click.command("daily-backup")
+@with_appcontext
+def daily_backup_command() -> None:
+    """実データのDBの、その日（日本時間）のバックアップを作る。
+
+    本番の定期実行のタスクから、毎日動かす（docs/development/deploy.md）。
+    その日の分がなければ作り、自動のバックアップを、新しい30個だけ残す。
+    作れなければ、終了コード1で終わる（定期実行のタスクの記録に残る）。
+    """
+    echo_environment()
+    database_path = database_file_path(current_app)
+    if database_path is None or not is_real_database(
+        database_path, current_app
+    ):
+        raise click.ClickException(
+            "毎日のバックアップを作れるのは、実データのDBだけです"
+        )
+    today = clock.japan_today()
+    try:
+        backup_path = create_daily_backup(database_path, today)
+    except BackupError as error:
+        raise click.ClickException(str(error)) from error
+    if backup_path is None:
+        click.echo("今日の分は、作成済みです")
+    else:
+        click.echo(f"バックアップを作りました：{backup_path}")
+    removed_paths = remove_old_auto_backups(database_path, today)
+    if removed_paths:
+        click.echo(
+            f"古い自動のバックアップを{len(removed_paths)}個消しました"
+            f"（新しい{AUTO_BACKUP_KEEP_COUNT}個を残します）"
+        )
+    directory = backup_directory(database_path)
+    click.echo(f"バックアップのフォルダの合計：{folder_size_text(directory)}")
+
+
+@click.command("make-transfer-copy")
+@click.argument("output", type=click.Path(path_type=Path))
+@with_appcontext
+def make_transfer_copy_command(output: Path) -> None:
+    """クラウドへ移すための、実データのDBの写しを作る（Mac で使う）。
+
+    元のDBは変えない。写しには、ログイン中の端末・ログインの失敗・端末の
+    印の行と、ファイルの空き領域を持ち込まない（app/transfer.py）。
+    OUTPUT は、リポジトリのフォルダの外のパス（例：~/Desktop/transfer.db）。
+    """
+    echo_environment()
+    if current_app.config["PRODUCTION"]:
+        raise click.ClickException(
+            "移行の写しは、Mac（ローカル）で作ります"
+        )
+    source = database_file_path(current_app)
+    if source is None:
+        raise click.ClickException(
+            "写せるのは、SQLiteのファイルのDBだけです"
+        )
+    output = output.expanduser().absolute()
+    if output.resolve().is_relative_to(PROJECT_ROOT):
+        raise click.ClickException(
+            "写しは、リポジトリのフォルダの外に作ってください"
+            "（Git に入れないため。例：~/Desktop/transfer.db）"
+        )
+    try:
+        result = make_transfer_copy(source, output)
+    except BackupError as error:
+        raise click.ClickException(str(error)) from error
+
+    click.echo(f"移行の写しを作りました：{output}（持ち主だけが読める600）")
+    removed_text = "、".join(
+        f"{table} {count}件" for table, count in result["removed"].items()
+    )
+    click.echo(f"消した行：{removed_text or 'なし'}")
+    counts_text = "、".join(
+        f"{table} {count}件" for table, count in result["counts"].items()
+    )
+    click.echo(f"写しの各テーブルの件数：{counts_text}")
+    click.echo(f"migration の版：{result['version']}")
+    click.echo(
+        "送ったら、この写しを消してください（rm）。本番では、写しに "
+        "flask db upgrade を当ててから使います（docs/development/deploy.md）"
+    )
+
+
 def register_commands(app: Flask) -> None:
     """自作のコマンドを、アプリに登録する（create_app から呼ぶ）。"""
     app.cli.add_command(backup_db_command)
@@ -341,3 +452,5 @@ def register_commands(app: Flask) -> None:
     app.cli.add_command(rename_user_command)
     app.cli.add_command(unlock_login_command)
     app.cli.add_command(show_settings_command)
+    app.cli.add_command(daily_backup_command)
+    app.cli.add_command(make_transfer_copy_command)
