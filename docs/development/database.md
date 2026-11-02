@@ -64,8 +64,8 @@ DBの構造の変え方（migration）と、実データのDBの扱い（バッ�
 migration `a750d741785a` を、上の手順で適用したあと（Koma）：
 
 1. 適用の後の確認（上の手順6）に加えて：`sqlite3 -readonly instance/app.db "SELECT id, username, password_hash IS NULL FROM users"` が `1|owner|1` の1行。5つの表の `user_id` が、すべて1（例：`SELECT COUNT(*) FROM events WHERE user_id IS NOT 1` が0）
-2. パスワードを決める：`flask --app app set-password owner`（15文字以上。表示しない入力で2回。漏えいしたパスワードの確認のため、インターネットにつなぐ）
-3. ログインIDを、推測されにくいものに変える：`flask --app app rename-user owner <新しいID>`（`owner` は、公開のリポジトリに書かれているため。新しいIDは、リポジトリ・Issue・PRに書かない）
+2. ログインIDを、推測されにくいものに変える：`flask --app app rename-user owner <新しいID>`（`owner` は、公開のリポジトリに書かれているため。新しいIDは、リポジトリ・Issue・PRに書かない）
+3. パスワードを決める：`flask --app app set-password <新しいID>`（15文字以上。表示しない入力で2回。漏えいしたパスワードの確認のため、インターネットにつなぐ）。IDを変えたあとに決めるのは、`set-password` が、パスワードに新しいIDが含まれないかを確かめられるため（`rename-user` は、ハッシュしかないため、確かめられない）
 4. `python run.py` で起動し、ログインの画面で、新しいIDとパスワードでログインして、今までのデータが見えることを確かめる
 
 ## 利用者の管理
