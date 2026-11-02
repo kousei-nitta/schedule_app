@@ -9,6 +9,8 @@
   ファイルで答える（CDNに届かない、Claudeの作業環境のため。CIは、
   CDNから読む）。ブラウザが integrity（SRI）を確かめるので、違う
   ファイルなら読み込まれない
+- bfcache_page：戻る・進むのキャッシュ（bfcache）を使うブラウザのページ
+  （ふだんの page は、Playwright の既定で、bfcache を使わない）
 - page_errors：ページで起きたJavaScriptの例外の一覧
 - csp_violations：ブラウザが、CSP（app/security.py）に反するとして
   止めた読み込み・実行の一覧
@@ -26,7 +28,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import ConsoleMessage, Page, Route
+from playwright.sync_api import ConsoleMessage, Page, Playwright, Route
 from werkzeug.serving import make_server
 
 from app import create_app
@@ -114,6 +116,29 @@ def app_url(page: Page, live_server: str) -> str:
     if os.environ.get("E2E_CDN_FROM_NPM") == "1":
         page.route(CDN_PREFIX + "**", answer_from_node_modules)
     return live_server
+
+
+@pytest.fixture
+def bfcache_page(playwright: Playwright):
+    """戻る・進むのキャッシュ（bfcache）を使うブラウザのページ。
+
+    Playwright は、Chromium を、bfcache を切って起動する
+    （--disable-back-forward-cache）。また、既定の headless の
+    Chromium（headless shell）は、bfcache を使わない。そのため、
+    新しい headless（channel="chromium"）で、切る設定を外して起動する
+    （python -m playwright install chromium で、両方が入る）。
+    bfcache から戻るときは、読み込み（load）が起きないため、「戻る」は
+    page.go_back(wait_until="commit") で待つ。
+    """
+    browser = playwright.chromium.launch(
+        channel="chromium",
+        ignore_default_args=["--disable-back-forward-cache"],
+    )
+    page = browser.new_page()
+    if os.environ.get("E2E_CDN_FROM_NPM") == "1":
+        page.route(CDN_PREFIX + "**", answer_from_node_modules)
+    yield page
+    browser.close()
 
 
 @pytest.fixture

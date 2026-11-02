@@ -81,10 +81,8 @@ def log_out(page: Page, app_url: str) -> None:
     page.locator("#logout-button").click()
     expect(page).to_have_url(app_url + "/login")
     # 「戻る」でも、ログイン中の画面（データ）は見えない（開き直して、
-    # ログインの画面になる）。Playwright の Chromium は、戻る・進むの
-    # キャッシュ（bfcache）を使わないため、そこから戻る場合は、ここでは
-    # 確かめられない。その場合の守りは、Cache-Control: no-store（pytest の
-    # tests/test_auth.py で確かめる）と、Mac での確認
+    # ログインの画面になる）。戻る・進むのキャッシュ（bfcache）から戻る
+    # 場合は、下の test_back_after_logout_with_bfcache で確かめる
     page.go_back()
     expect(page).to_have_url(app_url + "/login")
     expect(page.locator("#user-menu-button")).to_have_count(0)
@@ -222,3 +220,41 @@ def test_expired_login_moves_to_login_page(
     expect(page).to_have_url(app_url + "/login")
     assert page_errors == []
     assert csp_violations == []
+
+
+def test_back_after_logout_with_bfcache(bfcache_page: Page, live_server: str):
+    """ログアウトのあとの「戻る」で、ログイン中の画面が bfcache から
+    戻らない（共用のPCで、次の人に見られない）。
+
+    守っているのは、画面とAPIの Cache-Control: no-store（app/security.py）。
+    Chrome は、no-store のページを bfcache に入れない（入れる場合も、
+    HttpOnly の Cookie が変わると追い出す）。no-store を外すと、ログイン中の
+    画面が、サーバーへの要求なしに、そのまま戻る（Task 025で確かめた）。
+    """
+    page = bfcache_page
+    # bfcache を使わなかったときに、Chrome が知らせる理由
+    not_restored_reasons = []
+    devtools = page.context.new_cdp_session(page)
+    devtools.send("Page.enable")
+    devtools.on(
+        "Page.backForwardCacheNotUsed",
+        lambda event: not_restored_reasons.extend(
+            explanation["reason"]
+            for explanation in event["notRestoredExplanations"]
+        ),
+    )
+
+    log_in(page, live_server)
+    # カレンダーの読み込み（APIの取得）が終わってから、ログアウトする
+    expect(page.locator(".fc-timegrid")).to_be_visible()
+    page.locator("#user-menu-button").click()
+    page.locator("#logout-button").click()
+    expect(page).to_have_url(live_server + "/login")
+
+    page.go_back(wait_until="commit")
+
+    expect(page).to_have_url(live_server + "/login")
+    expect(page.locator("#login-password")).to_be_visible()
+    expect(page.locator("#user-menu-button")).to_have_count(0)
+    # bfcache が使えないから（空振り）でなく、no-store のため、戻らなかった
+    assert "MainResourceHasCacheControlNoStore" in not_restored_reasons
