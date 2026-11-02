@@ -43,7 +43,7 @@
 | 資源の枯渇 | ログインの前に、重い計算（scrypt）を、同時にたくさんさせる。大きな本文を読ませる | 断るかを先に判断（計算しない）、決まりに合わない入力は計算しない、同時の確かめは2つまで（空かなければ503）、ログインの本文は16KiBまで（超えたら、読まずに413。長さのない本文は、読まずに411）、失敗の記録に索引（行を増やされても遅くならない） |
 | 消したデータの残り | DBのファイルやバックアップが漏れたときに、消したはずの行（メモなど）が、ファイルの空き領域から読まれる | SQLite の `secure_delete` をオン（下の「入力」） |
 | DB・ログからの漏れ | DB・バックアップ・ログが漏れる | パスワードはハッシュ、トークンはSHA-256、失敗の記録はHMAC。ログに、パスワード・トークン・打ち込まれたIDを出さない |
-| キャッシュからの漏れ | 共用のPCで、ログアウトのあとに「戻る」で見える。途中の機器に残る | `Cache-Control: no-store`、戻る・進むのキャッシュ（bfcache）から画面が戻ったら読み込み直す（`app/static/js/page_restore.js`）、ログアウトで `Clear-Site-Data: "storage"` |
+| キャッシュからの漏れ | 共用のPCで、ログアウトのあとに「戻る」で見える。途中の機器に残る | `Cache-Control: no-store`、ログアウトの前に画面を隠し、戻る・進むのキャッシュ（bfcache）から画面が戻ったら読み込み直す（`app/static/js/logout_protection.js`）、ログアウトで `Clear-Site-Data: "storage"` |
 
 ## 対策
 
@@ -139,7 +139,7 @@
 
 **ログアウト**
 - 「ログアウト」（`POST /logout`）：この端末の行を消す。「すべての端末からログアウト」（`POST /logout-all`）：その利用者の行をすべて消す（端末をなくしたとき）。パスワードを変えたときも、すべての端末からログアウトする
-- どちらも、Cookie を消し、`Clear-Site-Data: "storage"`（ブラウザの保存領域に残ったデータを消してもらう）を付けて、ログインの画面へ303。`"cache"` は付けない（KomaのMacで、ログアウトのあと、ログインの画面に移るまで遅いことを見つけた。Chromium で測ると、`"cache"` を付けたときは、ほかのサイトのキャッシュが多いほど遅く、約200MBで約1秒・約600MBで約1.5秒、付けないと約0.15秒。このアプリの分を探すために、キャッシュの全体を調べるためと考えられる。個人のデータを含む応答は `no-store` のため、このアプリのキャッシュに残るのは、静的ファイル（個人のデータを含まない）だけ。`"cache"` は、戻る・進むのキャッシュ（bfcache）を追い出さないことも、別の目のレビューで確かめた）。ログアウトのあとの「戻る」で、ログイン中の画面が出ないことは、2つで守る：①`no-store`（Chrome は、no-store のページを bfcache に入れない）②bfcache から画面が戻ったら、画面を隠したまま読み込み直す（`app/static/js/page_restore.js`。Safari は、HTTP のページでは、no-store でも bfcache に残し、ログアウトの前の画面がそのまま見えた。KomaのMacで見つけた。HTTPS のページでは、no-store なら残さないとされるが、ブラウザの方針に頼りきらない）。pytest（ヘッダー）と、bfcache を使うブラウザでのE2Eテスト（①は `test_back_after_logout_with_bfcache`、②は no-store を外して Safari と同じ状況にした `test_page_restored_from_bfcache_is_reloaded`）で確かめる。`"cookies"` は付けない（同じドメインの、ほかのサイトの Cookie まで消すことがあるため。このアプリの Cookie は、`Set-Cookie` で消す）
+- どちらも、Cookie を消し、`Clear-Site-Data: "storage"`（ブラウザの保存領域に残ったデータを消してもらう）を付けて、ログインの画面へ303。`"cache"` は付けない（KomaのMacで、ログアウトのあと、ログインの画面に移るまで遅いことを見つけた。Chromium で測ると、`"cache"` を付けたときは、ほかのサイトのキャッシュが多いほど遅く、約200MBで約1秒・約600MBで約1.5秒、付けないと約0.15秒。このアプリの分を探すために、キャッシュの全体を調べるためと考えられる。個人のデータを含む応答は `no-store` のため、このアプリのキャッシュに残るのは、静的ファイル（個人のデータを含まない）だけ。`"cache"` は、戻る・進むのキャッシュ（bfcache）を追い出さないことも、別の目のレビューで確かめた）。ログアウトのあとの「戻る」で、ログイン中の画面が出ないことは、次の2つで守る。①`no-store`：今の Chrome は、no-store のページを bfcache に入れない（入れる機能が有効でも、HttpOnly の Cookie が変わると追い出す。別の目のレビューで確かめた）。②`app/static/js/logout_protection.js`：Safari は、HTTP のページでは、no-store でも bfcache に残し、ログアウトの前の画面がそのまま見えた（KomaのMacで見つけた）。WebKit が no-store のページを bfcache に入れないのは、HTTPS のページだけで（[WebKit の BackForwardCache.cpp](https://webkit.googlesource.com/WebKit/+/refs/heads/master/Source/WebCore/history/BackForwardCache.cpp) の条件）、WebKit 自身も、この条件を短期の対処としている（[blink-dev の Intent to Ship](https://groups.google.com/a/chromium.org/g/blink-dev/c/GuRqI7zXWMY)）。そのため、ブラウザの方針に頼りきらず、bfcache に入るときに画面を隠し、bfcache から戻ったら、隠したまま読み込み直す。また、Safari は、スワイプで戻るときに見せる「画面の写し」を、次の画面へ移る直前に撮る（[WebKit bug 138753](https://bugs.webkit.org/show_bug.cgi?id=138753)）。この写しは bfcache と関係なく、HTTPS でも残るため、ログアウトのフォームを送る前に画面を隠し、隠した画面が描かれてから送る（写しに、ログイン中の画面が残らないことは、Mac と iPhone で確かめる）。テスト：pytest（ヘッダー）と、bfcache を使うブラウザでのE2Eテスト（①は `test_back_after_logout_with_bfcache`。②は、no-store を外して Safari と同じ状況にした `test_page_restored_from_bfcache_after_logout_is_reloaded`・`test_page_restored_from_bfcache_while_logged_in_is_hidden_then_reloaded`）。`"cookies"` は付けない（同じドメインの、ほかのサイトの Cookie まで消すことがあるため。このアプリの Cookie は、`Set-Cookie` で消す）
 - `GET` では受け付けない（405。データを変える操作を、リンクで起こさせない）
 
 **利用者の管理**（`app/cli.py`。手順は `development/database.md` の「利用者の管理」）
@@ -226,7 +226,7 @@ Task 025（ログイン）・Task 026（クラウドへの公開）の設計と�
 - **Task 026**
   - 本番の設定：デバッグモードなし（Werkzeug のデバッガーは、ログインの確かめより前で動くため、本番で起動できないようにする）、`SECRET_KEY` は環境変数だけ（使い捨てのファイルシステムで、起動のたびに変わらないように）、HTTPS（HSTS）、WSGIのサーバー、`TRUSTED_HOSTS` を本番の名前に
   - Cookie：`AUTH_COOKIE_SECURE` をオン、名前を `__Host-` で始まるものに（起動の確かめは、Task 025で入れた）。`Secure` が要るかを、Host の名前から推し量らず、「公開する」ことを示す明示の設定で決めるか（Host を書き換えて渡すプロキシの後ろでは、今の確かめが効かないため）
-  - ほかのサイトのリンクから開いたときの、ログインの画面の開き直し（`/login?reloaded=1`）と、ログアウトのあとの「戻る」で、ログイン中の画面が出ないこと（bfcache。Chromium では、E2Eテストで確かめている）を、iPhone の Safari（WebKit）でも確かめる
+  - ほかのサイトのリンクから開いたときの、ログインの画面の開き直し（`/login?reloaded=1`）と、ログアウトのあとの「戻る」（ボタンとスワイプ）で、ログイン中の画面（スワイプのときの画面の写しを含む）が出ないこと（bfcache。Chromium では、E2Eテストで確かめている。Task 025で、Mac・iPhone の Safari の HTTP でも確かめる）を、公開した HTTPS の iPhone の Safari（WebKit）でも確かめる
   - プロキシの後ろ：`ProxyFix` は、信頼するプロキシの段数だけにする（ほかでは `X-Forwarded-For` を読まない）。接続元ごとの試行の制限が、利用者の本当のIPで働くこと、`Origin` の検査がスキーム（`https`）で合うことを、本番で確かめる。「自分」の Origin を、設定（`ALLOWED_ORIGINS`）で決めるかを決める
   - プロセスの数：試行の制限の「判断と記録を1つずつ」（今はプロセスの中の鍵）と、同時のパスワードの確かめの数（1回32MiB）を、プロセスの数と合わせて決める（複数のプロセスなら、DBの側で1つずつにする）
   - ログイン：Koma のログインIDを、推測されにくいものにしてあること（`owner` のままにしない）。一度ログインした端末の印（device cookie。印のある端末は、IDごとの制限を別に数える）を足すかを決める（上の「ログインの試行の制限」の締め出し）。失敗の記録の行を大量に作られたときの守り（決まりに合わないIDなら、パスワードの計算なしで行を作れ、IPv6 は /64 ごとに数えるため、/48 を1つ持てば、1時間に約65万行を作れる。期限の切れた行をまとめて消すと、その1回の試行が長く止まる（50万行で約9秒））：古い行を何回かに分けて、または決まった時間ごとに消す、IPv6 を /48 などのもっと粗い単位でも数えるか、全体の上限を設ける。制限を解くコマンドを、本番でどう動かすか（コマンドを動かす環境にも、サーバーと同じ `SECRET_KEY` が要る。違うと、記録のHMACが合わず、解けない）。締め出しや失敗が多いことを、Koma に知らせる仕組み（任意）

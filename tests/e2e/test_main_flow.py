@@ -240,6 +240,37 @@ def not_restored_reasons_of(page: Page) -> list[str]:
     return reasons
 
 
+# 画面が隠れていたかを、Pythonに知らせる。
+# - フォームの送信（submit）：フォームの処理（app/static/js/
+#   logout_protection.js）のあと。ログアウトを送る前に、隠したか
+# - 画面が出るとき（pageshow）：bfcache から戻ったか（persisted）も。
+#   ページのスクリプトより先に登録されるため、logout_protection.js が、
+#   そのイベントで隠すより前の状態を記録する
+# 画面を離れるとき（pagehide）の知らせは、移る途中で届かないことがある
+# ため、記録しない
+REPORT_PAGE_EVENTS = """
+window.addEventListener("submit", () => {
+  const hidden = document.body.classList.contains("d-none");
+  window.reportPageEvent(`${location.pathname} submit hidden=${hidden}`);
+});
+window.addEventListener("pageshow", (event) => {
+  const hidden = document.body.classList.contains("d-none");
+  window.reportPageEvent(
+    `${location.pathname} pageshow persisted=${event.persisted} ` +
+    `hidden=${hidden}`
+  );
+});
+"""
+
+
+def page_events_of(page: Page) -> list[str]:
+    """フォームの送信・画面が出るときの記録（あとから増える）。"""
+    events = []
+    page.expose_function("reportPageEvent", lambda text: events.append(text))
+    page.add_init_script(REPORT_PAGE_EVENTS)
+    return events
+
+
 def log_out_and_go_back(page: Page, app_url: str) -> None:
     """ログインし、カレンダーを読み込んでから、ログアウトして「戻る」。"""
     log_in(page, app_url)
@@ -252,33 +283,43 @@ def log_out_and_go_back(page: Page, app_url: str) -> None:
     page.go_back(wait_until="commit")
 
 
+def expect_login_page(page: Page, app_url: str) -> None:
+    expect(page).to_have_url(app_url + "/login")
+    expect(page.locator("#login-password")).to_be_visible()
+    expect(page.locator("#user-menu-button")).to_have_count(0)
+
+
 def test_back_after_logout_with_bfcache(bfcache_page: Page, live_server: str):
     """ログアウトのあとの「戻る」で、ログイン中の画面が bfcache から
     戻らない（共用のPCで、次の人に見られない）。
 
-    1つ目の守りは、画面とAPIの Cache-Control: no-store（app/security.py）。
-    Chrome は、no-store のページを bfcache に入れない（入れる場合も、
-    HttpOnly の Cookie が変わると追い出す）。no-store を外すと、ログイン中の
-    画面が、サーバーへの要求なしに、そのまま戻る（Task 025で確かめた）。
+    守りの1つ目は、画面とAPIの Cache-Control: no-store（app/security.py）。
+    Chrome は、no-store のページを bfcache に入れない（入れる機能が有効
+    でも、HttpOnly の Cookie が変わると追い出す）。no-store を外すと、
+    ログイン中の画面が、サーバーへの要求なしに、そのまま戻る（Task 025で
+    確かめた）。
     """
     page = bfcache_page
     not_restored_reasons = not_restored_reasons_of(page)
+    page_events = page_events_of(page)
 
     log_out_and_go_back(page, live_server)
 
-    expect(page).to_have_url(live_server + "/login")
-    expect(page.locator("#login-password")).to_be_visible()
-    expect(page.locator("#user-menu-button")).to_have_count(0)
+    expect_login_page(page, live_server)
     # bfcache が使えないから（空振り）でなく、no-store のため、戻らなかった
     assert "MainResourceHasCacheControlNoStore" in not_restored_reasons
+    # ログアウトのフォームを送る前に、画面を隠していた（Safari の、
+    # スワイプで戻るときの画面の写しに、ログイン中の画面が残らないように）
+    assert "/ submit hidden=true" in page_events
 
 
-def test_page_restored_from_bfcache_is_reloaded(
+def test_page_restored_from_bfcache_after_logout_is_reloaded(
     bfcache_page: Page, live_server: str, monkeypatch: pytest.MonkeyPatch
 ):
-    """bfcache から画面が戻っても、読み込み直して、ログインの画面になる。
+    """bfcache から画面が戻っても、隠したまま読み込み直し、ログインの
+    画面になる。
 
-    2つ目の守り（app/static/js/page_restore.js）。Safari は、HTTP の
+    守りの2つ目（app/static/js/logout_protection.js）。Safari は、HTTP の
     ページでは、no-store でも bfcache に残す（Task 025で、KomaのMacで
     見つけた）。ここでは、Chromium で同じ状況を作るため、no-store を
     no-cache に替える（bfcache に入る）。
@@ -286,11 +327,43 @@ def test_page_restored_from_bfcache_is_reloaded(
     monkeypatch.setattr(security, "NO_STORE", "no-cache")
     page = bfcache_page
     not_restored_reasons = not_restored_reasons_of(page)
+    page_events = page_events_of(page)
 
     log_out_and_go_back(page, live_server)
 
-    expect(page).to_have_url(live_server + "/login")
-    expect(page.locator("#login-password")).to_be_visible()
-    expect(page.locator("#user-menu-button")).to_have_count(0)
-    # 画面は、bfcache から戻っていた（このテストが空振りしていない）
+    expect_login_page(page, live_server)
+    # 画面は、bfcache から戻っていた（このテストが空振りしていない）。
+    # 戻った時点で、画面は隠れていた
     assert not_restored_reasons == []
+    assert "/ pageshow persisted=true hidden=true" in page_events
+
+
+def test_page_restored_from_bfcache_while_logged_in_is_hidden_then_reloaded(
+    bfcache_page: Page, live_server: str, monkeypatch: pytest.MonkeyPatch
+):
+    """ログイン中に、ほかの画面へ移ってから「戻る」：bfcache に入るときに
+    隠し（pagehide）、戻ったら読み込み直して、ふだんの画面になる。
+    読み込み直しは、1回だけ（繰り返さない）。
+    """
+    monkeypatch.setattr(security, "NO_STORE", "no-cache")
+    page = bfcache_page
+    not_restored_reasons = not_restored_reasons_of(page)
+    page_events = page_events_of(page)
+    log_in(page, live_server)
+    expect(page.locator(".fc-timegrid")).to_be_visible()
+
+    # このアプリの、ほかの画面（静的ファイル）へ移ってから、戻る
+    page.goto(live_server + "/static/css/style.css")
+    page.go_back(wait_until="commit")
+
+    expect(page).to_have_url(live_server + "/")
+    expect(page.locator(".fc-timegrid")).to_be_visible()
+    expect(page.locator("body")).not_to_have_class(re.compile(r"\bd-none\b"))
+    assert not_restored_reasons == []
+    # bfcache に入るときに隠し（pagehide）、隠れたまま戻った。読み込み
+    # 直したあとは、普通の表示（persisted=false）で、もう読み込み直さない
+    restored = "/ pageshow persisted=true hidden=true"
+    assert restored in page_events
+    assert page_events[page_events.index(restored) + 1:] == [
+        "/ pageshow persisted=false hidden=false"
+    ]
