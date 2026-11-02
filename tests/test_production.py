@@ -518,14 +518,18 @@ def test_login_cookie_uses_host_prefix_and_secure(production_app):
 
     assert response.status_code == 303
     cookies = response.headers.getlist("Set-Cookie")
-    session = [c for c in cookies if c.startswith("__Host-schedule_session=")]
-    assert len(session) == 1
-    attributes = session[0].split("; ")
-    assert "Secure" in attributes
-    assert "HttpOnly" in attributes
-    assert "SameSite=Strict" in attributes
-    assert "Path=/" in attributes
-    assert not any(a.lower().startswith("domain=") for a in attributes)
+    # ログインの Cookie と、端末の印の Cookie の2つ。どちらも __Host-
+    assert sorted(cookie.split("=", 1)[0] for cookie in cookies) == [
+        "__Host-schedule_device",
+        "__Host-schedule_session",
+    ]
+    for cookie in cookies:
+        attributes = cookie.split("; ")
+        assert "Secure" in attributes
+        assert "HttpOnly" in attributes
+        assert "SameSite=Strict" in attributes
+        assert "Path=/" in attributes
+        assert not any(a.lower().startswith("domain=") for a in attributes)
 
 
 def test_logged_in_production_client_can_use_the_api(production_app):
@@ -596,7 +600,7 @@ def test_downgrade_is_allowed_locally(app):
     with app.app_context():
         downgrade(directory=MIGRATIONS)
 
-    assert "users" not in table_names(app)
+    assert "trusted_devices" not in table_names(app)
 
 
 # --- コマンド ---

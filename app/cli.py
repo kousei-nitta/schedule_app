@@ -44,6 +44,7 @@ from app.passwords import (
     is_valid_username,
     password_rule_errors,
 )
+from app.trusted_devices import end_all_devices
 from app.user_sessions import end_all_sessions
 
 SKIP_BREACH_CHECK_HELP = (
@@ -234,9 +235,10 @@ def set_password_command(username: str, skip_breach_check: bool) -> None:
     user = find_user(username)
     password = prompt_new_password(username, skip_breach_check)
     user.password_hash = hash_password(password)
-    # 前のパスワードでログインした端末は、すべてログアウトさせる
-    # （パスワードが漏れて変えた場合に、他人のログインを残さない）
+    # 前のパスワードでログインした端末は、すべてログアウトさせ、端末の印も
+    # 消す（パスワードが漏れて変えた場合に、他人のログインや印を残さない）
     count = end_all_sessions(user.id)
+    end_all_devices(user.id)
     db.session.commit()
     auth_logger.info(
         "パスワードを変えました（利用者：%s、ログアウトした端末：%s台）",

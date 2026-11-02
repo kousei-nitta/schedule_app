@@ -28,6 +28,8 @@ TEST_PASSWORD = "kumo sakura densha 2099"
 # ログインの画面を通すテストの、時計の始まり（UTC。fixture clock_now）
 START = datetime(2026, 10, 30, 3, 0, 0)
 COOKIE_NAME = "schedule_session"
+# 端末の印の Cookie（app/trusted_devices.py）
+DEVICE_COOKIE_NAME = "schedule_device"
 # 画面のフォームの送信に、ブラウザが付けるヘッダー（このアプリから）
 FORM_HEADERS = {"Origin": "http://localhost", "Sec-Fetch-Site": "same-origin"}
 
@@ -113,6 +115,21 @@ def session_cookie_header(response) -> str | None:
 def cookie_value(response) -> str:
     """応答で入れた、ログインの Cookie の値（トークン）。"""
     header = session_cookie_header(response)
+    assert header is not None
+    return header.split(";", 1)[0].split("=", 1)[1]
+
+
+def device_cookie_header(response) -> str | None:
+    """応答の、端末の印の Cookie の Set-Cookie（なければ None）。"""
+    for header in response.headers.getlist("Set-Cookie"):
+        if header.startswith(f"{DEVICE_COOKIE_NAME}="):
+            return header
+    return None
+
+
+def device_cookie_value(response) -> str:
+    """応答で入れた、端末の印の Cookie の値。"""
+    header = device_cookie_header(response)
     assert header is not None
     return header.split(";", 1)[0].split("=", 1)[1]
 
