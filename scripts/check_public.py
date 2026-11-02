@@ -268,17 +268,36 @@ def environ_key(header_name: str) -> str:
     return "HTTP_" + header_name.upper().replace("-", "_")
 
 
+def same_client(address, my_address) -> bool:
+    """同じ接続元か。IPv6 は、アプリと同じく /64 の範囲で比べる（Mac は、
+    一時的な IPv6 のアドレスを、接続ごとに変えうるため）。"""
+    if address is None or address.version != my_address.version:
+        return False
+    if address.version == 6:
+        network = ipaddress.ip_network(f"{my_address}/64", strict=False)
+        return address in network
+    return address == my_address
+
+
 def address_header_state(received: list[str | None], my_address) -> str:
     """接続元のヘッダーに届いた値（偽りかたごと）から、使えるかを決める。
 
     使える（"使える"）のは、どの要求でも、偽の値が混ざらず、値が1つの
-    アドレスで、この Mac の公開のアドレスと同じとき。
+    アドレスで、この Mac の公開のアドレスと同じ接続元のとき。
     """
     if any(v is not None and FAKE_ADDRESS_PREFIX in v for v in received):
         return "偽の値が届く（使えない）"
     if any(v is None for v in received):
         return "届かないことがある（使えない）"
-    if any(parse_address(v) != my_address for v in received):
+    addresses = [parse_address(v) for v in received]
+    if any(
+        a is not None and a.version != my_address.version for a in addresses
+    ):
+        return (
+            "IPv4 と IPv6 が違う（届いた値と同じ種類の、この Mac の"
+            "アドレスで、入れ直す）"
+        )
+    if not all(same_client(a, my_address) for a in addresses):
         return "この Mac のアドレスと違う（使えない）"
     return "使える"
 
@@ -568,8 +587,8 @@ def probe_headers(target: Target, report: Report) -> None:
     """
     my_address = parse_address(
         input(
-            "この Mac の公開のアドレス"
-            "（ターミナルで curl https://api64.ipify.org の結果）："
+            "この Mac の公開のアドレス（ターミナルで "
+            "curl https://api64.ipify.org の結果。IPv4 か IPv6）："
         )
     )
     if my_address is None:
@@ -593,6 +612,14 @@ def probe_headers(target: Target, report: Report) -> None:
         try:
             reports.append(json.loads(response.body))
         except ValueError:
+            if spoofed is underscore and 400 <= response.status < 500:
+                # プロキシが、下線の名前のヘッダーのある要求を断った
+                # （偽の値は、アプリに届かない。いちばん安全な作り）
+                print(
+                    f"下線の名前のヘッダーは、プロキシが断った"
+                    f"（{response.status}。安全）"
+                )
+                continue
             report.check(
                 False, "下見のアプリの応答（JSON）", str(response.status)
             )
@@ -638,7 +665,8 @@ def probe_headers(target: Target, report: Report) -> None:
     )
     print(
         f"uWSGI の待ち受け：{seen.get('uwsgi_sockets')!r}"
-        "（この行を Claude に伝える。ほかの利用者から届くかを判断する）"
+        "（この行を Claude に伝える。アカウント名は <アカウント名> に"
+        "置き換える。ほかの利用者から届くかを判断する）"
     )
 
 

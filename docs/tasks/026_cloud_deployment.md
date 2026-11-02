@@ -4,6 +4,7 @@
 - 決定の記録：`docs/decisions/0005-public-hosting-and-device-cookie.md`（ADR 0005。このタスクで書く）。前提は ADR 0001（ホストの条件）・0002（公開の前の点検）・0003（Python 3.14）・0004（ログイン）
 - ブランチ：`feature/026-cloud-deployment`
 - 設計の承認：Koma、2026-11-02（公開先は alwaysdata の Free。一度ログインした端末の印（025-D1）を足す。仕様の変更（メモ2,000字・学期の期間366日以内・本番のDBにデモの利用者を置かない）を承認）。案は、脅威の分析のエージェント（攻撃者の視点）の点検を取り込んだもの
+- 【レビューで足した】の項目：2026-11-03、攻撃のテストと別の目のレビューの指摘で、設計の承認のあとに足したもの（守りを強める向き。PR で Koma の承認を求める）
 
 ## 目的
 Macを開かなくても、スマホから使えるようにする。インターネットのだれからでも届くことを前提に、Task 025 までの守りを、公開の形（HTTPS・プロキシの後ろ・共有ホスティング）に合わせて固める。実データを、漏らさず・失わずに、クラウドへ移す。
@@ -31,18 +32,18 @@ Macを開かなくても、スマホから使えるようにする。インタ�
 | 公開先 | alwaysdata の Free（パリ。カード不要・期限なし・個人の利用）。サイトの種類は Python WSGI（uWSGI）。DB は SQLite のファイル。下見で前提（ファイルシステムがローカル・接続元のヘッダー・Python の版・速さ）を確かめ、崩れたら止まる | ADR 0005、`architecture/overview.md` |
 | 公開の判定 | 環境変数 `APP_ENV=production` のときだけ本番。ほかの値は起動しない（書き間違いで、黙ってローカルの扱いにならないため）。設定は `create_app` の時点で読む | `architecture/security.md` の「本番の設定」 |
 | 本番の必須の設定 | `PUBLIC_ORIGIN`（`https://<名前>`。パス・ポート・末尾の `/` なし）、`SECRET_KEY`（環境変数だけ。`instance/` のファイルを使わない）、`DATABASE_URL`（SQLite の絶対パス。リポジトリの外）、`CLIENT_ADDRESS_HEADER`（下の「接続元」）。足りない・形が違えば、Web もコマンドも起動しない | 同上 |
-| 本番から決まるもの | `TRUSTED_HOSTS` は `PUBLIC_ORIGIN` の名前だけ。`Origin` の比較は `PUBLIC_ORIGIN` と（`ALLOWED_ORIGINS` は作らない）。Cookie は `Secure` と `__Host-` の名前。HSTS（1年）。`X-Forwarded-Proto` が `https` でない要求は400。デバッグモードは起動しない。`run.py` は本番では起動しない | 同上 |
-| 設定のファイル | 本番の環境変数は、0600 のファイル1つ（リポジトリとDBのフォルダの外）にまとめ、サイト（WSGI の入口）と SSH のコマンドの両方が読む。コマンドは、最初に「本番かどうか」と使うDBを表示する。設定を表示するコマンド `show-settings`（秘密は表示しない） | 同上、`development/deploy.md` |
+| 本番から決まるもの | `TRUSTED_HOSTS` は `PUBLIC_ORIGIN` の名前だけ。`Origin` の比較は `PUBLIC_ORIGIN` と（`ALLOWED_ORIGINS` は作らない）。Cookie は `Secure` と `__Host-` の名前。HSTS（1年）。`X-Forwarded-Proto` が `https` でない要求は400。デバッグモードは起動しない。`run.py` は本番では起動しない。【レビューで足した】`flask run` も本番では起動しない（`--debugger` で、デバッガー付きで起動できたため）。`wsgi.py` は、本番の設定がなければ、アプリを作る前に止まる（サイトに設定のファイルを付け忘れたとき、ローカルの扱いで起動しないため） | 同上 |
+| 設定のファイル | 本番の環境変数は、0600 のファイル1つ（リポジトリとDBのフォルダの外）にまとめ、サイト（WSGI の入口）と SSH のコマンドの両方が読む。コマンドは、最初に「本番かどうか」と使うDBを表示する。設定を表示するコマンド `show-settings`（秘密は表示しない）。【レビューで足した】設定のファイルが、リポジトリかDBのフォルダの中なら起動しない | 同上、`development/deploy.md` |
 | 接続元 | 本番では `CLIENT_ADDRESS_HEADER` で決めた1つ（プロキシが必ず上書きすると、下見で確かめたもの。例：`X-Real-IP`）だけを、小さな WSGI の層で読み、接続元にする。ないか、アドレスでない要求は400。`REMOTE_ADDR` がそのまま本当の接続元なら、`REMOTE_ADDR` と書く。`ProxyFix` は使わない（`X-Forwarded-For` の段数を当てにしない） | 同上 |
 | 日本時間 | 「今日」と、バックアップの名前の日時は、日本時間（UTC+9 の固定。日本に夏時間はない）。`app/clock.py` に集める。ほかの場所で `date.today()`・`datetime.now()` を使わない（テストで確かめる）。ログインの表は今までどおり UTC | `architecture/data_model.md` の「共通の約束」 |
 | 端末の印（025-D1） | 表 `trusted_devices`（`user_id`・`token_digest`（一意）・`created_at`・`failure_count`）。Cookie は `schedule_device`（本番は `__Host-schedule_device`）、`HttpOnly`・`SameSite=Strict`・`Path=/`・180日。ログインに成功するたびに作り替える（利用者ごとに10個まで）。期限は、サーバーの `created_at` で判定する | `architecture/data_model.md`、`architecture/security.md` |
-| 印のある道 | 印が有効で、その持ち主のログインIDが、打ち込まれたIDと完全に一致するときは、IDごと・接続元ごとの制限と全体の上限を当てない。代わりに、パスワードを確かめる前に、印の失敗の数を増やす（5回未満のときだけ。1つずつの処理の中）。5回で印を無効にする（ログに残す）。成功したら、印を作り替え、数を戻す | `architecture/security.md` の「ログインの試行の制限」 |
+| 印のある道 | 印が有効で、その持ち主のログインIDが、打ち込まれたIDと完全に一致するときは、IDごと・接続元ごとの制限と全体の上限を当てない。代わりに、パスワードを確かめる前に、印の失敗の数を増やす（5回未満のときだけ。1つずつの処理の中）。5回で印を無効にする（ログに残す）。成功したら、印を作り替え、数を戻す。【レビューで足した】有効な印が、持ち主と違うIDと一緒に届いたら、印のない道で扱い、印の失敗にも数える（盗まれた印で、持ち主のIDを探らせない。試せる候補は5回まで） | `architecture/security.md` の「ログインの試行の制限」 |
 | 印を消すとき | `set-password`・「すべての端末からログアウト」で、その利用者の印をすべて消す（「すべての端末から」のときは、その端末の印の Cookie も消す）。ふつうのログアウトでは消さない。移行の写しでも消す | 同上 |
 | 確かめの枠 | パスワードの確かめ（scrypt）は、印のない道で1つ、印のある道で1つまで（合わせて2つ。今と同じメモリー）。空かなければ503 | 同上 |
 | 全体の上限 | 直近1時間の失敗の行が300以上なら、印のない道の試行を、記録も計算もせずに断る（503「混み合っています」）。行の数（ディスク）と、計算（CPU）に上限を設ける。IPv6 の /48 は、別に数えず、この上限で守る（失敗の表の作り直しを避ける） | 同上 |
 | ワーカーの数 | uWSGI のワーカーは1つ（threads は複数）。本番で uWSGI の中で動くとき、ワーカーが2つ以上なら起動しない（試行の制限の「1つずつ」が、プロセスの中の鍵のため） | 同上、`development/deploy.md` |
 | 本番のDB | 実データのDBは、ローカルは `instance/app.db`、本番は `DATABASE_URL` のファイル。本番では、DBのフォルダが持ち主だけのもの（700）でなければ起動しない。作るファイルは持ち主だけ（umask 077）。SQLite の一時ファイルはメモリーに置く（`temp_store`） | `architecture/overview.md`、`architecture/security.md` |
-| 壊す操作 | 本番では、`create-demo-db`・`flask db downgrade`・`flask db stamp` を断る。`create-user`・`rename-user` で `demo` を断る | `development/database.md` |
+| 壊す操作 | 本番では、`create-demo-db` を断る。`create-user`・`rename-user` で `demo` を断る。`flask db downgrade`・`flask db stamp` を断る（【レビューで足した】断る名前の一覧でなく、通す操作の一覧（`upgrade`・`current`・`history -i`）にする。Alembic の更新で増えた操作や、本番で migration のファイルを作る `migrate` も断るため） | `development/database.md`、`architecture/security.md` の「本番の設定」 |
 | 毎日のバックアップ | コマンド `daily-backup`（定期実行のタスクから。実データのDBだけ。その日の分がなければ作り、新しい30個を残す。失敗したら終了コード1）。ローカルの起動のときの自動のバックアップは今までどおり | `architecture/overview.md` の「データの保護（バックアップ）」 |
 | 移行の写し | コマンド `make-transfer-copy <出力先>`（Macで、実データのDBから）：読み取り専用でコピー → `secure_delete` をオンにして、ログイン中の端末・失敗の記録・端末の印を消す → `VACUUM INTO` で空き領域のない写し → 確かめる（壊れていない・データの件数が元と同じ・3つの表が0件・空き領域0・`owner` と `demo` がいない）→ 0600（途中のファイルも600）。途中のファイルは消す。元のDBは変えない。migration は、本番で、写しに当てる | `development/deploy.md` |
 | 本文の上限 | すべての要求の本文は64KiBまで（`MAX_CONTENT_LENGTH`。超えたら413。APIはJSONのエラー）。ログインは今までどおり16KiB | `architecture/api.md` の「エラー」 |

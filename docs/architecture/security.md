@@ -90,7 +90,7 @@
 
 - `PUBLIC_ORIGIN` から決まるもの：`TRUSTED_HOSTS` はその名前だけ、`Origin` の比較はその値と（`ALLOWED_ORIGINS` は作らない）、Cookie は `Secure` と `__Host-` の名前（`__Host-schedule_session`・`__Host-schedule_device`）、HSTS。手で設定を上書きして、これらがずれたら、起動しない（`check_security_settings`）
 - **設定のファイル**：本番の5つの設定は、1つのファイル（持ち主だけが読み書きできる600。自分のファイル）にまとめ、そのパスを環境変数 `SCHEDULE_ENV_FILE` で渡す。サイト（uWSGI）と SSH のコマンドが、同じファイルを読む（片方だけに設定があると、たとえば `unlock-login` が別の鍵で照らし合わせて、制限が解けない）。書ける名前は5つだけ、同じ名前が2回・環境変数にもある・形の違う行があれば、起動しない。ファイルが、リポジトリかDBのフォルダの中にあっても、起動しない（Git に入れる・DBのフォルダといっしょに写すおそれ）。エラーの文に、ファイルの中身を入れない
-- どのコマンドも、最初に「ローカル」か「本番」かと、使うDBを表示する。`show-settings` は、設定を表示する（`SECRET_KEY` は長さだけ）
+- アプリのコマンド（`app/cli.py`）は、どれも、最初に「ローカル」か「本番」かと、使うDBを表示する（Flask-Migrate の `flask db` は表示しない。手順書では、その前に `show-settings` などで確かめる）。`show-settings` は、設定を表示する（`SECRET_KEY` は長さだけ）
 
 **起動のときの確かめ**（本番だけ）
 - デバッグモードなら、起動しない（Werkzeug のデバッガーは、ログインの確かめより前で動く）。`run.py`・`flask run`（開発用のサーバー）も、起動しない（プロキシを通らずにつながる入口を作らない）
@@ -107,7 +107,7 @@
 - WSGI では、`X-Real-IP` と `X_Real_IP`（下線）が、同じ `HTTP_X_REAL_IP` になる。アプリでは見分けられないため、プロキシが下線の名前を捨てる（または上書きする）ことを、下見（`scripts/check_public.py --probe`）と点検（`--rate-limit`）で確かめる
 - 残る弱さ：共有のサーバーの中から、プロキシを通らずに、uWSGI の待ち受けに直接つなげると、接続元のヘッダーを偽れる（ログインは要る）。下見で、待ち受けの場所（`--probe` が表示する）を確かめる
 
-**壊す操作**：本番では、`create-demo-db`（デモの利用者も置かない）と、ID の `demo`（`create-user`・`rename-user`）を断る。`flask db` は、`upgrade`・`current`・`history`・`check`・`ensure-version` だけを通す（`migrations/env.py` で、Alembic が渡す処理の名前で見分ける。一覧にない操作（`downgrade`・`stamp` など。Alembic の更新で増えた操作も）は断る）。実データのDBは、本番では `DATABASE_URL` のファイル（`app/database_files.py`）
+**壊す操作**：本番では、`create-demo-db`（デモの利用者も置かない）と、ID の `demo`（`create-user`・`rename-user`）を断る。`flask db` は、`upgrade`・`current`・`history -i` だけを通す（`migrations/env.py` で、Alembic が渡す処理の名前で見分ける。一覧にない操作（`downgrade`・`stamp`、本番で migration のファイルを作る `migrate`、同じ処理の名前の `check`、Alembic の更新で増えた操作も）は断る）。実データのDBは、本番では `DATABASE_URL` のファイル（`app/database_files.py`）
 
 ### セキュリティのヘッダー
 `app/security.py` が、すべての応答（画面・API・静的ファイル・エラー）に付ける。

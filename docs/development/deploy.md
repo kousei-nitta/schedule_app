@@ -50,12 +50,13 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    - SSL：「Force HTTPS」をオン。HSTS は、alwaysdata の設定ではオンにしない（アプリが付ける）。WAF と HTTP のキャッシュは、オンにしない（キャッシュが `no-store` を守るか、WAF がパスワードを記録するかが、分からないため）
 3. Mac で（リポジトリのフォルダで。`.venv` はなくてよい。`python3.14` で動かす：Mac に最初から入っている `python3` は古く、動かない）
    ```sh
-   curl https://api64.ipify.org      # この Mac の公開のアドレス（次で尋ねられる）
+   curl https://api64.ipify.org      # この Mac の公開のアドレス（次で尋ねられる。IPv4 と IPv6 のどちらか）
    python3.14 scripts/check_public.py --probe https://<アカウント名>.alwaysdata.net
    ```
    - スクリプトは、偽の接続元を、ふつうの名前（`X-Real-IP`）と下線の名前（`X_Real_IP`）で送り、偽の値が届かず、この Mac のアドレスになるヘッダーを「候補」として出す。候補を `CLIENT_ADDRESS_HEADER` にする（ふつうは `X-Real-IP`）。候補が「なし」なら、止まって相談する
    - ✗ があれば（Python が 3.14.10 より古い、ワーカーが1つでない、ホームのファイルシステムがネットワーク上（`nfs` など）、`X-Forwarded-Proto` が https に上書きされない）、止まって相談する
-   - 最後の行の「uWSGI の待ち受け」を、Claude に伝える（共有のサーバーの、ほかの利用者が、プロキシを通らずにアプリへ直接つなげるかを判断する）
+   - 「この Mac のアドレスと違う」と出たら、IPv4 と IPv6 の違いかもしれない。表示された値と同じ種類のアドレス（IPv4：`curl -4 https://api.ipify.org`、IPv6：`curl -6 https://api64.ipify.org`）で、入れ直す
+   - 最後の行の「uWSGI の待ち受け」を、Claude に伝える（共有のサーバーの、ほかの利用者が、プロキシを通らずにアプリへ直接つなげるかを判断する）。伝えるときは、アカウント名を `<アカウント名>` に、Mac のアドレスを伏せる
 4. すぐに、サイトの Application path を `/home/<アカウント名>/schedule_app/wsgi.py` に変える（下見の道具を、公開したままにしない）
 
 ### 2-2. アプリを置く
@@ -106,7 +107,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    flask --app app db upgrade           # 空のDBを作る
    flask --app app create-user <下見用のID>   # 架空の利用者（demo は使えない）
    ```
-   - 本番のコマンドは、どれも、最初に「環境：本番」と、使うDBを出す。「環境：ローカル」と出たら、設定を読めていない。その先へ進まない（`flask db upgrade` などが、リポジトリの中に別のDBを作ってしまう）。手順3を確かめる
+   - 本番のアプリのコマンドは、どれも、最初に「環境：本番」と、使うDBを出す（`flask db` は出さない）。「環境：ローカル」と出たら、設定を読めていない。その先へ進まない（`flask db upgrade` などが、リポジトリの中に別のDBを作ってしまう）。手順3を確かめる
 6. 管理画面で、サイトを再起動する。ブラウザで開き、ログインの画面が出ることを確かめる。開けないときは、`~/admin/logs/uwsgi/` の新しいログを見る（起動しない理由が、日本語で出る）
 
 ### 2-3. 点検する
@@ -116,7 +117,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    python3.14 scripts/check_public.py --login https://<アカウント名>.alwaysdata.net   # 下見用のID・パスワード
    ```
    すべて ✓ であること。✗ があれば、表示を Claude に伝える（URL は伏せる）。`--login` は、動かすたびに、本番に端末の印を1つ増やす（利用者ごとに10個まで。古いものから消える）。何度も動かしたあとは、iPhone・Mac でログインし直す（印を付け直す）
-2. iPhone の Safari で（まず、Mac と同じ Wi-Fi で）
+2. iPhone の Safari で（まず、Mac と同じ Wi-Fi で。iCloud プライベートリレーを使っていれば、その Wi-Fi の「IPアドレスを非公開」を、点検の間だけ切る。切らないと、iPhone の接続元が Mac と違い、手順3の確かめにならない）
    - ログインして（この iPhone に、端末の印が付く）、架空のデータで、学期・授業・予定・課題を登録し、3つのモードを見る（横にはみ出さない、カレンダーが一覧で始まる、課題の表が読める）。開くまでの時間・操作の速さが、実用になるか
    - ほかのサイトのリンクから開く（メモのアプリにURLを書いて、タップする）：ログインの画面が1回だけ開き直され、ログイン中なら、そのまま使える
    - 利用者のメニューからログアウトし、「戻る」のボタンと、左の端からのスワイプで戻る：ログイン中の画面（スワイプのときの画面の写しを含む）が見えない
@@ -126,10 +127,10 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
       python3.14 scripts/check_public.py --rate-limit https://<アカウント名>.alwaysdata.net
       ```
    2. 同じ Wi-Fi の iPhone（印のある Safari）で、ログインできる（印のある道は、接続元ごとの制限を受けない）
-   3. 同じ Wi-Fi の iPhone の、プライベートのタブ（印がない）では、「試行が多すぎます」になる
+   3. 同じ Wi-Fi の iPhone の、プライベートのタブ（印がない）では、「ログインの失敗が続いたため、しばらくログインできません。…」になる
    4. モバイルの回線の iPhone でも、主な画面が実用の速さか見る
 4. Mac の Chrome・Safari でも、ログインと主な画面を開く（Mac の接続元の制限が解けた1時間あと。または、テザリングなどで別の接続元から）
-5. SSH で：`ls -la ~/schedule_data ~/schedule_data/backups ~/.config/schedule_app`（DBとフォルダが、自分だけの権限）、`ls -la ~/admin/logs/*/ | head`（ログが日ごとに分かれ、古いものが消えるかを見て、Claude に伝える）、`ps aux | grep -c uwsgi`（ほかの利用者のプロセスが見えるか）
+5. SSH で：`ls -la ~/schedule_data ~/.config/schedule_app`（DBとフォルダが、自分だけの権限。`backups` は、まだなくてよい）、`ls -la ~/admin/logs/*/ | head`（ログが日ごとに分かれ、古いものが消えるかを見て、Claude に伝える）、`ps aux | grep -c uwsgi`（ほかの利用者のプロセスが見えるか）
 6. 下見の DB は、まだ消さない（消すのは、移行の手順で、サイトを止めたあと）
 
 ## 3. 実データの移行（PR のマージのあと、1回だけ）
@@ -149,9 +150,11 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    git switch main                 # 下見のブランチから
    git pull --ff-only
    git log -1 --format=%H          # GitHub の main の最新（マージのコミット）と同じこと
+   git status --short              # 何も出ないこと（予定外のファイルがない）
    pip install --only-binary :all: -r requirements.txt
    ls -la ~/schedule_data          # app.db のほかに、app.db-journal・-wal・-shm がないこと
-   rm ~/schedule_data/app.db ~/schedule_data/backups/*
+   rm ~/schedule_data/app.db
+   rm -rf ~/schedule_data/backups  # 下見のバックアップ（なくてもよい）
    ```
    `-journal` などがあれば、消さずに止まり、Claude に相談する
 5. Mac から送る：`scp ~/schedule-transfer/app.db <アカウント名>@ssh-<アカウント名>.alwaysdata.net:schedule_data/app.db`
@@ -163,10 +166,11 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    flask --app app db upgrade                   # Task 026 の migration（端末の印の表）を当てる
    flask --app app db current                   # 最新の版（head）
    ```
-7. 管理画面で、サイトを動かす（Enable）。Mac と iPhone で、今までのID・パスワードでログインし、今までのデータが見えることを確かめる（このログインで、それぞれの端末に印が付く）
-8. Mac で `python3.14 scripts/check_public.py https://...` と `--login`（そのあと、iPhone・Mac でログインし直す必要はない。印は10個まで持てる）
-9. 毎日のバックアップを作る（下の「バックアップ」の定期実行）。管理画面から1回動かし、`ls -la ~/schedule_data/backups` に、その日の `app-YYYYMMDD-auto.db`（600）ができたことを確かめる
-10. Mac：送った写しを消す（`rm -r ~/schedule-transfer`）。Mac の `instance/app.db` は、移行の前の記録として残すが、もう使わない（`run.py` で起動して書き込むと、本番とずれる）
+7. iPhone・Mac のパスワードの管理（Safari の自動入力・「パスワード」のアプリ）から、下見のIDとパスワードを消す（このあとのログインの前に。下見と本番は同じサイトの名前のため、自動入力で下見のIDを送ると、本物の端末の印の失敗に数えられ、5回で印が消える）
+8. 管理画面で、サイトを動かす（Enable）。Mac と iPhone で、今までのID・パスワードでログインし、今までのデータが見えることを確かめる（このログインで、それぞれの端末に印が付く）
+9. Mac で `python3.14 scripts/check_public.py https://...` と `--login`（そのあと、iPhone・Mac でログインし直す必要はない。印は10個まで持てる）
+10. 毎日のバックアップを作る（下の「バックアップ」の定期実行）。管理画面から1回動かし、`ls -la ~/schedule_data/backups` に、その日の `app-YYYYMMDD-auto.db`（600）ができたことを確かめる
+11. Mac：送った写しを消す（`rm -r ~/schedule-transfer`）。Mac の `instance/app.db` は、移行の前の記録として残すが、もう使わない（`run.py` で起動して書き込むと、本番とずれる）
 
 ## 4. 更新（PR をマージしたあと）
 1. GitHub で、マージのコミット（`main` の最新）を確かめる
@@ -177,12 +181,13 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    flask --app app show-settings   # 1行目が「環境：本番」
    git pull --ff-only
    git log -1 --format=%H          # 1 と同じこと
+   git status --short              # 何も出ないこと
    pip install --only-binary :all: -r requirements.txt
    flask --app app backup-db --label before-<タスクの番号>
    flask --app app db upgrade
    ```
 4. 管理画面で、サイトを動かす（Enable）。Mac で `python3.14 scripts/check_public.py https://...`
-4. 戻すとき：`git checkout <前のコミット>` で再起動する。DB を戻すなら、下の「バックアップから戻す」
+5. 戻すとき：`git checkout <前のコミット>` で再起動する。DB を戻すなら、下の「バックアップから戻す」
 
 ## 5. バックアップ
 - 毎日：管理画面の「Advanced > Scheduled tasks」で、毎日1回の定期実行を作る。時刻は、サーバーの3時17分ごろ（パリの時刻。日本の昼で、夏時間でも日本の日付がずれない）
@@ -200,10 +205,10 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
 - バックアップから戻す：サイトを止め、`flask --app app backup-db --label before-restore` のあと、戻すファイルを `~/schedule_data/app.db` に写し（`-journal` などが残っていないこと）、`flask --app app backup-db --label after-restore` が成功してから、サイトを動かす（考え方は `development/database.md` の「バックアップから戻す」と同じ）
 
 ## 6. 利用者の管理（本番）
-- SSH で、`cd ~/schedule_app && . .venv/bin/activate` のあと、`flask --app app <コマンド>`（`development/database.md` の「利用者の管理」）。どのコマンドも、最初に「環境：本番」と、使うDBを出す。「ローカル」と出たら、`SCHEDULE_ENV_FILE` を読めていない（止めて、`~/.profile` を確かめる）
+- SSH で、`cd ~/schedule_app && . .venv/bin/activate` のあと、`flask --app app <コマンド>`（`development/database.md` の「利用者の管理」）。アプリのコマンドは、どれも、最初に「環境：本番」と、使うDBを出す（`flask db` は出さないため、その前に `show-settings` などで確かめる）。「ローカル」と出たら、`SCHEDULE_ENV_FILE` を読めていない（止めて、`~/.profile` を確かめる）
 - 締め出されたとき（端末の印のない新しい端末で、ログインの失敗が続いたため断られる）：`flask --app app unlock-login <ID>`。続くなら、`rename-user` で、推測されにくいIDに変える
 - 端末をなくしたとき：別の端末でログインして「すべての端末からログアウト」（ログイン中の端末と、端末の印が、すべて消える）。ログインできなければ、SSH で `set-password`（同じく、すべて消える）
-- 本番では、`create-demo-db`、ID の `demo`、`flask run`・`run.py`（開発用のサーバー）は使えない（断られる）。`flask db` は、`upgrade`・`current`・`history`・`check` だけ（`downgrade`・`stamp` などは断られる）
+- 本番では、`create-demo-db`、ID の `demo`、`flask run`・`run.py`（開発用のサーバー）は使えない（断られる）。`flask db` は、`upgrade`・`current`・`history -i` だけ（`downgrade`・`stamp`・`migrate`・`check` などは断られる。migration は Mac で作る）
 
 ## 7. ログ
 - アプリのログ（`~/admin/logs/uwsgi/`）：ログインの成功・失敗・制限・端末の印の無効化・断った要求（ほかのサイトから）。パスワード・トークン・打ち込まれたIDは出ない。接続元のアドレスは出る

@@ -337,3 +337,43 @@ def test_rate_limit_check_finds_proxy_keeping_underscores(
     assert len(report.failures) == 1
     # 断られた（400）のではなく、偽の接続元で、試せてしまった（401）
     assert "[401, 401, 401" in capsys.readouterr().out
+
+
+def test_probe_compares_ipv6_by_64(monkeypatch, capsys):
+    # Mac は、接続ごとに一時的な IPv6 のアドレスを使いうる。同じ /64 なら、
+    # 同じ接続元とみなす（アプリの数え方と同じ）
+    def ipv6_proxy(headers):
+        return good_proxy(headers) | {"X-Real-IP": "2001:db8:1:2::abcd"}
+
+    report = run_probe(
+        monkeypatch, ProbeTarget(ipv6_proxy), "2001:db8:1:2::1234"
+    )
+
+    assert report.failures == [], capsys.readouterr().out
+
+
+def test_probe_explains_ipv4_and_ipv6_mismatch(monkeypatch, capsys):
+    # Mac のアドレスに IPv6 を入れたが、届いたのは IPv4（安全な側の失敗。
+    # 入れ直し方を表示する）
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy), "2001:db8::1")
+
+    assert "IPv4 と IPv6 が違う" in capsys.readouterr().out
+    assert report.failures
+
+
+class RefusingUnderscoreTarget(ProbeTarget):
+    """下線の名前のヘッダーのある要求を、プロキシが400で断る。"""
+
+    def request(self, method, path, headers=None, body=None, *, https=True):
+        if any("_" in name for name in (headers or {})):
+            return Response(400, [], b"<h1>Bad Request</h1>")
+        return super().request(method, path, headers, body, https=https)
+
+
+def test_probe_accepts_proxy_refusing_underscores(monkeypatch, capsys):
+    report = run_probe(monkeypatch, RefusingUnderscoreTarget(good_proxy))
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "プロキシが断った（400。安全）" in output
+    assert "CLIENT_ADDRESS_HEADER の候補：['X-Real-IP']" in output

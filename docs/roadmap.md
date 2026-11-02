@@ -15,10 +15,10 @@
 | 最後にマージしたもの | Dependabot の #51（Playwright 1.64.0 ほか）と #50（ESLint 10.13.0）（2026-11-02。マージコミット `498ad57`・`fa22620`）。その前は Task 025（PR #49、2026-11-02。マージコミット `0df68d5`） |
 | 実装中のタスク | Task 026（クラウドへの公開。このPR） |
 | 次に設計するタスク | Task 027〜（見た目と使い心地） |
-| 自動の確認 | （このPRの最後に書く） |
+| 自動の確認 | pytest 1,826件が合格（2件 skip、5件 xfail：受け入れた弱さ。Task 025 の2件と、Task 026 の3件）、E2E 6件が合格、ruff・ESLint が合格（2026-11-03、Task 026。Claude の作業環境の Python 3.14） |
 | DBの構造 | 初期migration（`0280f6cf8d09`）、休講日の `closures` テーブル（`42bd53808fa1`）、利用者の表と、データの持ち主（`a750d741785a`。Task 025）。Task 026で、端末の印の `trusted_devices` を足す（このPR。本番のDBは、移行の写しに当てて作る） |
 | 実データのDB | 2026-10-24から、KomaがMacの `instance/app.db` で、実データで使っている（Task 023の自動のバックアップと手動のコマンドで守る。`docs/development/database.md`）。Task 026のマージのあと、Komaがクラウド（alwaysdata）へ移す（`docs/development/deploy.md`） |
-| 最終更新 | 2026-11-02（Task 026） |
+| 最終更新 | 2026-11-03（Task 026） |
 
 ## 段階とタスク
 025より後の番号は仮。段階や順序を変える場合は、`docs/decisions/` に残す（2026-10-26に、ADR 0002 で、Task 024を入れて、ログイン以降の番号を1つずつずらした）。
@@ -44,5 +44,7 @@
 | ID | 内容 | 見つけた時 | 扱う予定 |
 |---|---|---|---|
 | D-48 | Dependabot の pyee：Playwright 1.64 は、pyee を「15未満」に限る。#48（pyee 14）は、Dependabot が閉じ、#52（pyee 15。CIが失敗する）に置き換わった | 2026-10-27（Dependabot） | 2026-11-02、Koma：#51（Playwright 1.64.0・SQLAlchemy 2.1.5・pluggy 1.7.0・ruff 0.17.1。新たに要る依存がないことを、Python 3.14 で pyee 14 と一緒に入れて確かめた）を rebase のあとマージし、Macで `pip install -r requirements-dev.txt` と `python -m playwright install chromium`。#50（ESLint 10.13.0）もマージ。#52 は閉じた。Task 026 で、`dependabot.yml` に「pyee 15以上を除外」を足した（Playwright が受け付けるようになったら外す）。このPRのマージのあとの月曜日に出る pyee 14 のPRを、CIの合格と差分の確認のあと、マージする |
+| 026-L1 | 本番の `pip install` に、`--require-hashes`（配布物のハッシュの固定）がない。版の固定だけでは、乗っ取られたアカウントが、同じ版に新しい配布物を足すと、それが入りうる（別の目のレビュー（守り）の Low。脅威の分析でも挙がった） | 2026-11-02（Task 026） | 後続のタスク。ハッシュを書いた requirements を作る道具（開発のときだけ使う無料の道具）と、Dependabot の更新との合わせ方を、設計で決める |
+| 026-L2 | 下見で確かめて決めること：ログを残す期間（alwaysdata が古いログを消すか。消さないなら、30日より古いログを消す定期実行を足す）、uWSGI の待ち受けに、同じサーバーのほかの利用者が直接つなげるか（つなげるなら、接続元を偽れる。`docs/architecture/security.md` の「接続元」の残る弱さ） | 2026-11-02（Task 026） | Koma の下見の結果（`docs/development/deploy.md` の「下見」）を受けて、Task 026 のマージの前に決める。手順書や資料の変更が要れば、このPRか、次のPRで |
 
 - Task 021までの持ち越し（010-N1〜021-N1の17件）は、Task 022で閉じた。多くは、Copilotが計画書を書き写して報告する経路に関するもので、開発体制の変更で不要になった。ブラウザ確認で分かったこと（010-N1・018-N2・020-N2・020-N3・021-N1）は、`docs/development/testing.md` の「画面の確認」に、`sqlite3` を `-readonly` で開くこと（011-L1）は、`docs/development/database.md` に残した。記録は `docs/archive/roadmap_until_task021.md`

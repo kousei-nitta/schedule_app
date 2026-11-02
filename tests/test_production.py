@@ -598,15 +598,23 @@ def test_stamp_is_refused_in_production(production_app, capsys):
     assert "この操作" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("operation", [current, check])
-def test_reading_operations_are_allowed_in_production(
-    production_app, capsys, operation
-):
+def test_current_is_allowed_in_production(production_app, capsys):
     # 本番で通す操作の一覧（migrations/env.py）にある、読むだけの操作
     with production_app.app_context():
-        operation(directory=MIGRATIONS)
+        current(directory=MIGRATIONS)
 
     assert "この操作" not in capsys.readouterr().err
+
+
+def test_check_and_migrate_are_refused_in_production(production_app, capsys):
+    # flask db check と flask db migrate は、Alembic が同じ名前の処理
+    # （retrieve_migrations）を渡す。本番で migration のファイルを作らせ
+    # ないため、どちらも断る（migrate は、断れなかったときにリポジトリへ
+    # ファイルを作るため、check で確かめる）
+    with production_app.app_context(), pytest.raises(SystemExit):
+        check(directory=MIGRATIONS)
+
+    assert "この操作" in capsys.readouterr().err
 
 
 def test_unknown_operation_is_refused_in_production(production_app):
