@@ -11,6 +11,8 @@
   ファイルなら読み込まれない
 - bfcache_page：戻る・進むのキャッシュ（bfcache）を使うブラウザのページ
   （ふだんの page は、Playwright の既定で、bfcache を使わない）
+- ブラウザの時間帯は、日本（Asia/Tokyo。利用者のスマホ・Macと同じ。
+  アプリの「今日」も日本時間。app/clock.py）
 - page_errors：ページで起きたJavaScriptの例外の一覧
 - csp_violations：ブラウザが、CSP（app/security.py）に反するとして
   止めた読み込み・実行の一覧
@@ -49,6 +51,17 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if item.path.resolve().is_relative_to(E2E_DIRECTORY):
             item.add_marker(pytest.mark.e2e)
+
+
+# ブラウザの時間帯（アプリの「今日」と同じ日本。CIやClaudeの作業環境の
+# 時間帯（UTC）では、日本の朝に、ブラウザとアプリの「今日」がずれるため）
+BROWSER_TIMEZONE = "Asia/Tokyo"
+
+
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args):
+    # pytest-playwright の page が使う設定に、時間帯を足す
+    return {**browser_context_args, "timezone_id": BROWSER_TIMEZONE}
 
 
 @pytest.fixture
@@ -134,7 +147,7 @@ def bfcache_page(playwright: Playwright):
         channel="chromium",
         ignore_default_args=["--disable-back-forward-cache"],
     )
-    page = browser.new_page()
+    page = browser.new_page(timezone_id=BROWSER_TIMEZONE)
     if os.environ.get("E2E_CDN_FROM_NPM") == "1":
         page.route(CDN_PREFIX + "**", answer_from_node_modules)
     yield page

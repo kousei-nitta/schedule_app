@@ -18,8 +18,6 @@ import os
 import platform
 import sqlite3
 import stat
-from datetime import date, datetime
-
 import click
 from flask import Flask, current_app
 from flask.cli import with_appcontext
@@ -145,7 +143,9 @@ def backup_db_command(label: str) -> None:
         )
 
     try:
-        backup_path = manual_backup_path(database_path, datetime.now(), label)
+        backup_path = manual_backup_path(
+            database_path, clock.japan_now(), label
+        )
         counts = create_backup(database_path, backup_path)
     except BackupError as error:
         # ClickException は、メッセージを表示して、終了コード1で終わる
@@ -186,7 +186,7 @@ def create_demo_db_command(replace: bool, skip_breach_check: bool) -> None:
     password = prompt_new_password(DEMO_USERNAME, skip_breach_check)
     try:
         counts = create_demo_database(
-            current_app, date.today(), replace, password=password
+            current_app, clock.japan_today(), replace, password=password
         )
     except DemoDataError as error:
         raise click.ClickException(str(error)) from error

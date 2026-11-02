@@ -3,6 +3,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify
 
+from app import clock
 from app.api_helpers import (
     MAX_ID,
     api_error_response,
@@ -66,11 +67,11 @@ def subject_to_dict(subject: Subject) -> dict[str, Any]:
 def current_date() -> date:
     """授業全体の編集で、予定を作り直す基準の「今日」を返す。
 
-    サーバー（Flaskを動かしているPC）のローカルの日付。テストで日付を
-    固定できるように、関数にしておく（テストでは、monkeypatch で
-    置き換える）。
+    日本時間の日付（app/clock.py。クラウドのサーバーのタイムゾーンに
+    よらない）。テストで日付を固定できるように、関数にしておく（テスト
+    では、monkeypatch で置き換える）。
     """
-    return date.today()
+    return clock.japan_today()
 
 
 def validate_subject_values(

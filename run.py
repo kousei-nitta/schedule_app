@@ -1,7 +1,6 @@
 import os
-from datetime import date
 
-from app import create_app
+from app import clock, create_app
 from app.backup import backup_real_database_on_startup
 from app.database_files import describe_database
 
@@ -39,7 +38,7 @@ if __name__ == "__main__":
                 "デバッグモード：オン（FLASK_DEBUG）。開発のときだけ"
                 "使ってください"
             )
-        # 実データのDBの、その日の自動バックアップ
+        # 実データのDBの、その日（日本時間）の自動バックアップ
         # （その日の分があれば作らない）
-        backup_real_database_on_startup(app, date.today())
+        backup_real_database_on_startup(app, clock.japan_today())
     app.run(host="127.0.0.1", port=5001, debug=debug)

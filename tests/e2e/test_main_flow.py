@@ -19,7 +19,7 @@ from datetime import date, datetime, time, timedelta
 import pytest
 from playwright.sync_api import Page, expect
 
-from app import security
+from app import clock, security
 from app.demo_data import semester_name
 from tests.auth_support import E2E_USERNAME, TEST_PASSWORD
 
@@ -111,7 +111,9 @@ def test_main_flow(
     page_errors: list[str],
     csp_violations: list[str],
 ):
-    today = date.today()
+    # 「今日」は、アプリと同じ日本時間（app/clock.py。ブラウザの時間帯も
+    # 日本。tests/e2e/conftest.py の browser_context_args）
+    today = clock.japan_today()
     this_sunday = sunday_of(today)
     semester_start = this_sunday - timedelta(weeks=1)
     semester_end = this_sunday + timedelta(weeks=4, days=-1)
@@ -121,7 +123,9 @@ def test_main_flow(
 
     # ブラウザの「今」を、テストの「今日」の正午に固定する（テストの途中で
     # 日付をまたいでも、Pythonとブラウザの「今日」がずれないように）
-    page.clock.set_fixed_time(datetime.combine(today, time(12, 0)))
+    page.clock.set_fixed_time(
+        datetime.combine(today, time(12, 0), tzinfo=clock.JAPAN_TIMEZONE)
+    )
 
     # 0. ログインする
     log_in(page, app_url)
