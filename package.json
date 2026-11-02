@@ -9,7 +9,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "bootstrap": "5.3.8",
-    "eslint": "10.12.0",
+    "eslint": "10.13.0",
     "fullcalendar": "6.1.21",
     "globals": "17.13.0"
   },
