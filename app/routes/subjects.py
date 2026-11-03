@@ -3,7 +3,11 @@ from typing import Any
 
 from flask import Blueprint, jsonify
 
+from app import clock
 from app.api_helpers import (
+    NOTES_LENGTH_MESSAGE,
+    NOTES_MAX_LENGTH,
+    NOTES_TYPE_MESSAGE,
     MAX_ID,
     api_error_response,
     format_time,
@@ -66,11 +70,11 @@ def subject_to_dict(subject: Subject) -> dict[str, Any]:
 def current_date() -> date:
     """授業全体の編集で、予定を作り直す基準の「今日」を返す。
 
-    サーバー（Flaskを動かしているPC）のローカルの日付。テストで日付を
-    固定できるように、関数にしておく（テストでは、monkeypatch で
-    置き換える）。
+    日本時間の日付（app/clock.py。クラウドのサーバーのタイムゾーンに
+    よらない）。テストで日付を固定できるように、関数にしておく（テスト
+    では、monkeypatch で置き換える）。
     """
-    return date.today()
+    return clock.japan_today()
 
 
 def validate_subject_values(
@@ -163,7 +167,9 @@ def validate_subject_values(
         notes, error = validate_optional_string(
             payload,
             "notes",
-            "詳細・メモは文字列で指定してください",
+            NOTES_TYPE_MESSAGE,
+            max_length=NOTES_MAX_LENGTH,
+            length_message=NOTES_LENGTH_MESSAGE,
         )
         if error is None:
             values["notes"] = notes

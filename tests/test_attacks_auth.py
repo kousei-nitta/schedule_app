@@ -88,23 +88,15 @@ def test_head_request_is_not_counted_as_login_failure(app, anonymous_client):
     assert failure_count(app) == 0
 
 
-# --- 受け入れた弱さ：1つの接続元で、持ち主を締め出し続けられる ---
+# --- 直した弱さ：1つの接続元で、持ち主を締め出し続けられた ---
+#
+# ログインIDごとの制限は、だれの失敗でも始まり、正しいパスワードも断る。
+# IDを知っていれば、1つの接続元から1分に1回送るだけで、持ち主を締め出せた
+# （Task 025 で、受け入れた弱さとして残した）。Task 026 で、一度ログイン
+# した端末の印（app/trusted_devices.py）を足した。印のある端末は、IDごと
+# の制限を受けない。印のない新しい端末は、今も締め出される（下の xfail）
 
 
-@pytest.mark.xfail(
-    strict=True,
-    # 弱さの再現（assert の失敗）だけを「予想どおり」にする。ほかの
-    # 例外（500 の応答での KeyError など）は、ふつうの失敗にする
-    raises=AssertionError,
-    reason=(
-        "受け入れた弱さ：ログインIDごとの制限は、だれの失敗でも始まり、"
-        "正しいパスワードも断る。IDを知っていれば、1つの接続元から1分に"
-        "1回送るだけで、持ち主を締め出せる。今は、IDを推測されにくいものに"
-        "する（rename-user。IDの有無は応答から分からない）ことで防ぐ。"
-        "一度ログインした端末の印（device cookie）を足すかは、公開"
-        "（Task 026）の前に決める（docs/roadmap.md の持ち越し）"
-    ),
-)
 def test_one_address_cannot_keep_owner_locked_out(app, clock_now):
     # 攻撃の前に、持ち主は、いつもの端末で1回ログインしている
     owner = app.test_client()
@@ -138,6 +130,31 @@ def test_one_address_cannot_keep_owner_locked_out(app, clock_now):
         f"持ち主の結果：{owner_results}、"
         f"攻撃者の失敗に数えた回数：{attacker_hashed_failures}"
     )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason=(
+        "受け入れた弱さ：印のない新しい端末（初めて使うスマホ、Cookie を"
+        "消したブラウザ）は、IDを知る攻撃者に、締め出され続ける。IDを推測"
+        "されにくいものにし、締め出されたら、SSH から unlock-login・"
+        "rename-user で補う（ADR 0005）"
+    ),
+)
+def test_new_device_cannot_be_kept_locked_out(app, clock_now):
+    attacker = app.test_client()
+    for minute in range(30):
+        clock_now.value = START + timedelta(minutes=minute)
+        post_login(attacker, TEST_USERNAME, WRONG_PASSWORD, ATTACKER_ADDRESS)
+
+    # 持ち主が、初めての端末（印なし）から、正しいパスワードで試す
+    new_device = app.test_client()
+    response = post_login(
+        new_device, TEST_USERNAME, TEST_PASSWORD, OWNER_ADDRESS
+    )
+
+    assert response.status_code == 303
 
 
 # --- 直した弱さ：ログインの失敗の記録に、索引がなかった ---

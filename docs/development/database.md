@@ -3,6 +3,7 @@
 DBの構造の変え方（migration）と、実データのDBの扱い（バックアップ・戻し方）、デモ用の架空のデータ。データの設計そのものは `docs/architecture/data_model.md`。DBの切り替えとバックアップの仕組みは、`docs/architecture/overview.md` の「DBの切り替え（環境変数）」「データの保護（バックアップ）」。
 
 - **実データのDB**：KomaのMacの `instance/app.db`。2026-10-24から、実際の予定を入れて使っている。この資料とほかの資料で「開発用DB」と書いているものも、同じファイルを指す（Task 021までの呼び方）
+- **公開のあと（Task 026）**：実データを本番（alwaysdata）へ移したあとは、本番の `~/schedule_data/app.db` が実データのDB。Mac の `instance/app.db` は、移行の前の記録として残し、もう書き込まない。本番での手順（移行・更新・バックアップ・戻し方）は `development/deploy.md`。下の手順のコマンドは、本番でも同じものを使う（本番では、設定のファイルから、使うDBが決まる）
 - Claudeは、実データのDBに触れない（Claudeの作業はクラウドの作業環境で行い、そこには実データのDBがない）。実データのDBの管理（バックアップ、migrationの適用、データの削除）は、Komaが行う
 - テストと確認は、一時的なDBか、デモのDBで行う（`docs/development/testing.md`、下の「デモ用の架空のデータ」）
 - 使うDBは、環境変数 `DATABASE_URL` で切り替えられる（設定がなければ、実データのDB）。起動のとき、`run.py` が、使っているDBと、実データのDBかどうかを表示する
@@ -64,8 +65,8 @@ DBの構造の変え方（migration）と、実データのDBの扱い（バッ�
 migration `a750d741785a` を、上の手順で適用したあと（Koma）：
 
 1. 適用の後の確認（上の手順6）に加えて：`sqlite3 -readonly instance/app.db "SELECT id, username, password_hash IS NULL FROM users"` が `1|owner|1` の1行。5つの表の `user_id` が、すべて1（例：`SELECT COUNT(*) FROM events WHERE user_id IS NOT 1` が0）
-2. パスワードを決める：`flask --app app set-password owner`（15文字以上。表示しない入力で2回。漏えいしたパスワードの確認のため、インターネットにつなぐ）
-3. ログインIDを、推測されにくいものに変える：`flask --app app rename-user owner <新しいID>`（`owner` は、公開のリポジトリに書かれているため。新しいIDは、リポジトリ・Issue・PRに書かない）
+2. ログインIDを、推測されにくいものに変える：`flask --app app rename-user owner <新しいID>`（`owner` は、公開のリポジトリに書かれているため。新しいIDは、リポジトリ・Issue・PRに書かない）
+3. パスワードを決める：`flask --app app set-password <新しいID>`（15文字以上。表示しない入力で2回。漏えいしたパスワードの確認のため、インターネットにつなぐ）。IDを変えたあとに決めるのは、`set-password` が、パスワードに新しいIDが含まれないかを確かめられるため（`rename-user` は、ハッシュしかないため、確かめられない）
 4. `python run.py` で起動し、ログインの画面で、新しいIDとパスワードでログインして、今までのデータが見えることを確かめる
 
 ## 利用者の管理
@@ -78,6 +79,9 @@ migration `a750d741785a` を、上の手順で適用したあと（Koma）：
 | `flask --app app rename-user <ID> <新しいID>` | ログインIDを変える |
 | `flask --app app unlock-login <ID>` | ログインの試行の制限を解く（そのIDの失敗の記録を消す） |
 
+- `set-password` は、その利用者の、一度ログインした端末の印（`architecture/security.md` の「端末の印」）も、すべて無効にする
+- 本番では、`demo` という利用者を作れない（`create-user`・`rename-user` が断る）
+
 - ログインID：半角英小文字・数字・`_`・`-`、3〜32文字
 - パスワード：15〜128文字。表示しない入力で、2回入れる（コマンドの引数では受け取らない。履歴に残さないため）。単語を3〜4つ、空白でつなげると、覚えやすく、強い。ログインIDを含むもの、同じ文字の繰り返し・文字の種類が少ないもの（`abab…`）・連続した文字だけ（`123…`・`abc…`）、漏えいしたパスワード（Have I Been Pwned。パスワードのハッシュの先頭5文字だけを送る）は断る。漏えいの確認につながらないときは、失敗する（ネットワークを確かめる。どうしても確かめられないときだけ、`--skip-breach-check`）
 - パスワードを忘れたら、`set-password` で決め直す。他人に締め出されたら、`unlock-login`。続くなら、`rename-user` で、推測されにくいIDに変える
@@ -89,13 +93,16 @@ migration `a750d741785a` を、上の手順で適用したあと（Koma）：
 - 自動のバックアップ：`python run.py` の起動のとき、その日の分がなければ、`instance/backups/app-YYYYMMDD-auto.db` ができる（新しい30個を残す）。中身は、**その日に初めて起動したときの状態**（その日に入れたデータは、次の日の分に入る）。起動したまま日をまたぐと、次に起動するまで作られない
   - 起動のときの表示で、作れたかを確かめる。「警告：自動のバックアップを作れませんでした」と出たら、理由を見て、手動で取る
   - 理由に「書きかけの記録（app.db-journal）があります」とあるとき：アプリが書き込みの途中で止まった（Macの電源が切れた、など）。画面を一度開くと、SQLiteが書きかけを取り消す（`-journal` が消える）。そのあとで、手動のバックアップを取る
+- 毎日のバックアップ：`flask --app app daily-backup`。自動のバックアップと同じ名前で、その日（日本時間）の分を作り、新しい30個を残す（すでにあれば作らない）。本番で、定期実行から使う（`development/deploy.md` の「バックアップ」）。Mac で使う必要はない
 - 手動のバックアップ：`flask --app app backup-db [--label <ラベル>]`。学期や授業を削除する前、migrationを適用する前（上の手順）、データをまとめて直す前に取る。サーバーを動かしたままでも取れる（アプリが書き込み中なら、最大5秒待つ）
 - `instance/backups/` に、名前が `.partial` で終わるファイルが残っていたら、途中で止まったバックアップの残り。消してよい
 - 中を見るとき：`sqlite3` は、必ず `-readonly` を付けて開く（読むだけの確認で、ファイルを変えないため）
 - バックアップの中をアプリで見たいとき：先にコピーし、コピーのほうを `DATABASE_URL` で指定する（例：`cp instance/backups/app-20261025-auto.db instance/look.db` → `DATABASE_URL=sqlite:///look.db python run.py`）。バックアップをそのまま指定すると、読み書きできる状態で開き、バックアップが変わりうる
 - 画面の確認：データを変える操作で確かめるときは、実データのDBではなく、デモのDBを使う（下の「デモ用の架空のデータ」）。実データのDBで確かめるときは、先に手動のバックアップを取る
 - `git clean -x`（例：`git clean -fdx`）は使わない。`.gitignore` の対象の `instance/` ごと、実データのDBとすべてのバックアップが消える
-- Macの外へのコピー：バックアップの置き場所は、Macの中だけ（`instance/backups/`）。Macの故障・紛失に備えて、ときどき外へ写す（クラウドへの公開のときのバックアップは、Task 026で決める）
+- 今の設定の確かめ：`flask --app app show-settings`（ローカルか本番か・使うDBとフォルダの権限・Python と SQLite の版。秘密の値は出さない）
+- 移行の写し：`flask --app app make-transfer-copy <出力先>`（Mac の実データのDBから、本番へ送る写しを作る。出力先は、リポジトリの外。手順は `development/deploy.md` の「実データの移行」）。元のDBは変えない
+- Macの外へのコピー：バックアップの置き場所は、Macの中だけ（`instance/backups/`）。Macの故障・紛失に備えて、ときどき外へ写す（公開のあとの本番のバックアップは、`development/deploy.md` の「バックアップ」）
   - 写すのは、`instance/backups/` の中のファイル（検査済みで、使っていないファイル）。動いているアプリの `instance/app.db` を、直接写さない
   - Time Machine を使っていれば、自動で含まれる
   - `instance/backups` を、シンボリックリンクで外部のディスクに向けない（ディスクを外すと作れない。exFAT などのディスクでは、名前を付ける処理（ハードリンク）ができず、作れない）。外へは、ファイルをコピーする

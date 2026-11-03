@@ -190,6 +190,18 @@ def test_deleted_notes_do_not_remain_in_database_file(app, client):
     assert secret.encode() not in database_path.read_bytes()
 
 
+def test_sqlite_connections_use_secure_delete_and_memory_temp(app):
+    # secure_delete = 1（ON）、temp_store = 2（MEMORY。一時的なデータを、
+    # 共有のサーバーの /tmp などに書かない。Task 026）
+    with app.app_context():
+        secure_delete = db.session.execute(
+            db.text("PRAGMA secure_delete")
+        ).scalar()
+        temp_store = db.session.execute(db.text("PRAGMA temp_store")).scalar()
+
+    assert (secure_delete, temp_store) == (1, 2)
+
+
 # --- 直した弱さ：漏えいの確認を省くと、弱いパスワードが通っていた ---
 #
 # 手元の決まりが「長さ・IDを含む・1文字の繰り返しだけ・制御文字」だけで、

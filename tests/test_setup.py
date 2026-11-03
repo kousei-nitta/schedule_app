@@ -33,6 +33,7 @@ def test_migrations_create_all_expected_tables(app):
         "users",
         "user_sessions",
         "login_failures",
+        "trusted_devices",
         "semesters",
         "subjects",
         "events",
@@ -139,6 +140,29 @@ def test_user_sessions_table_matches_design(app):
     }
     assert foreign_keys == [user_id_foreign_key("user_sessions")]
     assert unique == [("uq_user_sessions_token_digest", ["token_digest"])]
+
+
+def test_trusted_devices_table_matches_design(app):
+    # Task 026（端末の印。docs/architecture/data_model.md の「TrustedDevice」）
+    columns, primary_key, foreign_keys, unique = table_design(
+        app, "trusted_devices"
+    )
+
+    assert columns == {
+        "id": ("INTEGER", False),
+        "user_id": ("INTEGER", False),
+        "token_digest": ("VARCHAR(64)", False),
+        "created_at": ("DATETIME", False),
+        "failure_count": ("INTEGER", False),
+    }
+    assert primary_key == {
+        "constrained_columns": ["id"],
+        "name": "pk_trusted_devices",
+    }
+    assert foreign_keys == [user_id_foreign_key("trusted_devices")]
+    assert unique == [
+        ("uq_trusted_devices_token_digest", ["token_digest"])
+    ]
 
 
 def test_login_failures_table_matches_design(app):

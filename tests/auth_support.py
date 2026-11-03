@@ -28,6 +28,8 @@ TEST_PASSWORD = "kumo sakura densha 2099"
 # ログインの画面を通すテストの、時計の始まり（UTC。fixture clock_now）
 START = datetime(2026, 10, 30, 3, 0, 0)
 COOKIE_NAME = "schedule_session"
+# 端末の印の Cookie（app/trusted_devices.py）
+DEVICE_COOKIE_NAME = "schedule_device"
 # 画面のフォームの送信に、ブラウザが付けるヘッダー（このアプリから）
 FORM_HEADERS = {"Origin": "http://localhost", "Sec-Fetch-Site": "same-origin"}
 
@@ -117,9 +119,40 @@ def cookie_value(response) -> str:
     return header.split(";", 1)[0].split("=", 1)[1]
 
 
+def device_cookie_header(response) -> str | None:
+    """応答の、端末の印の Cookie の Set-Cookie（なければ None）。"""
+    for header in response.headers.getlist("Set-Cookie"):
+        if header.startswith(f"{DEVICE_COOKIE_NAME}="):
+            return header
+    return None
+
+
+def device_cookie_value(response) -> str:
+    """応答で入れた、端末の印の Cookie の値。"""
+    header = device_cookie_header(response)
+    assert header is not None
+    return header.split(";", 1)[0].split("=", 1)[1]
+
+
 def failure_count(app) -> int:
     """ログインの失敗の記録の数（すべての接続元・ID）。"""
     with app.app_context():
         return db.session.scalar(
             db.select(db.func.count()).select_from(LoginFailure)
         )
+
+
+def add_recent_failures(app, count, failed_at):
+    """ほかの接続元・IDの失敗の行を、count 行作る（全体の上限のテスト）。"""
+    with app.app_context():
+        for number in range(count):
+            db.session.add(
+                LoginFailure(
+                    login_id_digest=f"{number:064x}",
+                    client_digest=f"{number:064x}",
+                    failed_at=failed_at,
+                    login_id_locked_until=failed_at,
+                    client_locked_until=failed_at,
+                )
+            )
+        db.session.commit()

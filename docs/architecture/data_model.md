@@ -4,15 +4,15 @@
 
 データのテーブルは5つ（Semester・Subject・Event・Task・Closure）。関係は **Semester → Subject → Event / Task** と、**Semester → Closure**。Closure（休講日）は、初期migrationには含まれない（休講日を実装するときに、新しいmigrationで追加する）。
 
-ログインのテーブルは3つ（User・UserSession・LoginFailure。Task 025）。5つのデータのテーブルは、すべて `user_id` で、どれかの利用者（User）のものになる（下の「データの持ち主」）。
+ログインのテーブルは4つ（User・UserSession・LoginFailure。Task 025。TrustedDevice。Task 026）。5つのデータのテーブルは、すべて `user_id` で、どれかの利用者（User）のものになる（下の「データの持ち主」）。
 
 ## 共通の約束
 - 型は SQLAlchemy の型で書く。`String(n)` の n は最大文字数。
-- 日付・時刻（Date／Time／DateTime）は、タイムゾーン情報なし（naive）のローカル時刻として扱う。タイムゾーンの変換はしない。
-  - 例外：ログインのテーブル（User・UserSession・LoginFailure）の日時は、UTC（タイムゾーンなしで保存）。期限を、サーバーのタイムゾーンや、Macとクラウドの違いに左右されずに決めるため。処理は `app/clock.py` の `utc_now` の1か所で求める
+- 日付・時刻（Date／Time／DateTime）は、タイムゾーン情報なし（naive）の日本時間として扱う。タイムゾーンの変換はしない。サーバーが「今日」を決めるとき（授業の編集の基準など）は、サーバーのタイムゾーンによらず、日本時間（UTC+9。`app/clock.py` の `japan_today`。Task 026）。画面の「今日」は、ブラウザの日付
+  - 例外：ログインのテーブル（User・UserSession・LoginFailure・TrustedDevice）の日時は、UTC（タイムゾーンなしで保存）。期限を、サーバーのタイムゾーンや、Macとクラウドの違いに左右されずに決めるため。処理は `app/clock.py` の `utc_now` の1か所で求める
 - 主キー `id` は整数の自動採番。
 - 初期値（`default`）は SQLAlchemy 側（Python側）で指定する。DB側の `server_default` は、現時点のモデルでは使わない（データが入ったテーブルにNOT NULLのカラムを後から追加する場合は、そのときのmigrationで別途検討する）。
-- 現時点のモデルには、check制約を定義しない。unique制約は、ログインのテーブルの2つ（`users.username`・`user_sessions.token_digest`。取り違えると、他人としてログインしうるため、DBでも守る）だけ。インデックスは、`login_failures` の3つ（ログインの試行のたびに探す・消す列。行を増やされても、ログインが遅くならないように）だけにする（名前は「制約の命名規則」を参照）。
+- 現時点のモデルには、check制約を定義しない。unique制約は、ログインのテーブルの3つ（`users.username`・`user_sessions.token_digest`・`trusted_devices.token_digest`。取り違えると、他人としてログインしうるため、DBでも守る）だけ。インデックスは、`login_failures` の3つ（ログインの試行のたびに探す・消す列。行を増やされても、ログインが遅くならないように）だけにする（名前は「制約の命名規則」を参照）。
 - SQLiteは、既定では外部キー制約を強制しない（`PRAGMA foreign_keys` を有効にしていない）。`user_id` の外部キーも、DBでは強制されないため、守りとして当てにしない（持ち主は、routeで確かめる。「データの持ち主」）。
 - 削除時の連動は、ORMの `cascade` やDB側の `ondelete` を使わず、routeで、子の行を明示的に削除してから、親の行を削除する（1回のcommit。2026-10-13に決定）。SQLiteは既定では外部キー制約を強制しない（`PRAGMA foreign_keys`）ため、親の行だけを削除すると、子の行が残る（ORMで親の行を `session.delete` すると、`relationship` を通して、子の行の外部キーが `NULL` に書き換えられて残る）。routeに書くのは、何を削除するかを、routeのコードから読めるようにするため（休講日の追加で、その日の予定を削除する処理と同じ書き方）。DBの構造は変えない（migrationは不要）。現時点で、子の行を持つ親の削除は、授業の削除（予定・課題。「授業API」）と、学期の削除（休講日。授業がある学期は削除できない。「学期API」。2026-10-20）
 - `category` には、コード値（英小文字と `_` だけの固定の文字列）を保存する。値は、Event・Taskの表のとおり。画面に出す表示名・色・アイコンは、画面側の対応表（`app/static/js/categories.js`。色の値は `app/static/css/style.css`。「JavaScriptの構成」）で持ち、DBには持たない。
@@ -76,6 +76,20 @@
 - 行は、24時間より古く、その行で始まった制限が終わってから消す
 - インデックス：`login_id_digest`・`client_digest`・`failed_at`（`ix_login_failures_login_id_digest`・`ix_login_failures_client_digest`・`ix_login_failures_failed_at`）
 
+## TrustedDevice（一度ログインした端末の印）　テーブル名：`trusted_devices`
+ログインに成功した端末に渡す印（device cookie）。1つの印につき1行。印のある端末は、ログインの試行の制限を、印ごとの失敗の数で受ける（`architecture/security.md` の「端末の印」。Task 026）。
+
+| フィールド | 型 | NULL | 内容 |
+|---|---|---|---|
+| id | Integer（主キー） | 不可 | |
+| user_id | Integer、外部キー → `users.id` | 不可 | 印の持ち主 |
+| token_digest | String(64) | 不可 | 印（32バイトの乱数）の SHA-256（16進数）。印そのものは保存しない。一意（`uq_trusted_devices_token_digest`） |
+| created_at | DateTime | 不可 | 印を作った日時（UTC）。180日で切れる。ログインに成功するたびに、作り替える |
+| failure_count | Integer | 不可 | この印で、続けて失敗した数。5で、行を消す |
+
+- 利用者ごとに10個まで（古いものから消す）。期限の切れた行は、印を作るときに消す
+- migration `bf181029c723`（表を作るだけ）
+
 ## Semester（学期）　テーブル名：`semesters`
 学期を表す。UIの学期タブ、「新しい学期の登録」、学期ごとの期間管理に対応する。
 
@@ -84,7 +98,7 @@
 | id | Integer（主キー） | 不可 | |
 | name | String(50) | 不可 | 学期名。形式は「2026年度 前期」（「学期API」を参照）。DBには文字列だけを保存し、年度・種別の別カラムは持たない |
 | start_date | Date | 不可 | 学期の開始日 |
-| end_date | Date | 不可 | 学期の終了日 |
+| end_date | Date | 不可 | 学期の終了日（開始日から366日以内。「学期API」） |
 
 - 名前と期間は、編集で変えられる（「学期API」の `PATCH`。2026-10-20）。期間を変えると、授業の予定と休講日に反映する（「学期の期間の変更と予定の同期」）
 - 授業がある学期は、削除できない。授業がない学期を削除すると、その学期の休講日も削除される（「学期API」の削除）
@@ -101,7 +115,7 @@
 | weekday | Integer | 不可 | 曜日。**0=月曜〜6=日曜**（Pythonの `date.weekday()` と同じ）。JavaScript・FullCalendarの曜日は0=日曜なので、受け渡しの際は変換が必要 |
 | start_time | Time | 不可 | 開始時刻 |
 | end_time | Time | 不可 | 終了時刻 |
-| notes | Text | 可 | 詳細／メモ |
+| notes | Text | 可 | 詳細／メモ（2,000字以内。APIで確かめる） |
 
 ## Event（予定／時間型）　テーブル名：`events`
 授業の毎週分・アルバイト・その他（時間指定あり）の実際の1件1件。
@@ -117,7 +131,7 @@
 | title | String(200) | 不可 | タイトル |
 | room | String(100) | 可 | 教室（主に授業用） |
 | employer | String(100) | 可 | 派遣会社（主にアルバイト用） |
-| notes | Text | 可 | 詳細／メモ |
+| notes | Text | 可 | 詳細／メモ（2,000字以内。APIで確かめる） |
 | is_generated | Boolean | 不可 | 初期値 `False`。授業の学期一括登録で自動生成したEventは `True`（休講日の削除と、学期の期間の変更で作る授業のEventも `True`）。カレンダーから追加した単発の授業（補講など）、アルバイト、その他は `False` |
 
 - 教室（`room`）は授業の予定だけ、派遣会社（`employer`）はアルバイトの予定だけが持つ（予定APIで、ほかのカテゴリには指定できない。「予定API」）
@@ -133,7 +147,7 @@
 | category | String(20) | 不可 | `assignment`（課題）／`other`（その他） |
 | title | String(200) | 不可 | 課題名／タイトル |
 | due_datetime | DateTime | 不可 | 締切日時。分までを保存する（秒は0。APIの日時の形式が、秒を持たないため） |
-| notes | Text | 可 | 詳細／メモ |
+| notes | Text | 可 | 詳細／メモ（2,000字以内。APIで確かめる） |
 | is_completed | Boolean | 不可 | 初期値 `False`（未完了） |
 
 状態は「未完了」「完了」の2つのみ（中間状態は設けない）。
@@ -160,7 +174,7 @@
 - Subject 1 — 0..n Event（授業由来のEvent）
 - Subject 1 — 0..n Task（対象授業としての参照）
 - Semester 1 — 0..n Closure（休講日）
-- User 1 — 0..n 各データ（Semester・Subject・Closure・Event・Task。`user_id`）、User 1 — 0..n UserSession
+- User 1 — 0..n 各データ（Semester・Subject・Closure・Event・Task。`user_id`）、User 1 — 0..n UserSession、User 1 — 0..n TrustedDevice
 - ORMの `relationship`（`back_populates` で双方向）：`Semester.subjects` ↔ `Subject.semester`、`Subject.events` ↔ `Event.subject`、`Subject.tasks` ↔ `Task.subject`、`Semester.closures` ↔ `Closure.semester`。`cascade` は指定しない（削除の連動は、「共通の約束」のとおり、routeで明示的に行う）。
 
 ## 制約の命名規則（naming convention）

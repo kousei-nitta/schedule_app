@@ -1,0 +1,395 @@
+"""本番の点検のスクリプト（scripts/check_public.py。Task 026）。
+
+本物の本番には届かないため、プロキシの代わりをする偽の Target で、本番の
+設定のアプリ（fixture production_app）に送り、スクリプトの確かめと、
+アプリの振る舞いが合っていることを確かめる。判定の関数は、作った応答で
+確かめる。
+"""
+import json
+
+import pytest
+
+from scripts import check_public
+from scripts.check_public import (
+    Report,
+    Response,
+    Target,
+    check_basics,
+    check_logged_in,
+    check_rate_limit,
+    cookie_problems,
+    probe_headers,
+    leaked_markers,
+    security_header_problems,
+)
+from tests.auth_support import TEST_PASSWORD, TEST_USERNAME
+from tests.production_support import (
+    OWNER_ADDRESS,
+    PUBLIC_HOST,
+    PUBLIC_ORIGIN,
+    ProxyTarget,
+)
+
+
+def test_basic_checks_pass_against_production_app(production_app, capsys):
+    report = Report()
+
+    check_basics(ProxyTarget(production_app), report)
+
+    assert report.failures == [], capsys.readouterr().out
+
+
+def test_logged_in_checks_pass(production_app, monkeypatch, capsys):
+    answers = iter([TEST_USERNAME, TEST_PASSWORD])
+    monkeypatch.setattr(
+        check_public.getpass, "getpass", lambda _: next(answers)
+    )
+    report = Report()
+
+    check_logged_in(ProxyTarget(production_app), report)
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "✓ Cookie がある：__Host-schedule_device" in output
+
+
+def test_rate_limit_check_passes(production_app, monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    report = Report()
+
+    check_rate_limit(ProxyTarget(production_app), report)
+
+    assert report.failures == [], capsys.readouterr().out
+
+
+class SpoofableTarget(ProxyTarget):
+    """接続元のヘッダーを上書きしない（危ない）プロキシ。"""
+
+    def request(self, method, path, headers=None, body=None, *, https=True):
+        sent = dict(headers or {})
+        sent.setdefault("X-Real-IP", OWNER_ADDRESS)
+        sent["X-Forwarded-Proto"] = "https"
+        response = self.client.open(
+            path,
+            method=method,
+            headers=sent,
+            data=body,
+            base_url=f"http://{PUBLIC_HOST}",
+        )
+        return Response(
+            response.status_code, list(response.headers.items()), b""
+        )
+
+
+def test_rate_limit_check_finds_spoofable_proxy(production_app, monkeypatch):
+    # プロキシが X-Real-IP を上書きしないと、11回目も 429 にならない
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    report = Report()
+
+    check_rate_limit(SpoofableTarget(production_app), report)
+
+    assert len(report.failures) == 1
+
+
+# --- 判定の関数 ---
+
+GOOD_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "X-Robots-Tag": "noindex, nofollow",
+    "Cache-Control": "no-store",
+    "Strict-Transport-Security": "max-age=31536000",
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'none'; object-src 'none'; "
+        "frame-ancestors 'none'"
+    ),
+    "Permissions-Policy": "camera=(), microphone=()",
+}
+
+
+def test_good_headers_have_no_problems():
+    assert security_header_problems(GOOD_HEADERS, login_page=True) == []
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        ({"Strict-Transport-Security": "max-age=300"}, "Strict-Transport"),
+        ({"X-Frame-Options": "SAMEORIGIN"}, "X-Frame-Options"),
+        ({"Server": "nginx/1.24.0"}, "Server"),
+        ({"X-Powered-By": "PHP"}, "X-Powered-By"),
+        (
+            {
+                "Content-Security-Policy": GOOD_HEADERS[
+                    "Content-Security-Policy"
+                ]
+                + "; style-src 'unsafe-inline'"
+            },
+            "unsafe-inline",
+        ),
+    ],
+)
+def test_header_problems_are_found(change, problem):
+    problems = security_header_problems(GOOD_HEADERS | change)
+
+    assert any(problem in text for text in problems)
+
+
+def test_server_name_without_version_is_fine():
+    headers = GOOD_HEADERS | {"Server": "alwaysdata"}
+
+    assert security_header_problems(headers) == []
+
+
+def test_cookie_problems():
+    good = "__Host-a=x; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=9"
+
+    assert cookie_problems(good, "__Host-a") == []
+    bad = "a=x; HttpOnly; SameSite=Lax; Path=/app; Domain=example.com"
+    assert cookie_problems(bad, "__Host-a") == [
+        "名前が a（__Host-a のはず）",
+        "Secure がない",
+        "SameSite=Strict でない",
+        "Path=/ でない",
+        "Domain がある",
+    ]
+
+
+def test_leaked_markers():
+    assert leaked_markers(b"SQLite format 3\x00...") == ["SQLite format 3"]
+    assert leaked_markers(b"<html>login</html>") == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://a.example",
+        "https://a.example/",
+        "https://A.example",
+        "a.example",
+    ],
+)
+def test_target_needs_https_origin(url):
+    with pytest.raises(SystemExit):
+        Target(url)
+
+
+# --- 下見の道具（scripts/echo_headers_wsgi.py） ---
+
+
+def test_echo_app_reports_headers_but_hides_cookies():
+    import json
+
+    from scripts.echo_headers_wsgi import application
+
+    statuses = []
+    body = b"".join(
+        application(
+            {
+                "REMOTE_ADDR": "10.0.0.1",
+                "wsgi.url_scheme": "http",
+                "HTTP_X_REAL_IP": "203.0.113.5",
+                "HTTP_COOKIE": "__Host-schedule_session=secret-token",
+                "HTTP_AUTHORIZATION": "Basic secret",
+            },
+            lambda status, headers: statuses.append((status, headers)),
+        )
+    )
+
+    report = json.loads(body)
+    assert statuses[0][0] == "200 OK"
+    assert ("Cache-Control", "no-store") in statuses[0][1]
+    assert report["REMOTE_ADDR"] == "10.0.0.1"
+    assert report["headers"]["HTTP_X_REAL_IP"] == "203.0.113.5"
+    assert b"secret" not in body
+    assert report["workers"] is None
+    assert report["uwsgi_sockets"] is None
+    assert isinstance(report["home_filesystem"], str)
+
+
+# --- 下見（--probe） ---
+
+MAC_ADDRESS = "198.51.100.77"
+
+
+class ProbeTarget(Target):
+    """下見の道具を置いたサイトの代わり。proxy（送ったヘッダー → アプリに
+    届くヘッダー）で、プロキシの振る舞いを決める。"""
+
+    def __init__(self, proxy, python="3.14.10"):
+        super().__init__(PUBLIC_ORIGIN)
+        self.proxy = proxy
+        self.python = python
+
+    def request(self, method, path, headers=None, body=None, *, https=True):
+        received = {}
+        for name, value in self.proxy(dict(headers or {})).items():
+            received["HTTP_" + name.upper().replace("-", "_")] = value
+        report = {
+            "REMOTE_ADDR": "10.0.0.1",
+            "headers": received,
+            "workers": 1,
+            "python": self.python,
+            "sqlite": "3.50.0",
+            "home_filesystem": "ext4",
+            "uwsgi_sockets": {"socket": ["/run/uwsgi/site.sock"]},
+        }
+        return Response(200, [], json.dumps(report).encode())
+
+
+def good_proxy(headers):
+    # 下線の名前を捨て、X-Real-IP と X-Forwarded-Proto を上書きする
+    kept = {k: v for k, v in headers.items() if "_" not in k}
+    return kept | {"X-Real-IP": MAC_ADDRESS, "X-Forwarded-Proto": "https"}
+
+
+def proxy_keeping_underscores(headers):
+    # 下線の名前を、そのまま渡す（アプリには、同じ HTTP_X_REAL_IP に見える）
+    kept = good_proxy(headers)
+    for name, value in headers.items():
+        if "_" in name:
+            kept[name.replace("_", "-")] = value
+    return kept
+
+
+def proxy_trusting_forwarded_for(headers):
+    # 利用者が送った X-Forwarded-For から、X-Real-IP を作る
+    kept = good_proxy(headers)
+    kept["X-Real-IP"] = headers.get("X-Forwarded-For", MAC_ADDRESS)
+    return kept
+
+
+def run_probe(monkeypatch, target, address=MAC_ADDRESS):
+    monkeypatch.setattr("builtins.input", lambda _: address)
+    report = Report()
+    probe_headers(target, report)
+    return report
+
+
+def test_probe_passes_with_good_proxy(monkeypatch, capsys):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy))
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "CLIENT_ADDRESS_HEADER の候補：['X-Real-IP']" in output
+    assert "/run/uwsgi/site.sock" in output
+
+
+@pytest.mark.parametrize(
+    "proxy", [proxy_keeping_underscores, proxy_trusting_forwarded_for]
+)
+def test_probe_finds_fake_addresses(monkeypatch, capsys, proxy):
+    # 偽の値が届くヘッダーは、候補にしない（M3。別の目のレビュー）
+    report = run_probe(monkeypatch, ProbeTarget(proxy))
+
+    assert "候補：なし" in capsys.readouterr().out
+    assert report.failures
+
+
+def test_probe_needs_the_mac_address(monkeypatch, capsys):
+    # 値が、この Mac の公開のアドレスでなければ、候補にしない
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy), "203.0.113.1")
+
+    assert "候補：なし" in capsys.readouterr().out
+    assert report.failures
+
+
+def test_probe_refuses_text_that_is_not_an_address(monkeypatch):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy), "my mac")
+
+    assert report.failures == ["この Mac の公開のアドレス"]
+
+
+def test_probe_needs_new_enough_python(monkeypatch):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy, "3.14.8"))
+
+    assert report.failures == ["Python 3.14.9 以上"]
+
+
+def test_probe_accepts_python_3_14_9_with_a_note(monkeypatch, capsys):
+    # alwaysdata が 3.14.10 を用意するまでは、3.14.9 で進める
+    # （docs/development/deploy.md の「Python の版」）
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy, "3.14.9"))
+
+    assert report.failures == []
+    assert "3.14.10 より古い" in capsys.readouterr().out
+
+
+def test_probe_has_no_note_for_python_3_14_10(monkeypatch, capsys):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy, "3.14.10"))
+
+    assert report.failures == []
+    assert "3.14.10 より古い" not in capsys.readouterr().out
+
+
+def test_rate_limit_check_finds_proxy_keeping_underscores(
+    production_app, monkeypatch, capsys
+):
+    # 下線の名前を捨てないプロキシでは、偽の接続元が届き、11回目も
+    # 429 にならない
+    class UnderscoreTarget(ProxyTarget):
+        def request(self, method, path, headers=None, body=None, **kwargs):
+            sent = dict(headers or {})
+            response = self.client.open(
+                path,
+                method=method,
+                headers={"X-Forwarded-Proto": "https"}
+                | {k: v for k, v in sent.items() if "_" in k}
+                | {k: v for k, v in sent.items() if k == "Origin"},
+                data=body,
+                content_type=sent.get("Content-Type"),
+                base_url=f"http://{PUBLIC_HOST}",
+            )
+            return Response(response.status_code, [], b"")
+
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    report = Report()
+
+    check_rate_limit(UnderscoreTarget(production_app), report)
+
+    assert len(report.failures) == 1
+    # 断られた（400）のではなく、偽の接続元で、試せてしまった（401）
+    assert "[401, 401, 401" in capsys.readouterr().out
+
+
+def test_probe_compares_ipv6_by_64(monkeypatch, capsys):
+    # Mac は、接続ごとに一時的な IPv6 のアドレスを使いうる。同じ /64 なら、
+    # 同じ接続元とみなす（アプリの数え方と同じ）
+    def ipv6_proxy(headers):
+        return good_proxy(headers) | {"X-Real-IP": "2001:db8:1:2::abcd"}
+
+    report = run_probe(
+        monkeypatch, ProbeTarget(ipv6_proxy), "2001:db8:1:2::1234"
+    )
+
+    assert report.failures == [], capsys.readouterr().out
+
+
+def test_probe_explains_ipv4_and_ipv6_mismatch(monkeypatch, capsys):
+    # Mac のアドレスに IPv6 を入れたが、届いたのは IPv4（安全な側の失敗。
+    # 入れ直し方を表示する）
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy), "2001:db8::1")
+
+    assert "IPv4 と IPv6 が違う" in capsys.readouterr().out
+    assert report.failures
+
+
+class RefusingUnderscoreTarget(ProbeTarget):
+    """下線の名前のヘッダーのある要求を、プロキシが400で断る。"""
+
+    def request(self, method, path, headers=None, body=None, *, https=True):
+        if any("_" in name for name in (headers or {})):
+            return Response(400, [], b"<h1>Bad Request</h1>")
+        return super().request(method, path, headers, body, https=https)
+
+
+def test_probe_accepts_proxy_refusing_underscores(monkeypatch, capsys):
+    report = run_probe(monkeypatch, RefusingUnderscoreTarget(good_proxy))
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "プロキシが断った（400。安全）" in output
+    assert "CLIENT_ADDRESS_HEADER の候補：['X-Real-IP']" in output

@@ -44,13 +44,21 @@ LOGIN_ID_WINDOW = timedelta(hours=24)
 CLIENT_LOCK_STEPS = [(10, timedelta(hours=1))]
 CLIENT_WINDOW = timedelta(hours=1)
 
+# 全体の上限：すべての接続元・IDの、直近1時間の失敗の数。これ以上なら、
+# 印のない端末からの試行を、記録も計算もせずに断る（多くの接続元からの
+# 攻撃で、失敗の行（ディスク）と、パスワードの確かめ（CPU）を使い切らせ
+# ないため。IPv6 の /48 を1つ持てば、接続元ごとの制限は、ほぼ効かない）。
+# 印のある端末（app/trusted_devices.py）は、この上限の間もログインできる
+GLOBAL_FAILURE_LIMIT = 300
+GLOBAL_FAILURE_WINDOW = timedelta(hours=1)
+
 # 失敗の行を残す長さ（いちばん長い窓と同じ。その行で始まった制限が
 # まだ続いていれば、終わるまで残す）
 RECORD_RETENTION = timedelta(hours=24)
 
 # 「断るかの判断」と「失敗の記録」を、1つずつ行うための鍵
-# （同じプロセスの中の、同時の要求。クラウドで複数のプロセスで動かす
-# ときは、Task 026 で、DBの側で1つずつにする）
+# （同じプロセスの中の、同時の要求。本番も、ワーカー（プロセス）を1つに
+# して、この鍵で守る。2つ以上なら起動しない（app/production.py））
 ATTEMPT_LOCK = threading.Lock()
 
 
@@ -195,6 +203,16 @@ def reserve_attempt(
         db.session.add(failure)
         db.session.commit()
         return failure, None
+
+
+def too_many_recent_failures(now: datetime) -> bool:
+    """直近1時間の失敗（すべての接続元・ID）が、全体の上限に達したか。"""
+    count = db.session.scalar(
+        db.select(db.func.count())
+        .select_from(LoginFailure)
+        .where(LoginFailure.failed_at > now - GLOBAL_FAILURE_WINDOW)
+    )
+    return count >= GLOBAL_FAILURE_LIMIT
 
 
 def cancel_attempt(failure: LoginFailure) -> None:

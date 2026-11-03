@@ -4,16 +4,20 @@
 - セキュリティのヘッダー（CSPを含む）と、要求ごとのnonce
 - 入れ子が深すぎるJSON
 - テンプレートに、CSPで止まる書き方（インラインのスクリプトなど）がないこと
+- SQL の例外の文に、利用者のデータを入れないこと（hide_parameters）
 """
 import re
+from datetime import date
 from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api_helpers import INVALID_JSON_MESSAGE
 from app.extensions import db
 from app.models.semester import Semester
+from tests.auth_support import TEST_USER_ID
 
 
 TEMPLATE_DIRECTORY = (
@@ -272,8 +276,16 @@ def test_nonce_changes_within_one_app_context(app):
 # --- 入れ子が深すぎるJSON ---
 
 
+# 本文の上限（MAX_CONTENT_LENGTH の64KiB）の中では、Python 3.14 の json が
+# 読める深さ（3万段ほど）までしか送れず、RecursionError にならない。
+# 上限を超える本文は、読む前に413になる（下の test_body_over_limit_…）。
+# ここでは、上限を外して、read_json_object の守り（RecursionError を
+# 400 にする）そのものを確かめる（上限を変えたときの備え）
+
+
 @pytest.mark.parametrize("opening", ["[", '{"name":'])
 def test_too_deeply_nested_json_is_invalid_json(app, client, opening):
+    app.config["MAX_CONTENT_LENGTH"] = None
     # 100万段：Pythonの版（3.14 は 1万段でも読める）によらず、
     # json が RecursionError になる深さ
     depth = 1_000_000
@@ -293,8 +305,9 @@ def test_too_deeply_nested_json_is_invalid_json(app, client, opening):
     assert semester_count(app) == 0
 
 
-def test_too_deeply_nested_json_is_invalid_json_for_patch(client):
+def test_too_deeply_nested_json_is_invalid_json_for_patch(app, client):
     # PATCH（read_patch_object）も、read_json_object を通る
+    app.config["MAX_CONTENT_LENGTH"] = None
     created = client.post("/api/semesters", json=SEMESTER_PAYLOAD)
     semester_id = created.json["id"]
     depth = 1_000_000
@@ -310,6 +323,38 @@ def test_too_deeply_nested_json_is_invalid_json_for_patch(client):
     assert client.get(f"/api/semesters/{semester_id}").json["name"] == (
         SEMESTER_PAYLOAD["name"]
     )
+
+
+def test_body_over_limit_is_too_large_without_reading(app, client):
+    # 本文の上限（64KiB）を超える要求は、読まずに413（APIはJSON）
+    body = "[" * 40_000 + "]" * 40_000
+
+    response = client.post(
+        "/api/semesters", data=body, content_type="application/json"
+    )
+
+    assert response.status_code == 413
+    assert response.json == {
+        "error": {
+            "code": "too_large",
+            "message": "リクエストの本文が大きすぎます",
+        }
+    }
+    assert semester_count(app) == 0
+
+
+def test_body_within_limit_is_read(client):
+    # 上限ちょうどまでは読む（決まりに合わない JSON として400）
+    limit = 64 * 1024
+    body = '{"name": "' + "a" * (limit - 12) + '"}'
+    assert len(body.encode()) == limit
+
+    response = client.post(
+        "/api/semesters", data=body, content_type="application/json"
+    )
+
+    assert response.status_code == 400
+    assert response.json["error"]["code"] == "validation_error"
 
 
 # --- テンプレートの書き方 ---
@@ -367,3 +412,33 @@ def test_cdn_files_in_templates_are_allowed_by_policy(client):
             assert match.group(1) in allowed[directive], tag
 
     assert len(cdn_urls) == 3  # Bootstrap（CSS・JS）と FullCalendar
+
+
+def test_sql_errors_do_not_show_parameters(app):
+    # SQL の例外の文に、SQL の引数（利用者のデータ）を入れない
+    # （hide_parameters。エラーのログから漏らさない）。同じ id の学期を
+    # 2回入れて、一意の制約の例外を起こす
+    secret_name = "secret-name-in-sql-error"
+    with app.app_context():
+        semester = Semester(
+            user_id=TEST_USER_ID,
+            name="学期",
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 7, 31),
+        )
+        db.session.add(semester)
+        db.session.commit()
+        with pytest.raises(IntegrityError) as error:
+            db.session.execute(
+                db.insert(Semester).values(
+                    id=semester.id,
+                    user_id=TEST_USER_ID,
+                    name=secret_name,
+                    start_date=date(2026, 4, 1),
+                    end_date=date(2026, 7, 31),
+                )
+            )
+        db.session.rollback()
+
+    assert secret_name not in str(error.value)
+    assert "hide_parameters" in str(error.value)

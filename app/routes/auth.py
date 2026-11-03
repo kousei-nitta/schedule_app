@@ -5,8 +5,8 @@
 import math
 import threading
 
-from flask import Blueprint, Response, abort, g, redirect, render_template
-from flask import request, url_for
+from flask import Blueprint, Response, abort, current_app, g, redirect
+from flask import render_template, request, url_for
 
 from app import clock
 from app.auth import auth_logger, client_address, current_user
@@ -18,12 +18,24 @@ from app.login_limits import (
     keyed_digest,
     remaining_minutes,
     reserve_attempt,
+    too_many_recent_failures,
 )
 from app.models.user import User
 from app.passwords import (
     MAX_PASSWORD_INPUT_LENGTH,
     is_valid_username,
     verify_password,
+)
+from app.trusted_devices import (
+    cancel_device_attempt,
+    clear_device_cookie,
+    end_all_devices,
+    find_trusted_device,
+    forget_device_token,
+    issue_device_token,
+    remove_device_if_exhausted,
+    reserve_device_attempt,
+    set_device_cookie,
 )
 from app.user_sessions import (
     clear_session_cookie,
@@ -72,8 +84,12 @@ CLEAR_SITE_DATA = '"storage"'
 
 # パスワードの確かめ（scrypt。1回に32MiBのメモリー）を、同時にいくつまで
 # 行うか。ログインの前に重い計算をさせて、サーバーのメモリーやCPUを
-# 使い切らせないため。空かなければ、待つ時間（秒）のあと、断る（503）
-PASSWORD_CHECK_SLOTS = threading.BoundedSemaphore(2)
+# 使い切らせないため。空かなければ、待つ時間（秒）のあと、断る（503）。
+# 印のない端末の道と、印のある端末の道（app/trusted_devices.py）で、
+# 別に1つずつ持つ（合わせて2つ）。多くの接続元から、印のない道を
+# ふさがれても、本人の端末（印のある道）は、ログインできるように
+PASSWORD_CHECK_SLOTS = threading.BoundedSemaphore(1)
+TRUSTED_PASSWORD_CHECK_SLOTS = threading.BoundedSemaphore(1)
 PASSWORD_CHECK_WAIT_SECONDS = 5
 
 
@@ -140,12 +156,33 @@ def login():
     return render_login(reload_once=opened_from_other_site())
 
 
+def remove_exhausted_device(device_id: int, user_id: int) -> None:
+    """印の失敗が上限に達していれば、印を消し、ログに残す。
+
+    印で続けて失敗した。印が盗まれ、パスワードやIDを試されているかも
+    しれない。この印は、もう使えない。
+    """
+    if remove_device_if_exhausted(device_id):
+        auth_logger.warning(
+            "端末の印を、続けての失敗で無効にしました"
+            "（利用者：%s、接続元：%r）",
+            user_id,
+            client_address(),
+        )
+
+
 def attempt_login():
     """ログインを試す（POST /login）。
 
-    順序：①試行の制限を確かめ、先に失敗として記録する ②パスワードを
-    確かめる（IDがあってもなくても、同じ計算をする）③合っていれば、
-    記録を消し、新しいトークンで、ログイン中の端末を作る。
+    2つの道がある（docs/architecture/security.md の「ログインの試行の制限」）。
+    - 印のある道：この端末に、打ち込まれたIDの利用者の、有効な印がある。
+      IDごと・接続元ごとの制限と、全体の上限を当てない。パスワードを
+      確かめる前に、印の失敗の数を、先に1つ増やす
+    - 印のない道（ふつう）：全体の上限 → 試行の制限を確かめ、先に失敗と
+      して記録する
+    そのあと、パスワードを確かめる（IDがあってもなくても、同じ計算をする）。
+    合っていれば、記録を消し、新しいトークンでログイン中の端末を作り、
+    印を作り替える。
     決まりに合わないID（ありえないID）と、長すぎるパスワードは、計算せずに
     失敗にする（決まりは公開しているため、時間で分かっても、何も漏れない）。
     """
@@ -162,33 +199,62 @@ def attempt_login():
     now = clock.utc_now()
     login_id_digest = keyed_digest("login_id", login_id)
     client_digest = keyed_digest("client", client_key(request.remote_addr))
-
-    failure, locked_until = reserve_attempt(
-        login_id_digest, client_digest, now
+    device_token = request.cookies.get(
+        current_app.config["DEVICE_COOKIE_NAME"]
     )
-    if locked_until is not None:
-        auth_logger.warning(
-            "ログインを断りました（試行の制限。接続元：%r）",
-            client_address(),
+
+    device = find_trusted_device(device_token, login_id, now)
+    if device is not None and not device.login_id_matches:
+        # 有効な印が、持ち主と違うIDと一緒に届いた（打ち間違い、または
+        # 盗まれた印）。印のない道で扱うが、印の失敗にも数える（印の
+        # ある道とそうでない道の応答の違いから、持ち主のIDを探らせない。
+        # 試せる候補は、印の5回まで）
+        if reserve_device_attempt(device.device_id, now):
+            remove_exhausted_device(device.device_id, device.user_id)
+        device = None
+    trusted = device is not None and reserve_device_attempt(
+        device.device_id, now
+    )
+    failure = None
+    if trusted:
+        slots = TRUSTED_PASSWORD_CHECK_SLOTS
+    else:
+        if too_many_recent_failures(now):
+            # 記録も計算もしない（失敗の行と、CPUを使わせない）
+            auth_logger.warning(
+                "ログインを断りました（失敗が多いため、全体の上限。"
+                "接続元：%r）",
+                client_address(),
+            )
+            return render_login(LOGIN_BUSY_MESSAGE, 503)
+        failure, locked_until = reserve_attempt(
+            login_id_digest, client_digest, now
         )
-        message = LOGIN_LOCKED_MESSAGE.format(
-            wait=wait_text(remaining_minutes(locked_until, now))
-        )
-        return render_login(message, 429)
+        if locked_until is not None:
+            auth_logger.warning(
+                "ログインを断りました（試行の制限。接続元：%r）",
+                client_address(),
+            )
+            message = LOGIN_LOCKED_MESSAGE.format(
+                wait=wait_text(remaining_minutes(locked_until, now))
+            )
+            return render_login(message, 429)
+        slots = PASSWORD_CHECK_SLOTS
 
     # 利用者と、パスワードが合ったか。決まりに合わない入力は、確かめずに
-    # 失敗のまま
+    # 失敗のまま（印のある道は、IDが印の持ち主と一致したので、決まりに合う）
     user = None
     password_matches = False
     if (
         is_valid_username(login_id)
         and len(password) <= MAX_PASSWORD_INPUT_LENGTH
     ):
-        if not PASSWORD_CHECK_SLOTS.acquire(
-            timeout=PASSWORD_CHECK_WAIT_SECONDS
-        ):
+        if not slots.acquire(timeout=PASSWORD_CHECK_WAIT_SECONDS):
             # 確かめなかったので、失敗に数えない
-            cancel_attempt(failure)
+            if trusted:
+                cancel_device_attempt(device.device_id)
+            else:
+                cancel_attempt(failure)
             auth_logger.warning(
                 "ログインを断りました（混雑。接続元：%r）", client_address()
             )
@@ -202,31 +268,49 @@ def attempt_login():
             else:
                 verify_password(DUMMY_PASSWORD_HASH, password)
         finally:
-            PASSWORD_CHECK_SLOTS.release()
+            slots.release()
 
+    path_text = "印のある端末" if trusted else "印のない端末"
     if not password_matches:
+        # ログに出す利用者。印のある道では、長すぎるパスワードで確かめを
+        # 飛ばしても（user が None）、印の持ち主が分かっている
+        if trusted:
+            user_text = device.user_id
+        elif user is not None:
+            user_text = user.id
+        else:
+            user_text = "不明なID"
         auth_logger.warning(
-            "ログインに失敗しました（利用者：%s、接続元：%r）",
-            user.id if user is not None else "不明なID",
+            "ログインに失敗しました（利用者：%s、%s、接続元：%r）",
+            user_text,
+            path_text,
             client_address(),
         )
+        if trusted:
+            remove_exhausted_device(device.device_id, device.user_id)
         return render_login(LOGIN_FAILED_MESSAGE, 401)
 
-    # 成功：この接続元からの、このIDの失敗の記録を消す。この端末の前の
-    # ログインがあれば消し、新しいトークンにする（ログインの前に仕込まれた
-    # トークンを、そのまま使わせない）
-    forget_failures(login_id_digest, client_digest)
+    # 成功：印のない道では、この接続元からの、このIDの失敗の記録を消す。
+    # この端末の前のログインがあれば消し、新しいトークンにする（ログインの
+    # 前に仕込まれたトークンを、そのまま使わせない）。この端末の印を、
+    # 作り替える（同じ利用者の古い印は消す）
+    if not trusted:
+        forget_failures(login_id_digest, client_digest)
     if g.get("user_session") is not None:
         db.session.delete(g.user_session)
+    forget_device_token(device_token, user.id)
     token = start_session(user.id)
+    new_device_token = issue_device_token(user.id, now)
     db.session.commit()
     auth_logger.info(
-        "ログインしました（利用者：%s、接続元：%r）",
+        "ログインしました（利用者：%s、%s、接続元：%r）",
         user.id,
+        path_text,
         client_address(),
     )
     response = redirect("/", code=303)
     set_session_cookie(response, token)
+    set_device_cookie(response, new_device_token)
     return response
 
 
@@ -249,6 +333,9 @@ def logout_all():
     """すべての端末で、ログアウトする（スマホをなくしたときなど）。"""
     user_id = current_user().id
     count = end_all_sessions(user_id)
+    # 端末の印も、すべて消す（なくした端末の印で、IDごとの制限を外して
+    # 試されないため）。この端末の印の Cookie も消す
+    end_all_devices(user_id)
     db.session.commit()
     auth_logger.info(
         "すべての端末でログアウトしました（利用者：%s、%s台、接続元：%r）",
@@ -256,4 +343,6 @@ def logout_all():
         count,
         client_address(),
     )
-    return logged_out_response()
+    response = logged_out_response()
+    clear_device_cookie(response)
+    return response
