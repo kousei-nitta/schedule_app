@@ -304,9 +304,25 @@ def test_probe_refuses_text_that_is_not_an_address(monkeypatch):
 
 
 def test_probe_needs_new_enough_python(monkeypatch):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy, "3.14.8"))
+
+    assert report.failures == ["Python 3.14.9 以上"]
+
+
+def test_probe_accepts_python_3_14_9_with_a_note(monkeypatch, capsys):
+    # alwaysdata が 3.14.10 を用意するまでは、3.14.9 で進める
+    # （docs/development/deploy.md の「Python の版」）
     report = run_probe(monkeypatch, ProbeTarget(good_proxy, "3.14.9"))
 
-    assert report.failures == ["Python 3.14.10 以上"]
+    assert report.failures == []
+    assert "3.14.10 より古い" in capsys.readouterr().out
+
+
+def test_probe_has_no_note_for_python_3_14_10(monkeypatch, capsys):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy, "3.14.10"))
+
+    assert report.failures == []
+    assert "3.14.10 より古い" not in capsys.readouterr().out
 
 
 def test_rate_limit_check_finds_proxy_keeping_underscores(

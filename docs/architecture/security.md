@@ -282,7 +282,7 @@ KomaのMacの方針。
 | 項目 | 方針 |
 |---|---|
 | Python | 3.14（`docs/decisions/0003-python-3-14.md`）。pyenv で入れ、プロジェクトの `.venv` を、その版で作る。3.14 のセキュリティの修正版が出たら、上げる（公開から2週間の規則に従う。急ぎのセキュリティの修正は、Komaが判断して例外にする）。上げたら、`.venv` を作り直す |
-| pip・certifi | eMudhra の件（2026-10-20 公表。侵害された中間CA）に対応した版（pip 26.2.2 以降・certifi 2026.10.19 以降）。Python 3.14.10 以降は、`ssl` も侵害された鍵を拒む |
+| pip・certifi | eMudhra の件（2026-10-20 公表。侵害された中間CA）に対応した版（pip 26.2.2 以降・certifi 2026.10.19 以降）。Python 3.14.10 以降は、`ssl` も侵害された鍵を拒む（本番は、3.14.10 が用意されるまで、pip をハッシュと照らして上げる。`development/deploy.md` の「Python の版」） |
 | Node.js | 入れない（ESLintはCIが確かめ、MacのE2EはCDNから読むため、要らない。更新するものを減らす） |
 | ブラウザ | 最新にする（アプリを開くブラウザが、ほかのサイトからの攻撃を止める仕組みを持つため） |
 
@@ -299,6 +299,7 @@ Python の修正版を上げるときの手順（例：3.14.10 → 3.14.11）：
 | 通信 | HTTP（Macの中だけ） | HTTPS（ホストの「Force HTTPS」と、HSTS）。`https` でない要求は400 |
 | Cookie | `Secure` なし、名前 `schedule_session`・`schedule_device` | `Secure`、名前 `__Host-schedule_session`・`__Host-schedule_device` |
 | サーバー | Flaskの開発用サーバー（`run.py`） | ホストの uWSGI（`wsgi.py`。本番の設定がなければ起動しない）。ワーカーは1つ。デバッグモード・`run.py`・`flask run` は起動しない |
+| Python | 3.14.10 以上（pyenv。ADR 0003） | alwaysdata が用意する 3.14 の修正版。3.14.10 が用意されるまでは 3.14.9（eMudhra の件への対策を手順書に書いた。`development/deploy.md` の「Python の版」。roadmap の 026-L3） |
 | 秘密 | `SECRET_KEY`（`instance/secret_key`。Gitに入らない） | 設定のファイル（600。リポジトリとDBのフォルダの外）の `SECRET_KEY` だけ |
 | DB・バックアップ | `instance/app.db`、`instance/backups/`（起動のときに1日1回） | `~/schedule_data/app.db`（フォルダは700、ファイルは600）、`backups/`（定期実行で1日1回）。ホストの3日分 |
 

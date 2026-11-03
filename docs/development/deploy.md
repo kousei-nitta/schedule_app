@@ -22,7 +22,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
 2. 管理画面のパスワードは、ほかで使っていない長いものにする。登録したメールアドレス（アカウントの復旧の経路）のパスワードも、別の長いものにする
 3. 管理画面の2段階認証（TOTP）を有効にする（「Profile」の2段階認証）
 4. SSH：「Remote access > SSH」で、SSH を使えるようにする。Mac で鍵を作り（`ssh-keygen -t ed25519`。パスフレーズを付ける）、公開鍵（`~/.ssh/id_ed25519.pub`）を、サーバーの `~/.ssh/authorized_keys` に入れる。鍵で入れることを確かめたら、SSH のパスワードでのログインを切れるなら切る
-5. 「Environment > Python」で、既定の Python を 3.14 にする。SSH で `python --version` が 3.14.10 以上であること（`architecture/security.md` の「開発の環境」の版の理由と同じ）
+5. 「Environment > Python」で、既定の Python を 3.14 にする。SSH で `python --version` が 3.14.9 以上であること（3.14.10 以上が望ましい。alwaysdata が 3.14.10 以上を用意するまでは、3.14.9 で進める。下の「Python の版」）
 6. 管理画面には、最初の1年は120日に1回、そのあとは6か月に1回、ログインする（しないと、サイトが止まる。カレンダーに予定を入れておく）
 
 ## 2. 下見（実データを入れる前。架空のデータで）
@@ -54,7 +54,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    python3.14 scripts/check_public.py --probe https://<アカウント名>.alwaysdata.net
    ```
    - スクリプトは、偽の接続元を、ふつうの名前（`X-Real-IP`）と下線の名前（`X_Real_IP`）で送り、偽の値が届かず、この Mac のアドレスになるヘッダーを「候補」として出す。候補を `CLIENT_ADDRESS_HEADER` にする（ふつうは `X-Real-IP`）。候補が「なし」なら、止まって相談する
-   - ✗ があれば（Python が 3.14.10 より古い、ワーカーが1つでない、ホームのファイルシステムがネットワーク上（`nfs` など）、`X-Forwarded-Proto` が https に上書きされない）、止まって相談する
+   - ✗ があれば（Python が 3.14.9 より古い、ワーカーが1つでない、ホームのファイルシステムがネットワーク上（`nfs` など）、`X-Forwarded-Proto` が https に上書きされない）、止まって相談する
    - 「この Mac のアドレスと違う」と出たら、IPv4 と IPv6 の違いかもしれない。表示された値と同じ種類のアドレス（IPv4：`curl -4 https://api.ipify.org`、IPv6：`curl -6 https://api64.ipify.org`）で、入れ直す
    - 最後の行の「uWSGI の待ち受け」を、Claude に伝える（共有のサーバーの、ほかの利用者が、プロキシを通らずにアプリへ直接つなげるかを判断する）。伝えるときは、アカウント名を `<アカウント名>` に、Mac のアドレスを伏せる
 4. すぐに、サイトの Application path を `/home/<アカウント名>/schedule_app/wsgi.py` に変える（下見の道具を、公開したままにしない）
@@ -65,9 +65,11 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    cd ~/schedule_app
    python -m venv .venv
    . .venv/bin/activate
-   python -m pip install pip==26.2.2
+   python -m pip install --only-binary :all: --require-hashes -r <(echo "pip==26.2.2 --hash=sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70")
+   pip --version                  # pip 26.2.2
    pip install --only-binary :all: -r requirements.txt
    ```
+   pip を上げる行は、PyPI が公開している pip 26.2.2 のファイルのハッシュ（SHA-256）と照らして入れる。3.14.9 に付いてくる古い pip は、eMudhra の件（侵害された中間CAの鍵）に対応していないため、通信を乗っ取られて偽の pip を入れられないように（下の「Python の版」）。「THESE PACKAGES DO NOT MATCH THE HASHES」と出たら、止まって相談する
 2. DB のフォルダと、設定のファイルを作る。`SECRET_KEY` は、画面に出さずに、ファイルの中で作る（コマンドの履歴に残さない）
    ```sh
    mkdir -m 700 ~/schedule_data
@@ -133,6 +135,13 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
 5. SSH で：`ls -la ~/schedule_data ~/.config/schedule_app`（DBとフォルダが、自分だけの権限。`backups` は、まだなくてよい）、`ls -la ~/admin/logs/*/ | head`（ログが日ごとに分かれ、古いものが消えるかを見て、Claude に伝える）、`ps aux | grep -c uwsgi`（ほかの利用者のプロセスが見えるか）
 6. 下見の DB は、まだ消さない（消すのは、移行の手順で、サイトを止めたあと）
 
+### Python の版
+- 本番の Python は、alwaysdata が用意する 3.14 の修正版から選ぶ（サイト（uWSGI）は、alwaysdata の Python で動く）。2026-11-03 の時点では 3.14.9 で、セキュリティの修正版の 3.14.10（2026-10-25）は、まだない。3.14.10 以上が用意されるまで、3.14.9 で進める（Koma の承認、2026-11-03。ADR 0005 の「影響」。roadmap の 026-L3）
+- 3.14.10 の3つのセキュリティの修正のうち、本番に関係するのは、eMudhra の件（`ssl` が、侵害された中間CAの鍵を拒む）だけ（`tarfile`・`http.cookiejar` は使わない。利用者からの HTTPS は、alwaysdata のプロキシが受ける）。本番の Python から外へつなぐのは、次の2つ
+  - pip を上げる1回目：上の、ハッシュと照らす手順で守る（pip 26.2.2 は、この件に対応済み。そのあとのライブラリの取得も守られる）
+  - `set-password`・`create-user` の、漏えいしたパスワードの確認：3.14.10 以上に上げるまで、本番で、本物のパスワードの `set-password`・`create-user` を使わない（通信を乗っ取られると、パスワードのハッシュの先頭5文字が漏れうる）。本物のパスワードは、Mac で決めたものを、移行の写しで運ぶ。下見の架空のパスワードは、使ってよい。端末をなくしたなど、急ぎでやむをえないときは、使ってよい（漏れうるのは、先頭5文字だけ）
+- alwaysdata の更新履歴（`https://changelog.alwaysdata.com/`）を、ときどき見る。3.14.10 以上が出たら、上げる（下の「4. 更新」の「Python の修正版を上げる」）
+
 ## 3. 実データの移行（PR のマージのあと、1回だけ）
 1. Mac：サーバー（`run.py`）を止め、`main` に切り替えて新しくする（`git switch main && git pull`）
 2. Mac：手動のバックアップと、移行の写しを作る。写しは、リポジトリの外の、同期しないフォルダに作る（iCloud Drive の「デスクトップと書類」・Dropbox などの中に置かない。写しには、実データの全部と、パスワードのハッシュが入るため）
@@ -188,6 +197,23 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    ```
 4. 管理画面で、サイトを動かす（Enable）。Mac で `python3.14 scripts/check_public.py https://...`
 5. 戻すとき：`git checkout <前のコミット>` で再起動する。DB を戻すなら、下の「バックアップから戻す」
+
+### Python の修正版を上げる（alwaysdata が新しい 3.14.x を用意したとき）
+1. 管理画面の「Environment > Python」と、サイトの「Python version」で、新しい版を選べるかを見る（選べる版は、alwaysdata が決める）
+2. 管理画面で、サイトを止める（Disable）
+3. 本番（SSH）：`.venv` を作り直す（`.venv` には、入れたライブラリだけがある。DB と設定のファイルは別の場所なので、消してよい）
+   ```sh
+   cd ~/schedule_app
+   python --version                # 新しい版（3.14.10 以上）
+   rm -rf .venv
+   python -m venv .venv
+   . .venv/bin/activate
+   python -m pip install --only-binary :all: --require-hashes -r <(echo "pip==26.2.2 --hash=sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70")
+   pip install --only-binary :all: -r requirements.txt
+   flask --app app show-settings   # 1行目が「環境：本番」。Python の版
+   ```
+4. 管理画面で、サイトの Python の版を合わせ、サイトを動かす（Enable）。Mac で `python3.14 scripts/check_public.py https://...`（`--probe` は、下見の道具を置いたときだけ）
+5. 3.14.10 以上になったら、Claude に伝える（roadmap の 026-L3 を閉じ、上の「Python の版」の注意を消す）
 
 ## 5. バックアップ
 - 毎日：管理画面の「Advanced > Scheduled tasks」で、毎日1回の定期実行を作る。時刻は、サーバーの3時17分ごろ（パリの時刻。日本の昼で、夏時間でも日本の日付がずれない）

@@ -100,8 +100,11 @@ UNDERSCORE_NAMES = {
     "X-Client-IP": "X_Client_IP",
     "X-Forwarded-Proto": "X_Forwarded_Proto",
 }
-# Python の版の下限（docs/architecture/security.md の「開発の環境」）
-MIN_PYTHON = (3, 14, 10)
+# 本番の Python の版の下限と、望ましい版（docs/development/deploy.md の
+# 「Python の版」）。3.14.10 はセキュリティの修正版だが、alwaysdata が用意
+# するまでは、3.14.9 で進める（Koma の承認、2026-11-03。roadmap の 026-L3）
+MIN_PYTHON = (3, 14, 9)
+WANTED_PYTHON = (3, 14, 10)
 
 
 @dataclass
@@ -654,9 +657,14 @@ def probe_headers(target: Target, report: Report) -> None:
     print(f"Python：{python}、SQLite：{seen.get('sqlite')}")
     report.check(
         version_tuple(python) >= MIN_PYTHON,
-        "Python 3.14.10 以上",
+        "Python 3.14.9 以上",
         repr(python),
     )
+    if MIN_PYTHON <= version_tuple(python) < WANTED_PYTHON:
+        print(
+            "  （3.14.10 より古い。alwaysdata が 3.14.10 以上を用意したら"
+            "上げる。docs/development/deploy.md の「Python の版」）"
+        )
     filesystem = str(seen.get("home_filesystem"))
     report.check(
         not filesystem.startswith(("nfs", "cifs", "smb", "fuse", "9p")),
