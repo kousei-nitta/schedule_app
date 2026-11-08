@@ -100,6 +100,18 @@ UNDERSCORE_NAMES = {
     "X-Client-IP": "X_Client_IP",
     "X-Forwarded-Proto": "X_Forwarded_Proto",
 }
+# ホストの中だけで使うアドレス（REMOTE_ADDR が、プロキシのものかを見る）
+INTERNAL_NETWORKS = [
+    ipaddress.ip_network(network)
+    for network in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "fc00::/7",
+        "::1/128",
+    )
+]
 # 本番の Python の版の下限と、望ましい版（docs/development/deploy.md の
 # 「Python の版」）。3.14.10 はセキュリティの修正版だが、alwaysdata が用意
 # するまでは、3.14.9 で進める（Koma の承認、2026-11-03。roadmap の 026-L3）
@@ -282,27 +294,109 @@ def same_client(address, my_address) -> bool:
     return address == my_address
 
 
-def address_header_state(received: list[str | None], my_address) -> str:
-    """接続元のヘッダーに届いた値（偽りかたごと）から、使えるかを決める。
+# ヘッダーの判定の結果（「使える」のは、この2つ）
+USABLE = "使える"
+USABLE_MERGED = "使える（下線の名前は混ざり、アプリが400で断る）"
 
-    使える（"使える"）のは、どの要求でも、偽の値が混ざらず、値が1つの
-    アドレスで、この Mac の公開のアドレスと同じ接続元のとき。
+
+def list_values(value: str) -> list[str]:
+    """カンマで区切った値を、1つずつにする（uWSGI は、同じ名前になる
+    ヘッダーを「, 」でつないで1つにする。X-Real-IP と X_Real_IP など）。"""
+    return [part.strip() for part in value.split(",")]
+
+
+def hyphen_value_state(value: str | None, my_address) -> str:
+    """ふつうの名前で偽の値を送った要求に、届いた値を調べる。
+
+    プロキシが上書きしていれば、値は1つで、この Mac のアドレスになる。
     """
-    if any(v is not None and FAKE_ADDRESS_PREFIX in v for v in received):
+    if value is None:
+        return "届かない（使えない）"
+    if FAKE_ADDRESS_PREFIX in value:
         return "偽の値が届く（使えない）"
-    if any(v is None for v in received):
-        return "届かないことがある（使えない）"
-    addresses = [parse_address(v) for v in received]
-    if any(
-        a is not None and a.version != my_address.version for a in addresses
-    ):
+    address = parse_address(value)
+    if address is not None and address.version != my_address.version:
         return (
             "IPv4 と IPv6 が違う（届いた値と同じ種類の、この Mac の"
             "アドレスで、入れ直す）"
         )
-    if not all(same_client(a, my_address) for a in addresses):
+    if not same_client(address, my_address):
         return "この Mac のアドレスと違う（使えない）"
-    return "使える"
+    return USABLE
+
+
+def underscore_value_state(value: str | None, my_address) -> str:
+    """下線の名前（X_Real_IP など）で偽の値を送った要求に、届いた値を
+    調べる。
+
+    WSGI では、X-Real-IP と X_Real_IP が同じ HTTP_X_REAL_IP になる。
+    - 値が1つで、この Mac のアドレス：プロキシが、下線の名前を捨てた
+    - 値が2つ以上で、この Mac のアドレスを含む：下線の名前がプロキシを
+      通り、uWSGI が、プロキシの付けた本物の値とつないだ。アプリは、
+      値が1つでないと400で断る（app/proxy.py）ため、偽った人は、自分の
+      要求を止めるだけ
+    - 偽の値だけ：偽れる（使えない）
+    """
+    if value is None:
+        return "届かない（使えない）"
+    parts = list_values(value)
+    if len(parts) == 1:
+        if same_client(parse_address(parts[0]), my_address):
+            return USABLE
+        return "下線の名前で偽れる（使えない）"
+    if any(same_client(parse_address(part), my_address) for part in parts):
+        return USABLE_MERGED
+    return "下線の名前で偽れる（使えない）"
+
+
+def address_header_state(
+    hyphen_value: str | None,
+    underscore_value: str | None,
+    my_address,
+    *,
+    underscore_sent: bool = True,
+) -> str:
+    """接続元のヘッダーが、CLIENT_ADDRESS_HEADER に使えるかを決める。
+
+    underscore_sent が False なのは、下線の名前の要求を、プロキシが断った
+    とき（偽の値は、アプリに届かない）。
+    """
+    state = hyphen_value_state(hyphen_value, my_address)
+    if state != USABLE or not underscore_sent:
+        return state
+    return underscore_value_state(underscore_value, my_address)
+
+
+def proto_state(hyphen_value: str | None, underscore_value: str | None,
+                *, underscore_sent: bool = True) -> str | None:
+    """X-Forwarded-Proto が、偽れないかを調べる（問題がなければ None）。
+
+    ふつうの名前で http を送っても、ちょうど https になること。下線の
+    名前で http を送ったときは、https（捨てられた）か、混ざった値
+    （http, https。アプリは https ちょうどでないと400で断る）なら安全。
+    """
+    if hyphen_value != "https":
+        return f"ふつうの名前の http が、上書きされない（{hyphen_value!r}）"
+    if not underscore_sent or underscore_value == "https":
+        return None
+    if underscore_value is not None and len(list_values(underscore_value)) > 1:
+        return None
+    return f"下線の名前の http が、そのまま届く（{underscore_value!r}）"
+
+
+def remote_addr_state(values: list[str | None], my_address) -> str:
+    """REMOTE_ADDR（アプリに実際につないできた相手）の形を調べる。"""
+    addresses = [parse_address(v) for v in values]
+    if all(same_client(a, my_address) for a in addresses):
+        return USABLE
+    if all(
+        a is not None and any(a in network for network in INTERNAL_NETWORKS)
+        for a in addresses
+    ):
+        if len({str(a) for a in addresses}) == 1:
+            return "内部のアドレス（プロキシ）。毎回同じ"
+        return "内部のアドレス（プロキシ）。要求ごとに違う"
+    return "そのほか"
 
 
 def version_tuple(text: str) -> tuple[int, ...]:
@@ -548,8 +642,36 @@ def check_logged_in(target: Target, report: Report) -> None:
     )
 
 
+def spoofed_login(target: Target, spoofed: dict[str, str]) -> int:
+    """存在しないIDで、1回ログインに失敗する（接続元を偽るヘッダー付き）。"""
+    response = target.request(
+        "POST",
+        "/login",
+        target.same_origin_headers()
+        | {"Content-Type": LOGIN_FORM}
+        | spoofed,
+        login_form(f"check-{secrets.token_hex(6)}", secrets.token_hex(8)),
+    )
+    return response.status
+
+
+def random_fake_address() -> str:
+    return f"{FAKE_ADDRESS_PREFIX}{secrets.randbelow(250) + 1}"
+
+
 def check_rate_limit(target: Target, report: Report) -> None:
-    """接続元を偽るヘッダーを付けても、接続元ごとの制限が働くか。"""
+    """接続元を偽るヘッダーを付けても、接続元ごとの制限が働くか。
+
+    1. ふつうの名前（X-Real-IP など）で、毎回ちがう偽の接続元を送る。
+       プロキシが上書きするので、アプリには Mac の接続元が届き、11回目は
+       429 になる
+    2. 続けて、下線の名前（X_Real_IP など）だけで、偽の接続元を送る。
+       プロキシが捨てれば、Mac の接続元（もう制限中）で 429。uWSGI が
+       本物の値とつなげば、アプリが400で断る。どちらでもない（401）なら、
+       偽の接続元で、試せてしまっている
+    （1と2を同じ要求に入れると、混ざった値で毎回400になり、制限が働くか
+    を確かめられないため、分けて送る）
+    """
     answer = input(
         "この点検は、存在しないIDで11回失敗し、この Mac の接続元を、"
         "1時間ログインできなくします（端末の印のある端末は使えます）。"
@@ -560,24 +682,26 @@ def check_rate_limit(target: Target, report: Report) -> None:
         return
     statuses = []
     for _ in range(11):
-        fake = f"{FAKE_ADDRESS_PREFIX}{secrets.randbelow(250) + 1}"
+        fake = random_fake_address()
         spoofed = {"Forwarded": f"for={fake}"}
-        for name in ADDRESS_HEADERS:
-            spoofed[name] = fake
-            spoofed[UNDERSCORE_NAMES[name]] = fake
-        response = target.request(
-            "POST",
-            "/login",
-            target.same_origin_headers()
-            | {"Content-Type": LOGIN_FORM}
-            | spoofed,
-            login_form(f"check-{secrets.token_hex(6)}", secrets.token_hex(8)),
-        )
-        statuses.append(response.status)
+        spoofed |= {name: fake for name in ADDRESS_HEADERS}
+        statuses.append(spoofed_login(target, spoofed))
+    print(f"  （ふつうの名前の要求：{statuses}）")
     report.check(
-        statuses[-1] == 429,
+        statuses[:10] == [401] * 10 and statuses[10] == 429,
         "接続元を偽っても、接続元ごとの制限が働く（11回目は 429）",
         str(statuses),
+    )
+    underscore_statuses = []
+    for _ in range(3):
+        fake = random_fake_address()
+        spoofed = {UNDERSCORE_NAMES[name]: fake for name in ADDRESS_HEADERS}
+        underscore_statuses.append(spoofed_login(target, spoofed))
+    print(f"  （下線の名前の要求：{underscore_statuses}）")
+    report.check(
+        all(status in (400, 429) for status in underscore_statuses),
+        "下線の名前で偽っても、試せない（400 か 429）",
+        str(underscore_statuses),
     )
 
 
@@ -628,28 +752,46 @@ def probe_headers(target: Target, report: Report) -> None:
             )
             return
     seen = reports[0]
-    print(f"REMOTE_ADDR：{seen.get('REMOTE_ADDR')!r}")
+    underscore_sent = len(reports) == 2
     candidates = []
+    # REMOTE_ADDR が、この Mac のアドレスなら、いちばんよい（ヘッダーを
+    # 信じなくてよい。プロキシを通らずにつながれても、偽れない）
+    remote_addrs = [r.get("REMOTE_ADDR") for r in reports]
+    state = remote_addr_state(remote_addrs, my_address)
+    print(f"REMOTE_ADDR：{remote_addrs!r} … {state}")
+    if state == USABLE:
+        candidates.append("REMOTE_ADDR")
     for name in ADDRESS_HEADERS:
         received = [
             r.get("headers", {}).get(environ_key(name)) for r in reports
         ]
-        state = address_header_state(received, my_address)
+        state = address_header_state(
+            received[0],
+            received[1] if underscore_sent else None,
+            my_address,
+            underscore_sent=underscore_sent,
+        )
         print(f"{name}：{received!r} … {state}")
-        if state == "使える":
+        if state in (USABLE, USABLE_MERGED):
             candidates.append(name)
     print(f"CLIENT_ADDRESS_HEADER の候補：{candidates or 'なし'}")
     protos = [
         r.get("headers", {}).get("HTTP_X_FORWARDED_PROTO") for r in reports
     ]
-    report.check(
-        all(proto == "https" for proto in protos),
-        "X-Forwarded-Proto が https に上書きされる（下線の名前を含む）",
-        repr(protos),
+    problem = proto_state(
+        protos[0],
+        protos[1] if underscore_sent else None,
+        underscore_sent=underscore_sent,
     )
     report.check(
+        problem is None,
+        "X-Forwarded-Proto を偽れない（下線の名前を含む）",
+        problem or "",
+    )
+    print(f"  （届いた値：{protos!r}）")
+    report.check(
         bool(candidates),
-        "接続元のヘッダーに、偽の値が届かず、この Mac のアドレスになる",
+        "接続元を偽れない（ヘッダーか REMOTE_ADDR の候補がある）",
     )
     report.check(seen.get("workers") == 1, "uWSGI のワーカーが1つ",
                  repr(seen.get("workers")))

@@ -5,6 +5,7 @@
 アプリの振る舞いが合っていることを確かめる。判定の関数は、作った応答で
 確かめる。
 """
+import ipaddress
 import json
 
 import pytest
@@ -16,9 +17,12 @@ from scripts.check_public import (
     Target,
     check_basics,
     check_logged_in,
+    address_header_state,
     check_rate_limit,
     cookie_problems,
     probe_headers,
+    proto_state,
+    remote_addr_state,
     leaked_markers,
     security_header_problems,
 )
@@ -217,19 +221,25 @@ MAC_ADDRESS = "198.51.100.77"
 
 class ProbeTarget(Target):
     """下見の道具を置いたサイトの代わり。proxy（送ったヘッダー → アプリに
-    届くヘッダー）で、プロキシの振る舞いを決める。"""
+    届くヘッダーの組の一覧）で、プロキシの振る舞いを決める。同じ名前に
+    なるヘッダーは、uWSGI と同じく「, 」でつなぐ。"""
 
-    def __init__(self, proxy, python="3.14.10"):
+    def __init__(self, proxy, python="3.14.10", remote_addr="fd00::1"):
         super().__init__(PUBLIC_ORIGIN)
         self.proxy = proxy
         self.python = python
+        self.remote_addr = remote_addr
 
     def request(self, method, path, headers=None, body=None, *, https=True):
         received = {}
-        for name, value in self.proxy(dict(headers or {})).items():
-            received["HTTP_" + name.upper().replace("-", "_")] = value
+        for name, value in self.proxy(dict(headers or {})):
+            key = "HTTP_" + name.upper().replace("-", "_")
+            if key in received:
+                received[key] += ", " + value
+            else:
+                received[key] = value
         report = {
-            "REMOTE_ADDR": "10.0.0.1",
+            "REMOTE_ADDR": self.remote_addr,
             "headers": received,
             "workers": 1,
             "python": self.python,
@@ -240,26 +250,44 @@ class ProbeTarget(Target):
         return Response(200, [], json.dumps(report).encode())
 
 
+def proxy_added(real_ip=MAC_ADDRESS):
+    # プロキシが付けるヘッダー（alwaysdata の資料：X-Real-IP と
+    # X-Forwarded-Proto）
+    return [("X-Real-IP", real_ip), ("X-Forwarded-Proto", "https")]
+
+
 def good_proxy(headers):
     # 下線の名前を捨て、X-Real-IP と X-Forwarded-Proto を上書きする
-    kept = {k: v for k, v in headers.items() if "_" not in k}
-    return kept | {"X-Real-IP": MAC_ADDRESS, "X-Forwarded-Proto": "https"}
+    kept = [
+        (k, v) for k, v in headers.items()
+        if "_" not in k and k not in ("X-Real-IP", "X-Forwarded-Proto")
+    ]
+    return kept + proxy_added()
 
 
-def proxy_keeping_underscores(headers):
-    # 下線の名前を、そのまま渡す（アプリには、同じ HTTP_X_REAL_IP に見える）
-    kept = good_proxy(headers)
-    for name, value in headers.items():
-        if "_" in name:
-            kept[name.replace("_", "-")] = value
-    return kept
+def merging_proxy(headers):
+    # alwaysdata の下見で見えた振る舞い：ふつうの名前は上書きし、下線の
+    # 名前は、そのまま通す（uWSGI が、本物の値とつなぐ）
+    kept = [
+        (k, v) for k, v in headers.items()
+        if k not in ("X-Real-IP", "X-Forwarded-Proto")
+    ]
+    return kept + proxy_added()
+
+
+def proxy_not_overwriting(headers):
+    # 利用者が送った X-Real-IP・X-Forwarded-Proto を、そのまま渡す（偽れる）
+    kept = list(headers.items())
+    names = set(headers)
+    return kept + [
+        pair for pair in proxy_added() if pair[0] not in names
+    ]
 
 
 def proxy_trusting_forwarded_for(headers):
-    # 利用者が送った X-Forwarded-For から、X-Real-IP を作る
-    kept = good_proxy(headers)
-    kept["X-Real-IP"] = headers.get("X-Forwarded-For", MAC_ADDRESS)
-    return kept
+    # 利用者が送った X-Forwarded-For から、X-Real-IP を作る（偽れる）
+    kept = [(k, v) for k, v in good_proxy(headers) if k != "X-Real-IP"]
+    return kept + [("X-Real-IP", headers.get("X-Forwarded-For", MAC_ADDRESS))]
 
 
 def run_probe(monkeypatch, target, address=MAC_ADDRESS):
@@ -278,8 +306,20 @@ def test_probe_passes_with_good_proxy(monkeypatch, capsys):
     assert "/run/uwsgi/site.sock" in output
 
 
+def test_probe_passes_with_merging_proxy(monkeypatch, capsys):
+    # 下線の名前が、uWSGI で本物の値と混ざる（alwaysdata で見えた形）。
+    # アプリは、値が1つでないと400で断るので、偽れない
+    report = run_probe(monkeypatch, ProbeTarget(merging_proxy))
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "CLIENT_ADDRESS_HEADER の候補：['X-Real-IP']" in output
+    assert "下線の名前は混ざり、アプリが400で断る" in output
+    assert "'http, https'" in output
+
+
 @pytest.mark.parametrize(
-    "proxy", [proxy_keeping_underscores, proxy_trusting_forwarded_for]
+    "proxy", [proxy_not_overwriting, proxy_trusting_forwarded_for]
 )
 def test_probe_finds_fake_addresses(monkeypatch, capsys, proxy):
     # 偽の値が届くヘッダーは、候補にしない（M3。別の目のレビュー）
@@ -295,6 +335,79 @@ def test_probe_needs_the_mac_address(monkeypatch, capsys):
 
     assert "候補：なし" in capsys.readouterr().out
     assert report.failures
+
+
+def test_probe_prefers_remote_addr_when_it_is_the_mac(monkeypatch, capsys):
+    # プロキシが、接続元のアドレスのままつなぐなら、REMOTE_ADDR を使える
+    report = run_probe(
+        monkeypatch, ProbeTarget(good_proxy, remote_addr=MAC_ADDRESS)
+    )
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "候補：['REMOTE_ADDR', 'X-Real-IP']" in output
+
+
+MAC = MAC_ADDRESS
+MAC_IP = ipaddress.ip_address(MAC_ADDRESS)
+
+
+@pytest.mark.parametrize(
+    ("hyphen", "underscore", "expected"),
+    [
+        (MAC, MAC, "使える"),
+        (MAC, f"192.0.2.20, {MAC}", "使える（下線の名前は混ざり"),
+        (MAC, f"{MAC}, 192.0.2.20", "使える（下線の名前は混ざり"),
+        (MAC, "192.0.2.20", "下線の名前で偽れる"),
+        (MAC, "192.0.2.20, 192.0.2.21", "下線の名前で偽れる"),
+        (MAC, None, "届かない"),
+        (f"192.0.2.10, {MAC}", MAC, "偽の値が届く"),
+        ("192.0.2.10", MAC, "偽の値が届く"),
+        (None, MAC, "届かない"),
+        ("203.0.113.1", "203.0.113.1", "この Mac のアドレスと違う"),
+    ],
+)
+def test_address_header_state(hyphen, underscore, expected):
+    assert address_header_state(hyphen, underscore, MAC_IP).startswith(
+        expected
+    )
+
+
+def test_address_header_state_when_proxy_refused_underscores():
+    # 下線の名前の要求を、プロキシが断った（偽の値は届かない）
+    state = address_header_state(MAC, None, MAC_IP, underscore_sent=False)
+
+    assert state == "使える"
+
+
+@pytest.mark.parametrize(
+    ("hyphen", "underscore", "safe"),
+    [
+        ("https", "https", True),
+        ("https", "http, https", True),
+        ("https", "https, http", True),
+        ("https", "http", False),
+        ("https", None, False),
+        ("http, https", "https", False),
+        ("http", "https", False),
+    ],
+)
+def test_proto_state(hyphen, underscore, safe):
+    assert (proto_state(hyphen, underscore) is None) is safe
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ([MAC, MAC], "使える"),
+        (["fd00::1", "fd00::1"], "内部のアドレス（プロキシ）。毎回同じ"),
+        (["fd00::1", "fd00::2"], "内部のアドレス（プロキシ）。要求ごとに違う"),
+        (["203.0.113.9", "203.0.113.9"], "そのほか"),
+        ([None, None], "そのほか"),
+    ],
+)
+def test_remote_addr_state(values, expected):
+    assert remote_addr_state(values, MAC_IP) == expected
 
 
 def test_probe_refuses_text_that_is_not_an_address(monkeypatch):
@@ -350,16 +463,35 @@ def test_rate_limit_check_finds_proxy_keeping_underscores(
 
     check_rate_limit(UnderscoreTarget(production_app), report)
 
-    assert len(report.failures) == 1
     # 断られた（400）のではなく、偽の接続元で、試せてしまった（401）
-    assert "[401, 401, 401" in capsys.readouterr().out
+    assert "下線の名前で偽っても、試せない（400 か 429）" in report.failures
+    assert "[401, 401, 401]" in capsys.readouterr().out
+
+
+def test_rate_limit_check_passes_with_merging_proxy(
+    production_app, monkeypatch, capsys
+):
+    # alwaysdata で見えた形（下線の名前を捨てないが、uWSGI が本物の値と
+    # つなぐ）。1回目の点検は 429、2回目は、アプリが400で断る
+    class MergingProxyTarget(ProxyTarget):
+        keep_underscores = True
+
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    report = Report()
+
+    check_rate_limit(MergingProxyTarget(production_app), report)
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "[400, 400, 400]" in output
 
 
 def test_probe_compares_ipv6_by_64(monkeypatch, capsys):
     # Mac は、接続ごとに一時的な IPv6 のアドレスを使いうる。同じ /64 なら、
     # 同じ接続元とみなす（アプリの数え方と同じ）
     def ipv6_proxy(headers):
-        return good_proxy(headers) | {"X-Real-IP": "2001:db8:1:2::abcd"}
+        kept = [(k, v) for k, v in good_proxy(headers) if k != "X-Real-IP"]
+        return kept + [("X-Real-IP", "2001:db8:1:2::abcd")]
 
     report = run_probe(
         monkeypatch, ProbeTarget(ipv6_proxy), "2001:db8:1:2::1234"

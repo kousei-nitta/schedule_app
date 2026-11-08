@@ -94,11 +94,20 @@ def table_names(app) -> set[str]:
         return set(db.inspect(db.engine).get_table_names())
 
 
+# プロキシが、利用者の値を上書きして付けるヘッダー
+PROXY_HEADERS = ("X-Real-IP", "X-Forwarded-Proto")
+
+
 class ProxyTarget(Target):
     """ホストのプロキシの代わり：http は https へ移し、https はアプリへ
     渡す（下線の入った名前のヘッダーを捨て、X-Real-IP を、本当の接続元で
     上書きし、X-Forwarded-Proto を付ける）。
     """
+
+    # True なら、下線の名前を捨てずに、そのまま渡す（alwaysdata の下見で
+    # 見えた振る舞い）。Werkzeug のテストの道具は、uWSGI と同じく、同じ
+    # 名前になるヘッダー（X_Real_IP と X-Real-IP）を「, 」でつなぐ
+    keep_underscores = False
 
     def __init__(self, app):
         super().__init__(PUBLIC_ORIGIN)
@@ -108,13 +117,13 @@ class ProxyTarget(Target):
         if not https:
             location = f"https://{self.host}{path}"
             return Response(301, [("Location", location)], b"")
-        sent = {
-            name: value
+        sent = [
+            (name, value)
             for name, value in (headers or {}).items()
-            if "_" not in name
-        }
-        sent["X-Real-IP"] = OWNER_ADDRESS
-        sent["X-Forwarded-Proto"] = "https"
+            if name not in PROXY_HEADERS
+            and (self.keep_underscores or "_" not in name)
+        ]
+        sent += [("X-Real-IP", OWNER_ADDRESS), ("X-Forwarded-Proto", "https")]
         response = self.client.open(
             path,
             method=method,

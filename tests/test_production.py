@@ -429,7 +429,18 @@ def test_ipv6_client_address_is_normalized():
 
 @pytest.mark.parametrize(
     "value",
-    [None, "", "unknown", "203.0.113.5, 10.0.0.1", "203.0.113.5:443", "a b"],
+    [
+        None,
+        "",
+        "unknown",
+        "203.0.113.5, 10.0.0.1",
+        "203.0.113.5:443",
+        "a b",
+        # uWSGI が、下線の名前（X_Real_IP）とプロキシの値をつないだ形
+        # （alwaysdata の下見で見えた。docs/architecture/security.md）
+        "192.0.2.20, 203.0.113.5",
+        ", 203.0.113.5",
+    ],
 )
 def test_missing_or_wrong_client_address_is_rejected(value):
     environ = {"HTTP_X_FORWARDED_PROTO": "https", "REMOTE_ADDR": "10.0.0.1"}
@@ -439,7 +450,9 @@ def test_missing_or_wrong_client_address_is_rejected(value):
     assert seen_environ(**environ) is None
 
 
-@pytest.mark.parametrize("proto", [None, "http", "HTTPS", "https, http"])
+@pytest.mark.parametrize(
+    "proto", [None, "http", "HTTPS", "https, http", "http, https"]
+)
 def test_request_not_over_https_is_rejected(proto):
     environ = {"HTTP_X_REAL_IP": "203.0.113.5"}
     if proto is not None:
