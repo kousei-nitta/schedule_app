@@ -15,7 +15,7 @@
 | 最後にマージしたもの | Dependabot の #51（Playwright 1.64.0 ほか）と #50（ESLint 10.13.0）（2026-11-02。マージコミット `498ad57`・`fa22620`）。その前は Task 025（PR #49、2026-11-02。マージコミット `0df68d5`） |
 | 実装中のタスク | Task 026（クラウドへの公開。このPR） |
 | 次に設計するタスク | Task 027〜（見た目と使い心地） |
-| 自動の確認 | pytest 1,857件が合格（2件 skip、5件 xfail：受け入れた弱さ。Task 025 の2件と、Task 026 の3件）、E2E 6件が合格、ruff・ESLint が合格（2026-11-08、Task 026。Claude の作業環境の Python 3.14） |
+| 自動の確認 | pytest 1,858件が合格（2件 skip、5件 xfail：受け入れた弱さ。Task 025 の2件と、Task 026 の3件）、E2E 6件が合格、ruff・ESLint が合格（2026-11-08、Task 026。Claude の作業環境の Python 3.14） |
 | DBの構造 | 初期migration（`0280f6cf8d09`）、休講日の `closures` テーブル（`42bd53808fa1`）、利用者の表と、データの持ち主（`a750d741785a`。Task 025）。Task 026で、端末の印の `trusted_devices` を足す（このPR。本番のDBは、移行の写しに当てて作る） |
 | 実データのDB | 2026-10-24から、KomaがMacの `instance/app.db` で、実データで使っている（Task 023の自動のバックアップと手動のコマンドで守る。`docs/development/database.md`）。Task 026のマージのあと、Komaがクラウド（alwaysdata）へ移す（`docs/development/deploy.md`） |
 | 最終更新 | 2026-11-08（Task 026） |

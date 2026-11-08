@@ -159,7 +159,8 @@ schedule_app/
 │   └── demo.db              # デモのDB（例。create-demo-db で作る）
 ├── scripts/                 # 手元で動かす道具（アプリには含まない）
 │   ├── check_public.py      # 本番のURLの点検（Mac から。標準のライブラリだけ）
-│   └── echo_headers_wsgi.py # 下見の道具（受け取ったヘッダーを返すだけ）
+│   ├── echo_headers_wsgi.py # 下見の道具（受け取ったヘッダーを返すだけ）
+│   └── maintenance_wsgi.py  # 作業中の道具（どの要求にも 503。サイトを止める代わり）
 ├── docs/                    # 資料（何がどこにあるかは docs/README.md）
 ├── .github/
 │   ├── workflows/ci.yml     # CI（GitHub Actions。docs/development/testing.md の「CI」）

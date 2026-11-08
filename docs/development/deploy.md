@@ -25,6 +25,12 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
 5. 「Environment > Python」で、既定の Python を 3.14 にする。SSH で `python --version` が 3.14.9 以上であること（3.14.10 以上が望ましい。alwaysdata が 3.14.10 以上を用意するまでは、3.14.9 で進める。下の「Python の版」）
 6. 管理画面には、最初の1年は120日に1回、そのあとは6か月に1回、ログインする（しないと、サイトが止まる。カレンダーに予定を入れておく）
 
+## 作業中にする・戻す（サイトを止める代わり）
+alwaysdata の管理画面には、サイトを止める機能がない（公式の資料「Disabling a Website」）。そこで、作業の間は、どの要求にも「ただいま作業中です」と 503 を返すだけの道具（`scripts/maintenance_wsgi.py`。標準のライブラリだけ。要求の中身は読まない）を、サイトの入口にする。
+- **作業中にする**：管理画面の Web > Sites で、サイトの編集のボタンを押し、Application path を `/home/<アカウント名>/schedule_app/scripts/maintenance_wsgi.py` に変えて、いちばん下の Submit を押す（保存すると、サイトは自動で再起動し、アプリは DB を開かなくなる）。ブラウザで開いて、「ただいま作業中です」と出ることを確かめる
+- **戻す**：同じ画面で、Application path を `/home/<アカウント名>/schedule_app/wsgi.py` に戻して、Submit を押す
+- ほかの欄（Working directory・Python version・uWSGI additional settings・Environment variables・Virtualenv directory）は、変えない
+
 ## 2. 下見（実データを入れる前。架空のデータで）
 資料では分からない前提を、確かめる。どれかが合わなければ、止まって Claude に相談する（ADR 0005）。
 
@@ -58,7 +64,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    - 「REMOTE_ADDR」の行も、Claude に伝える（Mac のアドレスと同じなら `<MAC>` に。内部のアドレス（`fd00::…` など）なら、そのまま）
    - 「この Mac のアドレスと違う」と出たら、IPv4 と IPv6 の違いかもしれない。表示された値と同じ種類のアドレス（IPv4：`curl -4 https://api.ipify.org`、IPv6：`curl -6 https://api64.ipify.org`）で、入れ直す
    - 最後の行の「uWSGI の待ち受け」を、Claude に伝える（共有のサーバーの、ほかの利用者が、プロキシを通らずにアプリへ直接つなげるかを判断する）。伝えるときは、アカウント名を `<アカウント名>` に、Mac のアドレスを伏せる
-4. すぐに、サイトの Application path を `/home/<アカウント名>/schedule_app/wsgi.py` に変える（下見の道具を、公開したままにしない）
+4. すぐに、サイトの Application path を `/home/<アカウント名>/schedule_app/scripts/maintenance_wsgi.py` に変えて保存する（下見の道具を、公開したままにしない。下の「作業中にする・戻す」）
 
 ### 2-2. アプリを置く
 1. SSH で、Python のライブラリを入れる（`--only-binary :all:`：配布物の中のスクリプトを、入れるときに動かさない）
@@ -134,7 +140,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    4. モバイルの回線の iPhone でも、主な画面が実用の速さか見る
 4. Mac の Chrome・Safari でも、ログインと主な画面を開く（Mac の接続元の制限が解けた1時間あと。または、テザリングなどで別の接続元から）
 5. SSH で：`ls -la ~/schedule_data ~/.config/schedule_app`（DBとフォルダが、自分だけの権限。`backups` は、まだなくてよい）、`ls -la ~/admin/logs/*/ | head`（ログが日ごとに分かれ、古いものが消えるかを見て、Claude に伝える）、`ps aux | grep -c uwsgi`（ほかの利用者のプロセスが見えるか）
-6. 下見の DB は、まだ消さない（消すのは、移行の手順で、サイトを止めたあと）
+6. 下見の DB は、まだ消さない（消すのは、移行の手順で、作業中にしたあと）
 
 ### Python の版
 - 本番の Python は、alwaysdata が用意する 3.14 の修正版から選ぶ（サイト（uWSGI）は、alwaysdata の Python で動く）。2026-11-03 の時点では 3.14.9 で、セキュリティの修正版の 3.14.10（2026-10-25）は、まだない。3.14.10 以上が用意されるまで、3.14.9 で進める（Koma の承認、2026-11-03。ADR 0005 の「影響」。roadmap の 026-L3）
@@ -152,7 +158,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    flask --app app make-transfer-copy ~/schedule-transfer/app.db
    ```
    写しには、ログイン中の端末・ログインの失敗・端末の印と、消した行の残りが入らない。ログインIDが `owner` のままの利用者や、デモの利用者（`demo`）がいれば止まる
-3. 本番：管理画面で、サイトを止める（Disable）
+3. 本番：管理画面で、作業中にする（上の「作業中にする・戻す」）
 4. 本番（SSH）：コードを、マージのコミットにそろえ、下見の DB を消す
    ```sh
    cd ~/schedule_app && . .venv/bin/activate
@@ -177,14 +183,14 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    flask --app app db current                   # 最新の版（head）
    ```
 7. iPhone・Mac のパスワードの管理（Safari の自動入力・「パスワード」のアプリ）から、下見のIDとパスワードを消す（このあとのログインの前に。下見と本番は同じサイトの名前のため、自動入力で下見のIDを送ると、本物の端末の印の失敗に数えられ、5回で印が消える）
-8. 管理画面で、サイトを動かす（Enable）。Mac と iPhone で、今までのID・パスワードでログインし、今までのデータが見えることを確かめる（このログインで、それぞれの端末に印が付く）
+8. 管理画面で、Application path を戻す（上の「作業中にする・戻す」）。Mac と iPhone で、今までのID・パスワードでログインし、今までのデータが見えることを確かめる（このログインで、それぞれの端末に印が付く）
 9. Mac で `python3.14 scripts/check_public.py https://...` と `--login`（そのあと、iPhone・Mac でログインし直す必要はない。印は10個まで持てる）
 10. 毎日のバックアップを作る（下の「バックアップ」の定期実行）。管理画面から1回動かし、`ls -la ~/schedule_data/backups` に、その日の `app-YYYYMMDD-auto.db`（600）ができたことを確かめる
 11. Mac：送った写しを消す（`rm -r ~/schedule-transfer`）。Mac の `instance/app.db` は、移行の前の記録として残すが、もう使わない（`run.py` で起動して書き込むと、本番とずれる）
 
 ## 4. 更新（PR をマージしたあと）
 1. GitHub で、マージのコミット（`main` の最新）を確かめる
-2. 管理画面で、サイトを止める（Disable。古いコードのまま、ライブラリやDBが入れ替わらないように）
+2. 管理画面で、作業中にする（古いコードのまま、ライブラリやDBが入れ替わらないように。上の「作業中にする・戻す」）
 3. 本番（SSH）
    ```sh
    cd ~/schedule_app && . .venv/bin/activate
@@ -196,12 +202,12 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    flask --app app backup-db --label before-<タスクの番号>
    flask --app app db upgrade
    ```
-4. 管理画面で、サイトを動かす（Enable）。Mac で `python3.14 scripts/check_public.py https://...`
+4. 管理画面で、Application path を戻す。Mac で `python3.14 scripts/check_public.py https://...`
 5. 戻すとき：`git checkout <前のコミット>` で再起動する。DB を戻すなら、下の「バックアップから戻す」
 
 ### Python の修正版を上げる（alwaysdata が新しい 3.14.x を用意したとき）
 1. 管理画面の「Environment > Python」と、サイトの「Python version」で、新しい版を選べるかを見る（選べる版は、alwaysdata が決める）
-2. 管理画面で、サイトを止める（Disable）
+2. 管理画面で、作業中にする
 3. 本番（SSH）：`.venv` を作り直す（`.venv` には、入れたライブラリだけがある。DB と設定のファイルは別の場所なので、消してよい）
    ```sh
    cd ~/schedule_app
@@ -213,7 +219,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
    pip install --only-binary :all: -r requirements.txt
    flask --app app show-settings   # 1行目が「環境：本番」。Python の版
    ```
-4. 管理画面で、サイトの Python の版を合わせ、サイトを動かす（Enable）。Mac で `python3.14 scripts/check_public.py https://...`（`--probe` は、下見の道具を置いたときだけ）
+4. 管理画面で、サイトの Python の版を合わせ、Application path を戻す。Mac で `python3.14 scripts/check_public.py https://...`（`--probe` は、下見の道具を置いたときだけ）
 5. 3.14.10 以上になったら、Claude に伝える（roadmap の 026-L3 を閉じ、上の「Python の版」の注意を消す）
 
 ## 5. バックアップ
@@ -229,7 +235,7 @@ alwaysdata の Free での、本番の準備・下見・デプロイ・実デー
   ```
   バックアップには、パスワードのハッシュ・ログイン中の端末の記録（SHA-256）も入る。Mac は FileVault（ディスクの暗号化）をオンにしておく
 - `daily-backup` は、終わりに、バックアップのフォルダの合計の大きさを出す。1GB の上限に近づいていないかを、ときどき見る
-- バックアップから戻す：サイトを止め、`flask --app app backup-db --label before-restore` のあと、戻すファイルを `~/schedule_data/app.db` に写し（`-journal` などが残っていないこと）、`flask --app app backup-db --label after-restore` が成功してから、サイトを動かす（考え方は `development/database.md` の「バックアップから戻す」と同じ）
+- バックアップから戻す：作業中にし、`flask --app app backup-db --label before-restore` のあと、戻すファイルを `~/schedule_data/app.db` に写し（`-journal` などが残っていないこと）、`flask --app app backup-db --label after-restore` が成功してから、Application path を戻す（考え方は `development/database.md` の「バックアップから戻す」と同じ）
 
 ## 6. 利用者の管理（本番）
 - SSH で、`cd ~/schedule_app && . .venv/bin/activate` のあと、`flask --app app <コマンド>`（`development/database.md` の「利用者の管理」）。アプリのコマンドは、どれも、最初に「環境：本番」と、使うDBを出す（`flask db` は出さないため、その前に `show-settings` などで確かめる）。「ローカル」と出たら、`SCHEDULE_ENV_FILE` を読めていない（止めて、`~/.profile` を確かめる）

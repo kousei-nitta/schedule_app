@@ -214,6 +214,37 @@ def test_echo_app_reports_headers_but_hides_cookies():
     assert isinstance(report["home_filesystem"], str)
 
 
+# --- 作業中の道具（scripts/maintenance_wsgi.py） ---
+
+
+def test_maintenance_app_answers_503_and_shows_nothing():
+    # alwaysdata には、サイトを止める機能がないため、作業の間は、これを
+    # サイトの入口にする（docs/development/deploy.md）
+    from scripts.maintenance_wsgi import application
+
+    seen = []
+    environ = {
+        "REQUEST_METHOD": "POST",
+        "PATH_INFO": "/login",
+        "HTTP_COOKIE": "secret-cookie",
+        "HTTP_X_REAL_IP": "203.0.113.5",
+    }
+    body = b"".join(
+        application(environ, lambda status, headers: seen.append(
+            (status, dict(headers))
+        ))
+    )
+
+    status, headers = seen[0]
+    assert status == "503 Service Unavailable"
+    assert headers["Cache-Control"] == "no-store"
+    assert headers["Content-Length"] == str(len(body))
+    assert "作業中" in body.decode("utf-8")
+    # 要求の中身を、何も返さない
+    assert b"secret" not in body
+    assert b"203.0.113.5" not in body
+
+
 # --- 下見（--probe） ---
 
 MAC_ADDRESS = "198.51.100.77"
