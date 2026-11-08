@@ -369,9 +369,10 @@ def test_probe_needs_the_mac_address(monkeypatch, capsys):
 
 
 def test_probe_prefers_remote_addr_when_it_is_the_mac(monkeypatch, capsys):
-    # プロキシが、接続元のアドレスのままつなぐなら、REMOTE_ADDR を使える
+    # X-Real-IP が混ざった値のときも、REMOTE_ADDR が Mac のアドレスの
+    # まま（ヘッダーの写しでない）なら、REMOTE_ADDR を使える
     report = run_probe(
-        monkeypatch, ProbeTarget(good_proxy, remote_addr=MAC_ADDRESS)
+        monkeypatch, ProbeTarget(merging_proxy, remote_addr=MAC_ADDRESS)
     )
 
     output = capsys.readouterr().out
@@ -379,8 +380,21 @@ def test_probe_prefers_remote_addr_when_it_is_the_mac(monkeypatch, capsys):
     assert "候補：['REMOTE_ADDR', 'X-Real-IP']" in output
 
 
+def test_probe_cannot_tell_remote_addr_from_same_header(monkeypatch, capsys):
+    # 下線の名前を捨てるプロキシでは、REMOTE_ADDR と X-Real-IP が同じ値に
+    # なり、写しかどうかを見分けられない。REMOTE_ADDR は選ばない
+    report = run_probe(
+        monkeypatch, ProbeTarget(good_proxy, remote_addr=MAC_ADDRESS)
+    )
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "写しと見分けられない" in output
+    assert "候補：['X-Real-IP']" in output
+
+
 MAC = MAC_ADDRESS
-MAC_IP = ipaddress.ip_address(MAC_ADDRESS)
+MAC_IP = [ipaddress.ip_address(MAC_ADDRESS)]
 
 
 @pytest.mark.parametrize(
@@ -532,12 +546,90 @@ def test_probe_compares_ipv6_by_64(monkeypatch, capsys):
 
 
 def test_probe_explains_ipv4_and_ipv6_mismatch(monkeypatch, capsys):
-    # Mac のアドレスに IPv6 を入れたが、届いたのは IPv4（安全な側の失敗。
-    # 入れ直し方を表示する）
+    # Mac のアドレスに IPv6 だけを入れたが、届いたのは IPv4（安全な側の
+    # 失敗。IPv4 のアドレスも入れるよう表示する）
     report = run_probe(monkeypatch, ProbeTarget(good_proxy), "2001:db8::1")
 
-    assert "IPv4 と IPv6 が違う" in capsys.readouterr().out
+    assert "IPv4 で届いた（この Mac の IPv4 のアドレスも" in (
+        capsys.readouterr().out
+    )
     assert report.failures
+
+
+MAC_IPV6 = "2001:db8:7:8::1"
+
+
+def ipv4_then_ipv6_proxy():
+    # 1回目は IPv4、2回目は IPv6 で届く（alwaysdata の下見で見えた形。
+    # Mac が両方のアドレスを持つ）
+    calls = []
+
+    def proxy(headers):
+        calls.append(None)
+        real_ip = MAC_ADDRESS if len(calls) == 1 else MAC_IPV6
+        kept = [
+            (k, v) for k, v in headers.items()
+            if k not in ("X-Real-IP", "X-Forwarded-Proto")
+        ]
+        return kept + proxy_added(real_ip)
+
+    return proxy
+
+
+def test_probe_accepts_both_mac_addresses(monkeypatch, capsys):
+    # IPv4 と IPv6 の両方を入れれば、どちらで届いても、Mac とみなす
+    report = run_probe(
+        monkeypatch,
+        ProbeTarget(ipv4_then_ipv6_proxy()),
+        f"{MAC_ADDRESS} {MAC_IPV6}",
+    )
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "CLIENT_ADDRESS_HEADER の候補：['X-Real-IP']" in output
+
+
+def test_probe_needs_both_mac_addresses_when_both_are_used(
+    monkeypatch, capsys
+):
+    # IPv6 だけを入れると、IPv4 で届いた1回目が合わない（下見で見えた ✗）
+    report = run_probe(
+        monkeypatch, ProbeTarget(ipv4_then_ipv6_proxy()), MAC_IPV6
+    )
+
+    assert "IPv4 で届いた" in capsys.readouterr().out
+    assert report.failures
+
+
+class CopyingRemoteAddrTarget(ProbeTarget):
+    """ホストの uWSGI が、X-Real-IP の値を REMOTE_ADDR に写す（alwaysdata
+    の下見で見えた形。混ざった値も、そのまま写る）。"""
+
+    def request(self, method, path, headers=None, body=None, *, https=True):
+        response = super().request(method, path, headers, body, https=https)
+        report = json.loads(response.body)
+        report["REMOTE_ADDR"] = report["headers"].get("HTTP_X_REAL_IP")
+        return Response(200, [], json.dumps(report).encode())
+
+
+def test_probe_does_not_prefer_remote_addr_copied_from_header(
+    monkeypatch, capsys
+):
+    report = run_probe(monkeypatch, CopyingRemoteAddrTarget(merging_proxy))
+
+    output = capsys.readouterr().out
+    assert report.failures == [], output
+    assert "X-Real-IP の写し" in output
+    assert "CLIENT_ADDRESS_HEADER の候補：['X-Real-IP']" in output
+
+
+@pytest.mark.parametrize(
+    "text", ["", "my mac", "198.51.100.1 198.51.100.2 198.51.100.3"]
+)
+def test_probe_refuses_wrong_mac_addresses(monkeypatch, text):
+    report = run_probe(monkeypatch, ProbeTarget(good_proxy), text)
+
+    assert report.failures == ["この Mac の公開のアドレス"]
 
 
 class RefusingUnderscoreTarget(ProbeTarget):

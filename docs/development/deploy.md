@@ -56,15 +56,43 @@ alwaysdata の管理画面には、サイトを止める機能がない（公式
    - SSL：「Force HTTPS」をオン。HSTS は、alwaysdata の設定ではオンにしない（アプリが付ける）。WAF と HTTP のキャッシュは、オンにしない（キャッシュが `no-store` を守るか、WAF がパスワードを記録するかが、分からないため）
 3. Mac で（リポジトリのフォルダで。`.venv` はなくてよい。`python3.14` で動かす：Mac に最初から入っている `python3` は古く、動かない）
    ```sh
-   curl https://api64.ipify.org      # この Mac の公開のアドレス（次で尋ねられる。IPv4 と IPv6 のどちらか）
+   curl -4 https://api.ipify.org     # この Mac の公開の IPv4 のアドレス
+   curl -6 https://api64.ipify.org   # この Mac の公開の IPv6 のアドレス（ない・つながらないなら、IPv4 だけでよい）
    python3.14 scripts/check_public.py --probe https://<アカウント名>.alwaysdata.net
    ```
-   - スクリプトは、偽の接続元を、ふつうの名前（`X-Real-IP`）と下線の名前（`X_Real_IP`）で、別々に送る。ふつうの名前の偽の値が上書きされ（値が1つで、この Mac のアドレス）、下線の名前の偽の値が、捨てられるか、本物の値と混ざる（`192.0.2.20, <Mac のアドレス>` のような形。アプリが400で断るので安全）ヘッダーを、「候補」として出す。`REMOTE_ADDR` が、この Mac のアドレスなら、それも候補になる（いちばんよい）。候補の最初のものを `CLIENT_ADDRESS_HEADER` にする。候補が「なし」なら、止まって相談する
+   尋ねられたら、上の2つのアドレスを、空白で区切って入れる（Mac が両方を持つと、要求ごとに、どちらで届くかが変わるため）
+   - スクリプトは、偽の接続元を、ふつうの名前（`X-Real-IP`）と下線の名前（`X_Real_IP`）で、別々に送る。ふつうの名前の偽の値が上書きされ（値が1つで、この Mac のアドレス）、下線の名前の偽の値が、捨てられるか、本物の値と混ざる（`192.0.2.20, <Mac のアドレス>` のような形。アプリが400で断るので安全）ヘッダーを、「候補」として出す。`REMOTE_ADDR` が、この Mac のアドレスのままで、ヘッダーの写しでなければ、それも候補になる（いちばんよい）。alwaysdata では、`REMOTE_ADDR` は `X-Real-IP` の写しで（2026-11-08 の下見）、「X-Real-IP の写し」と出るので、`X-Real-IP` を使う。候補の最初のものを `CLIENT_ADDRESS_HEADER` にする。候補が「なし」なら、止まって相談する
    - ✗ があれば（Python が 3.14.9 より古い、ワーカーが1つでない、ホームのファイルシステムがネットワーク上（`nfs` など）、`X-Forwarded-Proto` を偽れる）、止まって相談する
-   - 「REMOTE_ADDR」の行も、Claude に伝える（Mac のアドレスと同じなら `<MAC>` に。内部のアドレス（`fd00::…` など）なら、そのまま）
-   - 「この Mac のアドレスと違う」と出たら、IPv4 と IPv6 の違いかもしれない。表示された値と同じ種類のアドレス（IPv4：`curl -4 https://api.ipify.org`、IPv6：`curl -6 https://api64.ipify.org`）で、入れ直す
+   - 「REMOTE_ADDR」の行も、Claude に伝える（Mac のアドレスは、IPv4 も IPv6 も `<MAC>` に。内部のアドレス（`fd00::…` など）なら、そのまま）
+   - 「IPv4 で届いた」「IPv6 で届いた」と出たら、その種類の Mac のアドレスを入れていない。上の `curl` の、その種類の結果を足して、入れ直す
    - 最後の行の「uWSGI の待ち受け」を、Claude に伝える（共有のサーバーの、ほかの利用者が、プロキシを通らずにアプリへ直接つなげるかを判断する）。伝えるときは、アカウント名を `<アカウント名>` に、Mac のアドレスを伏せる
-4. すぐに、サイトの Application path を `/home/<アカウント名>/schedule_app/scripts/maintenance_wsgi.py` に変えて保存する（下見の道具を、公開したままにしない。下の「作業中にする・戻す」）
+4. 下見の道具が動いているうちに（ブラウザでサイトを開いた直後に）、SSH で、自分のサイトの uWSGI に、プロキシを通らずに直接つないでみる。`<待ち受け>` は、3 の「uWSGI の待ち受け」の値（例：`[fd00::7:eaac]:8100`）。ほかのアドレスには、つながない（ほかの利用者のサイトかもしれない）
+   ```sh
+   ss -ltnH | grep ':8100'       # 自分の待ち受けが、この SSH から見えるか
+   python - '<待ち受け>' <<'EOF'
+   import json, socket, sys
+   host, port = sys.argv[1].rsplit(":", 1)
+   request = b"GET / HTTP/1.0\r\nHost: test\r\nX-Real-IP: 192.0.2.77\r\n\r\n"
+   proxy_line = b"PROXY TCP4 192.0.2.88 192.0.2.99 40000 8100\r\n"
+   for title, first in [("1 直接", b""), ("2 PROXYの行", proxy_line)]:
+       try:
+           with socket.create_connection((host.strip("[]"), int(port)), timeout=10) as conn:
+               conn.sendall(first + request)
+               data = b"".join(iter(lambda: conn.recv(65536), b""))
+       except OSError as error:
+           print(title, "つなげない：", error)
+           continue
+       head, _, body = data.partition(b"\r\n\r\n")
+       print(title, head.split(b"\r\n")[0].decode(errors="replace") or "応答なし")
+       if body.startswith(b"{"):
+           seen = json.loads(body)
+           print("   REMOTE_ADDR:", seen["REMOTE_ADDR"], "/ X-Real-IP:", seen["headers"].get("HTTP_X_REAL_IP"))
+   EOF
+   ```
+   - 「つなげない」（Connection refused など）なら、プロキシ以外からは、直接つなげない手がかり（よい知らせ）。`ss` に自分の待ち受けが出ているのに、つなげないなら、なおよい（alwaysdata が断っている）
+   - 「1 直接」が 200 なら、プロキシを通らずにつなげる。結果を Claude に伝える（`X-Real-IP` の偽の値 `192.0.2.77` が届くので、接続元を偽れる。roadmap の 026-L2）
+   - 結果を Claude に伝える（サーバーの中のアドレスは、伏せなくてよい。アカウント名は伏せる）
+5. すぐに、サイトの Application path を `/home/<アカウント名>/schedule_app/scripts/maintenance_wsgi.py` に変えて保存する（下見の道具を、公開したままにしない。下の「作業中にする・戻す」）
 
 ### 2-2. アプリを置く
 1. SSH で、Python のライブラリを入れる（`--only-binary :all:`：配布物の中のスクリプトを、入れるときに動かさない）

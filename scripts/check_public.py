@@ -283,15 +283,36 @@ def environ_key(header_name: str) -> str:
     return "HTTP_" + header_name.upper().replace("-", "_")
 
 
-def same_client(address, my_address) -> bool:
-    """同じ接続元か。IPv6 は、アプリと同じく /64 の範囲で比べる（Mac は、
-    一時的な IPv6 のアドレスを、接続ごとに変えうるため）。"""
-    if address is None or address.version != my_address.version:
+def parse_my_addresses(text: str) -> list | None:
+    """この Mac の公開のアドレス（IPv4 と IPv6。1つか2つ）を読む。
+
+    Mac は、IPv4 と IPv6 の両方を持つことがある。そのときは、要求ごとに
+    どちらで届くかが変わりうる（下見で、1回目は IPv4、2回目は IPv6 で
+    届いた）ため、両方を受け取る。読めなければ None。
+    """
+    parts = text.replace(",", " ").split()
+    addresses = [parse_address(part) for part in parts]
+    if not 1 <= len(addresses) <= 2 or None in addresses:
+        return None
+    return addresses
+
+
+def same_client(address, my_addresses) -> bool:
+    """この Mac のアドレスのどれかと、同じ接続元か。IPv6 は、アプリと
+    同じく /64 の範囲で比べる（Mac は、一時的な IPv6 のアドレスを、接続
+    ごとに変えうるため）。"""
+    if address is None:
         return False
-    if address.version == 6:
-        network = ipaddress.ip_network(f"{my_address}/64", strict=False)
-        return address in network
-    return address == my_address
+    for mine in my_addresses:
+        if address.version != mine.version:
+            continue
+        if address.version == 4 and address == mine:
+            return True
+        if address.version == 6 and address in ipaddress.ip_network(
+            f"{mine}/64", strict=False
+        ):
+            return True
+    return False
 
 
 # ヘッダーの判定の結果（「使える」のは、この2つ）
@@ -305,7 +326,7 @@ def list_values(value: str) -> list[str]:
     return [part.strip() for part in value.split(",")]
 
 
-def hyphen_value_state(value: str | None, my_address) -> str:
+def hyphen_value_state(value: str | None, my_addresses) -> str:
     """ふつうの名前で偽の値を送った要求に、届いた値を調べる。
 
     プロキシが上書きしていれば、値は1つで、この Mac のアドレスになる。
@@ -315,17 +336,19 @@ def hyphen_value_state(value: str | None, my_address) -> str:
     if FAKE_ADDRESS_PREFIX in value:
         return "偽の値が届く（使えない）"
     address = parse_address(value)
-    if address is not None and address.version != my_address.version:
+    if address is not None and all(
+        address.version != mine.version for mine in my_addresses
+    ):
         return (
-            "IPv4 と IPv6 が違う（届いた値と同じ種類の、この Mac の"
-            "アドレスで、入れ直す）"
+            f"IPv{address.version} で届いた（この Mac の IPv"
+            f"{address.version} のアドレスも、入れ直す）"
         )
-    if not same_client(address, my_address):
+    if not same_client(address, my_addresses):
         return "この Mac のアドレスと違う（使えない）"
     return USABLE
 
 
-def underscore_value_state(value: str | None, my_address) -> str:
+def underscore_value_state(value: str | None, my_addresses) -> str:
     """下線の名前（X_Real_IP など）で偽の値を送った要求に、届いた値を
     調べる。
 
@@ -341,10 +364,12 @@ def underscore_value_state(value: str | None, my_address) -> str:
         return "届かない（使えない）"
     parts = list_values(value)
     if len(parts) == 1:
-        if same_client(parse_address(parts[0]), my_address):
+        if same_client(parse_address(parts[0]), my_addresses):
             return USABLE
         return "下線の名前で偽れる（使えない）"
-    if any(same_client(parse_address(part), my_address) for part in parts):
+    if any(
+        same_client(parse_address(part), my_addresses) for part in parts
+    ):
         return USABLE_MERGED
     return "下線の名前で偽れる（使えない）"
 
@@ -352,7 +377,7 @@ def underscore_value_state(value: str | None, my_address) -> str:
 def address_header_state(
     hyphen_value: str | None,
     underscore_value: str | None,
-    my_address,
+    my_addresses,
     *,
     underscore_sent: bool = True,
 ) -> str:
@@ -361,10 +386,10 @@ def address_header_state(
     underscore_sent が False なのは、下線の名前の要求を、プロキシが断った
     とき（偽の値は、アプリに届かない）。
     """
-    state = hyphen_value_state(hyphen_value, my_address)
+    state = hyphen_value_state(hyphen_value, my_addresses)
     if state != USABLE or not underscore_sent:
         return state
-    return underscore_value_state(underscore_value, my_address)
+    return underscore_value_state(underscore_value, my_addresses)
 
 
 def proto_state(hyphen_value: str | None, underscore_value: str | None,
@@ -384,10 +409,39 @@ def proto_state(hyphen_value: str | None, underscore_value: str | None,
     return f"下線の名前の http が、そのまま届く（{underscore_value!r}）"
 
 
-def remote_addr_state(values: list[str | None], my_address) -> str:
-    """REMOTE_ADDR（アプリに実際につないできた相手）の形を調べる。"""
+# REMOTE_ADDR が、ヘッダーの値を写したものだったとき・見分けられないとき
+REMOTE_ADDR_COPY = (
+    "X-Real-IP の写し（直接つながれると偽れる。X-Real-IP を使う）"
+)
+REMOTE_ADDR_SAME = (
+    "X-Real-IP と同じ値（写しと見分けられない。X-Real-IP を使う）"
+)
+
+
+def remote_addr_state(
+    values: list[str | None],
+    my_addresses,
+    real_ip_values: list[str | None] | None = None,
+) -> str:
+    """REMOTE_ADDR（アプリに実際につないできた相手）の形を調べる。
+
+    REMOTE_ADDR が、どの要求でも X-Real-IP と同じ値で、そこに偽の値や
+    混ざった値があれば、ホストの uWSGI が、ヘッダーを写している
+    （alwaysdata の下見で、そう見えた）。同じ値でも、偽の値がなければ、
+    写しかどうかを見分けられない。どちらも、プロキシを通らずにつながれる
+    と、ヘッダーと同じく偽れるかもしれないので、ヘッダーより安全な候補に
+    はしない。REMOTE_ADDR を選ぶのは、X-Real-IP が混ざった値のときも、
+    REMOTE_ADDR が Mac のアドレスのまま（ヘッダーと別の値）のときだけ。
+    """
+    if real_ip_values is not None and values == real_ip_values:
+        if any(
+            v is not None and ("," in v or FAKE_ADDRESS_PREFIX in v)
+            for v in values
+        ):
+            return REMOTE_ADDR_COPY
+        return REMOTE_ADDR_SAME
     addresses = [parse_address(v) for v in values]
-    if all(same_client(a, my_address) for a in addresses):
+    if all(same_client(a, my_addresses) for a in addresses):
         return USABLE
     if all(
         a is not None and any(a in network for network in INTERNAL_NETWORKS)
@@ -712,14 +766,19 @@ def probe_headers(target: Target, report: Report) -> None:
     偽の値が混ざらず、この Mac の公開のアドレスになるヘッダーだけを、
     CLIENT_ADDRESS_HEADER の候補にする。
     """
-    my_address = parse_address(
+    my_addresses = parse_my_addresses(
         input(
             "この Mac の公開のアドレス（ターミナルで "
-            "curl https://api64.ipify.org の結果。IPv4 か IPv6）："
+            "curl -4 https://api.ipify.org と curl -6 https://api64.ipify.org "
+            "の結果。両方あれば、空白で区切って2つ）："
         )
     )
-    if my_address is None:
-        report.check(False, "この Mac の公開のアドレス", "アドレスの形でない")
+    if my_addresses is None:
+        report.check(
+            False,
+            "この Mac の公開のアドレス",
+            "アドレスの形でない（1つか2つ）",
+        )
         return
     hyphen = {
         "X-Real-IP": f"{FAKE_ADDRESS_PREFIX}10",
@@ -754,10 +813,12 @@ def probe_headers(target: Target, report: Report) -> None:
     seen = reports[0]
     underscore_sent = len(reports) == 2
     candidates = []
-    # REMOTE_ADDR が、この Mac のアドレスなら、いちばんよい（ヘッダーを
-    # 信じなくてよい。プロキシを通らずにつながれても、偽れない）
+    # REMOTE_ADDR が、この Mac のアドレスで、ヘッダーの写しでなければ、
+    # いちばんよい（ヘッダーを信じなくてよい。プロキシを通らずにつながれ
+    # ても、偽れない）
     remote_addrs = [r.get("REMOTE_ADDR") for r in reports]
-    state = remote_addr_state(remote_addrs, my_address)
+    real_ips = [r.get("headers", {}).get("HTTP_X_REAL_IP") for r in reports]
+    state = remote_addr_state(remote_addrs, my_addresses, real_ips)
     print(f"REMOTE_ADDR：{remote_addrs!r} … {state}")
     if state == USABLE:
         candidates.append("REMOTE_ADDR")
@@ -768,7 +829,7 @@ def probe_headers(target: Target, report: Report) -> None:
         state = address_header_state(
             received[0],
             received[1] if underscore_sent else None,
-            my_address,
+            my_addresses,
             underscore_sent=underscore_sent,
         )
         print(f"{name}：{received!r} … {state}")
