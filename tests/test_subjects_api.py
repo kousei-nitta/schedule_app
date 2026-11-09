@@ -188,7 +188,8 @@ def test_optional_subject_strings_normalize_empty_to_null(
     assert response.json["notes"] is None
 
 
-def test_subject_string_length_limits_and_unlimited_notes(client, app):
+def test_subject_string_length_limits(client, app):
+    # メモの上限（2,000字）は、tests/test_limits.py でも確かめる
     semester_id = make_semester(app)
     response = client.post(
         "/api/subjects",
@@ -196,13 +197,13 @@ def test_subject_string_length_limits_and_unlimited_notes(client, app):
             semester_id,
             subject_name="  " + "科" * 100 + "  ",
             room="教" * 100,
-            notes="詳" * 10000,
+            notes="詳" * 2000,
         ),
     )
     assert response.status_code == 201
     assert len(response.json["subject_name"]) == 100
     assert len(response.json["room"]) == 100
-    assert len(response.json["notes"]) == 10000
+    assert len(response.json["notes"]) == 2000
 
 
 @pytest.mark.parametrize(

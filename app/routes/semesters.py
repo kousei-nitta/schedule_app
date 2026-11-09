@@ -34,6 +34,13 @@ semesters_bp = Blueprint(
 SEMESTER_FIELDS = {"name", "start_date", "end_date"}
 
 END_DATE_ORDER_MESSAGE = "終了日は開始日より後にしてください"
+# 学期の期間（開始日から終了日まで。両端を含む）の上限の日数。1回の要求で、
+# 大量の授業の予定を作らせないため（docs/architecture/api_endpoints.md の
+# 「学期API」。Task 026）
+MAX_SEMESTER_DAYS = 366
+SEMESTER_PERIOD_MESSAGE = (
+    f"学期の期間は{MAX_SEMESTER_DAYS}日以内にしてください"
+)
 SEMESTER_HAS_SUBJECTS_MESSAGE = (
     "授業が登録されている学期は削除できません。"
     "先に、授業をすべて削除してください"
@@ -64,6 +71,15 @@ def is_duplicate_name(name: str, current_id: int | None) -> bool:
     if current_id is not None:
         statement = statement.where(Semester.id != current_id)
     return db.session.scalar(statement) is not None
+
+
+def period_error(start_date: date, end_date: date) -> str | None:
+    """開始日と終了日の、前後と期間の長さの誤り（なければ None）。"""
+    if end_date <= start_date:
+        return END_DATE_ORDER_MESSAGE
+    if (end_date - start_date).days + 1 > MAX_SEMESTER_DAYS:
+        return SEMESTER_PERIOD_MESSAGE
+    return None
 
 
 def validate_semester_values(
@@ -281,13 +297,12 @@ def create_semester():
 
     start_date = values.get("start_date")
     end_date = values.get("end_date")
-    # 前後の検査は、開始日と終了日の両方に誤りがないときだけ行う。
-    if (
-        start_date is not None
-        and end_date is not None
-        and end_date <= start_date
-    ):
-        fields["end_date"] = END_DATE_ORDER_MESSAGE
+    # 前後と期間の長さの検査は、開始日と終了日の両方に誤りがないとき
+    # だけ行う。
+    if start_date is not None and end_date is not None:
+        error = period_error(start_date, end_date)
+        if error is not None:
+            fields["end_date"] = error
 
     fields.update(validate_allowed_fields(payload, SEMESTER_FIELDS))
 
@@ -327,13 +342,14 @@ def update_semester(semester_id: int):
         current_id=semester.id,
     )
 
-    # 前後の検査は、変更後の値どうしで行う。本文に含まれない日付は、
-    # 今の値を使う。本文の日付に誤りがあれば、検査しない。
+    # 前後と期間の長さの検査は、変更後の値どうしで行う。本文に含まれない
+    # 日付は、今の値を使う。本文の日付に誤りがあれば、検査しない。
     if "start_date" not in fields and "end_date" not in fields:
         start_date = values.get("start_date", semester.start_date)
         end_date = values.get("end_date", semester.end_date)
-        if end_date <= start_date:
-            fields["end_date"] = END_DATE_ORDER_MESSAGE
+        error = period_error(start_date, end_date)
+        if error is not None:
+            fields["end_date"] = error
 
     fields.update(validate_allowed_fields(payload, SEMESTER_FIELDS))
 

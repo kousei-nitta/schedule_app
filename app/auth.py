@@ -76,7 +76,15 @@ def client_address() -> str:
 
 
 def own_origin() -> str:
-    """このアプリの Origin（例：http://127.0.0.1:5001）。"""
+    """このアプリの Origin（例：http://127.0.0.1:5001）。
+
+    本番は、設定の PUBLIC_ORIGIN（例：https://example.alwaysdata.net）。
+    要求から組み立てない（プロキシの後ろでは、スキームやポートが、
+    ブラウザの見ているものと違いうるため）。
+    """
+    public_origin = current_app.config["PUBLIC_ORIGIN"]
+    if public_origin is not None:
+        return public_origin
     return f"{request.scheme}://{request.host}"
 
 

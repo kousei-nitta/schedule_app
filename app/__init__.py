@@ -6,13 +6,26 @@ from flask import Flask
 
 from app.api_helpers import register_api_error_handlers
 from app.auth import register_auth
-from app.config import Config, check_cookie_security
+from app.config import (
+    Config,
+    check_security_settings,
+    settings_from_environment,
+)
+from app.env_file import environment_with_env_file
 from app.extensions import db, migrate
+from app.production import prepare_production
+from app.proxy import PublicProxyMiddleware
 from app.secret_key import load_secret_key
 from app.security import register_security_headers
 
 
 def create_app(test_config: dict[str, Any] | None = None):
+    """アプリを作る。
+
+    test_config がないとき（ふだんの起動・コマンド）は、この時点の環境変数
+    （と、本番の設定のファイル）から、ローカルか本番かを決める
+    （app/config.py）。テストは、test_config で設定を渡す。
+    """
     if (
         test_config is not None
         and "SQLALCHEMY_DATABASE_URI" not in test_config
@@ -24,18 +37,29 @@ def create_app(test_config: dict[str, Any] | None = None):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_object(Config)
     if test_config is None:
-        os.makedirs(app.instance_path, exist_ok=True)
-        # 秘密の鍵：環境変数 SECRET_KEY、なければ instance/secret_key
-        # （app/secret_key.py）
-        app.config["SECRET_KEY"] = load_secret_key(app.instance_path)
+        environment = environment_with_env_file(os.environ)
+        app.config.update(settings_from_environment(environment))
+        if not app.config["PRODUCTION"]:
+            os.makedirs(app.instance_path, exist_ok=True)
+            # 秘密の鍵：環境変数 SECRET_KEY、なければ instance/secret_key
+            # （app/secret_key.py）。本番は、環境変数だけ（上で読んだ）
+            app.config["SECRET_KEY"] = load_secret_key(
+                app.instance_path, environment
+            )
     else:
         # テストでは、instance/ に鍵のファイルを作らない（指定がなければ、
         # アプリごとの乱数）
         app.config["SECRET_KEY"] = secrets.token_hex(32)
         app.config.update(test_config)
 
-    # 公開の設定で、Cookie の Secure を付け忘れていたら、起動しない
-    check_cookie_security(app.config)
+    # Host・Cookie・本番の設定が危なければ、起動しない
+    check_security_settings(app.config)
+    if app.config["PRODUCTION"]:
+        prepare_production(app)
+        # プロキシの後ろで、接続元とスキームを決める（app/proxy.py）
+        app.wsgi_app = PublicProxyMiddleware(
+            app.wsgi_app, app.config["CLIENT_ADDRESS_HEADER"]
+        )
 
     db.init_app(app)
 

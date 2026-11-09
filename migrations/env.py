@@ -107,6 +107,48 @@ def run_migrations_online():
             context.run_migrations()
 
 
+# 本番で通す操作（Alembic が env.py に渡す処理の名前）。ほかの操作は、
+# 本番では断る（断る名前の一覧にすると、Alembic の更新で増えた操作を、
+# 黙って通してしまうため）。
+# - upgrade：flask db upgrade（DBを新しい形にする）
+# - display_version：flask db current（今の版を表示する）
+# - _display_current_history：flask db history -i（履歴を表示する）
+# 断るもの（例）：downgrade（DBを古い形に戻し、列や表のデータが消える）、
+# do_stamp（DBを変えずに「どこまで当てたか」の記録だけを書き換え、次の
+# upgrade が、当てるべき migration を飛ばしうる）、retrieve_migrations
+# （flask db migrate・check。本番で migration のファイルを作ると、レビューを
+# 通らないまま、次の upgrade で当たりうる。migration は Mac で作る）
+PRODUCTION_ALLOWED_OPERATIONS = {
+    "upgrade",
+    "display_version",
+    "_display_current_history",
+}
+
+
+def refuse_destructive_operation_in_production():
+    """本番（APP_ENV=production）で、上の一覧にない操作を断る。
+
+    Flask-Migrate の db コマンドは、このアプリのコマンドと違い、中を
+    変えられないため、ここ（すべての db コマンドが通る場所）で断る。
+    どの操作かは、Alembic が渡す処理の名前で見分ける（公開の仕組みで
+    ないため、Alembic の更新で変わりうる。名前が変わったら、通すはずの
+    操作も断られるので、気づける。tests/test_production.py が、upgrade・
+    current が通り、downgrade・stamp・migrate・check が断られることを
+    確かめる）。
+    """
+    if not current_app.config.get("PRODUCTION"):
+        return
+    operation = context._proxy.context_opts.get("fn")
+    name = getattr(operation, "__name__", None)
+    if name not in PRODUCTION_ALLOWED_OPERATIONS:
+        raise RuntimeError(
+            "本番では、この操作（db downgrade・db stamp など）はできません。"
+            "戻すときは、バックアップから戻します（docs/development/deploy.md）"
+        )
+
+
+refuse_destructive_operation_in_production()
+
 if context.is_offline_mode():
     run_migrations_offline()
 else:

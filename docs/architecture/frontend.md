@@ -62,6 +62,7 @@
 - 古い取得の予定は、FullCalendarが捨てる。画面の表示（取得の失敗の表示）は、取得のたびに増やす通し番号で、最新の取得の結果だけを反映する（「選択に依存する取得」の規則と同じ考え方）
 - **取得の失敗**（`eventSourceFailure`）：`ApiError` の失敗は、`fetchEvents` が画面に表示するため、何もしない（FullCalendarの既定の、コンソールへの警告も出さない）。`ApiError` でない例外（取得のあとの絞り込み・形の変換の例外など）は、`showLoadError` で、カレンダーの上に表示する（`errorMessageOf` が、固定のメッセージにし、詳細を `console.error` に出す。2026-10-18に決定。それまでは、何もしない関数で、このような例外が、画面にもコンソールにも出なかった）
 - 予定の日時は、タイムゾーンのない `YYYY-MM-DDTHH:MM` で渡す（ブラウザのローカルの日時として読まれる。「データ設計」の、タイムゾーンなしの約束と同じ）
+- **幅の狭い画面**（Task 026。`ui_ux.md` の「スマホでの表示」）：`initCalendar` で、`window.matchMedia("(max-width: 575.98px)")` を1回だけ判定し、狭ければ、初期表示を一覧（`LIST_VIEW`）にし（締切を出さない状態 `deadlinesShown = false` から始める）、週表示の `dayHeaderFormat` を短い形にする。ツールバーの折り返しと、課題・タスクの表の並べ方は、`style.css` の `@media (max-width: 575.98px)` で行う（JavaScriptでは、見た目を変えない）
 - **色**：予定に、カテゴリのclass（`categories.js` の `className`）を付け、色は `style.css` で、そのclassに、FullCalendarのCSSの変数（`--fc-event-bg-color`・`--fc-event-border-color`・`--fc-event-text-color`）として設定する。JavaScriptでは色を指定しない（FullCalendarの `backgroundColor`・`eventColor` などの色の設定も使わない）
 - 表示の中身を変えるとき（一覧表示の行など）は、`eventContent` で、`createElement` と `textContent` で作った要素（`domNodes`）を返す。HTMLの文字列（`html`）は返さない（`innerHTML` を使わない規則と同じ理由）
 - **絞り込み**：選択肢（チェックボックス）は、`categories.js` の対応表から作る（表示名を1か所で持つため）。絞り込みを変えたら、予定と締切を取得し直し（`refetchEvents`）、取得した予定・締切から、外したカテゴリのものを除く。対応表にないカテゴリの予定・締切は、絞り込みによらず表示する

@@ -22,6 +22,13 @@ updates:
       python-minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # pyee は Playwright が使うライブラリ。今の Playwright（1.64）は、
+      # pyee を「15未満」に限るため、15以上の版のPRは、インストールで
+      # 失敗する。Playwright が受け付けるようになったら、この除外を外す
+      # （docs/roadmap.md の持ち越し D-48）
+      - dependency-name: pyee
+        versions: [">=15"]
 
   # npm（package.json・package-lock.json。ESLint と、E2EでのCDNの代用）
   - package-ecosystem: npm

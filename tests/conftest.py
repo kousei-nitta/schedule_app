@@ -1,4 +1,5 @@
 import hashlib
+import os
 import shutil
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import pytest
 from flask_migrate import upgrade
 
 from app import clock, create_app
+from app.config import production_settings
 from app.extensions import db
 from tests.auth_support import (
     START,
@@ -15,6 +17,7 @@ from tests.auth_support import (
     create_user,
     logged_in_client,
 )
+from tests.production_support import production_environment
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -127,3 +130,29 @@ def clock_now(monkeypatch) -> FakeClock:
     fake = FakeClock(START)
     monkeypatch.setattr(clock, "utc_now", fake)
     return fake
+
+
+@pytest.fixture
+def keep_umask():
+    # 本番のアプリは、umask を 077 にする。テストのあとで元に戻す
+    previous = os.umask(0o022)
+    os.umask(previous)
+    yield
+    os.umask(previous)
+
+
+@pytest.fixture
+def production_app(template_db: Path, tmp_path: Path, keep_umask):
+    # 本番の設定のアプリ（tests/production_support.py）。DBは、一時
+    # ディレクトリの data/app.db（持ち主だけのフォルダ）
+    environment = production_environment(tmp_path)
+    shutil.copy2(template_db, tmp_path / "data" / "app.db")
+    test_app = create_app(
+        {"TESTING": True, **production_settings(environment)}
+    )
+    assert create_user(test_app, TEST_USERNAME) == TEST_USER_ID
+    yield test_app
+
+    with test_app.app_context():
+        db.session.remove()
+        db.engine.dispose()

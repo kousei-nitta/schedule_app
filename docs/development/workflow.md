@@ -8,7 +8,7 @@
 | Claude | 設計の案、承認後の実装（計画書・設計資料の更新・コード・テスト）、PRの作成、別の目のレビューの手配、指摘の修正 |
 | 別の目のレビュー | 実装の経緯を知らないレビュー役（Claudeが起動する別のエージェント）。計画書・該当する仕様・PRの差分だけを受け取る |
 | CI（GitHub Actions） | 自動の確認（`testing.md` の「CI」）。通らないPRは、マージしない |
-| Koma | 設計判断の承認、PRを読む、画面が変わるタスクではMacで触って確かめる、マージ、実データのDBの管理（`database.md`） |
+| Koma | 設計判断の承認、PRを読む、画面が変わるタスクではMacで触って確かめる、マージ、実データのDBの管理（`database.md`）、本番への反映（`deploy.md`） |
 
 - Claudeの作業は、クラウドの作業環境で行う。KomaのMacの実データのDBには触れない
 - PDCAの記録・報告は、Komaが行う
@@ -19,7 +19,7 @@
 3. **実装**：`feature/NNN-説明` のブランチで、計画書（`docs/tasks/`）、設計資料の更新、コードとテストを作る。段階ごとにcommitする
 4. **PR**：説明に、変更の要点・読む順番・判断の理由・確認の結果を、日本語で書く
 5. **CIと別の目のレビュー**（下の「レビュー」）
-6. **マージ**：Komaが読んで確かめ、マージする。画面が変わるタスクでは、Macで触って確かめる
+6. **マージ**：Komaが読んで確かめ、マージする。画面が変わるタスクでは、Macで触って確かめる。マージのあと、本番に反映する（`deploy.md` の「更新」。Task 026 の公開のあと）
 
 - タスクは、重大な理由がない限り、細かく分けすぎない（小さな持ち越しは、関係するファイルを変えるタスクで、まとめて直す）
 - 1つのタスク（設計 → 実装 → PR → マージ）を、1つのチャットで扱う。チャットの中にしかない決定は、区切る前に、PR（設計資料・roadmap・決定の記録）に入れる
@@ -58,7 +58,7 @@
 `.github/dependabot.yml`。毎週月曜の朝（日本時間）に、pip・npm・GitHub Actions の新しい版を確かめ、PRを出す。理由と設定は `architecture/security.md` の「依存とCI」。
 
 - 公開から14日たった版だけが出る。小さな更新（minor・patch）は、種類ごとに1つのPRにまとまる。大きな更新（major）は、1つずつのPRになる
-- **小さな更新**：CIの3つのジョブが合格し、下の「差分の確認」で問題がなければ、Komaがマージしてよい。Pythonのライブラリの更新をマージしたら、Macで `pip install -r requirements-dev.txt`（Playwright の更新のときは、続けて `python -m playwright install chromium`）
+- **小さな更新**：CIの3つのジョブが合格し、下の「差分の確認」で問題がなければ、Komaがマージしてよい。Pythonのライブラリの更新をマージしたら、Macで `pip install -r requirements-dev.txt`（Playwright の更新のときは、続けて `python -m playwright install chromium`）。`requirements.txt` が変わったときは、本番にも反映する（`deploy.md` の「更新」）
 - **差分の確認**（npm・pip のPR）：Dependabot が14日待つのは、PRの題名にある依存の版だけ。一緒に変わる間接の依存（`package-lock.json` の中や、新しい版が新たに要る Python のライブラリ）は、公開の直後の版になりうる（`CLAUDE.md` の版の規則は、間接の依存にも当てはまる）。マージの前に、確かめる。npm：PRの差分で、題名にない依存の版が変わった・増えたかを見る。pip：新たに要る依存は、差分に出ない（requirements に書かれていないため）。Claudeに頼み、そのブランチで `.venv` を作って `pip install -r requirements-dev.txt` のあと、`pip freeze` を requirements と比べ、書かれていない依存が増えていないかを確かめてもらう。どちらも、変わった・増えた依存があれば、Claudeに、その版の公開日を調べてもらう（`npm view <名前> time`・PyPI）。14日に満たないときは、待つか（翌週のPRで解消することが多い）、Komaが例外として判断する。pip で増えた依存は、requirements に足す（そのPRで足すか、別のPRにする）
 - **大きな更新・CIが通らない更新**：マージせず、タスクとして扱う（Claudeが、変更点を調べて、設計の案を出す）
 - **セキュリティの修正のPR**（Dependabot security updates）：14日を待たずに出る。マージは、版の規則（公開から2週間）の例外になるため、Komaが判断する（迷ったら、Claudeに内容を調べてもらう）

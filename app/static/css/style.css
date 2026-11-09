@@ -79,3 +79,81 @@
 .task-col-actions {
   width: 8rem;
 }
+
+/*
+  幅の狭い画面（スマホ。576px未満）での、最低限の表示（docs/ui_ux.md の
+  「スマホでの表示」）。見た目の作り込みは、段階3で行う。
+*/
+@media (max-width: 575.98px) {
+  /* カレンダーのツールバー：ボタンと期間を折り返し、期間の文字を小さく */
+  .fc .fc-toolbar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .fc .fc-toolbar-title {
+    font-size: 1.15rem;
+  }
+
+  /*
+    課題・タスクの表：列を横に並べると、課題名が1文字ずつ折り返されるため、
+    1件を、左に「完了」、真ん中に締切・課題名・対象授業を縦に、右に操作の
+    ボタンを置く形にする（表の見出しは隠す）。セルの並び（tasks.js）：
+    完了・締切・課題名・対象授業・操作
+  */
+  .task-table {
+    table-layout: auto;
+  }
+
+  .task-table thead {
+    display: none;
+  }
+
+  .task-table tbody tr {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "completed title actions"
+      "completed due actions"
+      "completed subject actions";
+    border-bottom: var(--bs-border-width) solid var(--bs-border-color);
+  }
+
+  .task-table tbody td {
+    border-bottom: 0;
+  }
+
+  .task-table tbody td:nth-child(1) {
+    grid-area: completed;
+  }
+
+  .task-table tbody td:nth-child(2) {
+    grid-area: due;
+    font-size: 0.875rem;
+  }
+
+  .task-table tbody td:nth-child(3) {
+    grid-area: title;
+  }
+
+  .task-table tbody td:nth-child(4) {
+    grid-area: subject;
+    font-size: 0.875rem;
+    color: var(--bs-secondary-color);
+  }
+
+  .task-table tbody td:nth-child(5) {
+    grid-area: actions;
+  }
+
+  /*
+    操作のボタン（編集・削除）を縦に並べる。削除のボタンの左の余白
+    （Bootstrap の ms-1。!important が付いている）も、ここでは消す
+  */
+  .task-table tbody td:nth-child(5) .btn {
+    display: block;
+    width: 100%;
+    margin-bottom: 0.25rem;
+    margin-left: 0 !important;
+  }
+}

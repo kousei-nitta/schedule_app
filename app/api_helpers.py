@@ -25,6 +25,7 @@ ERROR_STATUS_CODES = {
     "not_found": 404,
     "method_not_allowed": 405,
     "conflict": 409,
+    "too_large": 413,
     "server_error": 500,
 }
 
@@ -34,6 +35,13 @@ INVALID_JSON_MESSAGE = (
 )
 UNUSABLE_CHARACTER_MESSAGE = "使用できない文字が含まれています"
 EMPTY_PATCH_MESSAGE = "変更する項目を指定してください"
+
+# 授業・予定・課題の「詳細・メモ」（notes）の決まり（3つのAPIで同じ）。
+# 長さの上限は、大きなメモで、DB・バックアップ・ディスクを使わせないため
+# （docs/architecture/api_endpoints.md。Task 026）
+NOTES_MAX_LENGTH = 2000
+NOTES_TYPE_MESSAGE = "詳細・メモは文字列で指定してください"
+NOTES_LENGTH_MESSAGE = f"詳細・メモは{NOTES_MAX_LENGTH}文字以内にしてください"
 
 
 def contains_unusable_character(value: str) -> bool:
@@ -62,7 +70,7 @@ def is_api_path(path: str) -> bool:
 
 
 def register_api_error_handlers(app: Flask) -> None:
-    """APIの400・404・405・500をJSON形式で返すハンドラーを登録する。"""
+    """APIの400・404・405・413・500をJSON形式で返すハンドラーを登録する。"""
 
     @app.errorhandler(400)
     def handle_bad_request(error: BadRequest):
@@ -100,6 +108,17 @@ def register_api_error_handlers(app: Flask) -> None:
         if error.valid_methods:
             response.headers["Allow"] = ", ".join(sorted(error.valid_methods))
         return response, status
+
+    @app.errorhandler(413)
+    def handle_request_entity_too_large(error: HTTPException):
+        # 本文が、設定 MAX_CONTENT_LENGTH（app/config.py）より大きい。
+        # 本文は読まずに断る（大きな本文で、メモリーを使わせないため）
+        if not is_api_path(request.path):
+            return error
+        return api_error_response(
+            "too_large",
+            "リクエストの本文が大きすぎます",
+        )
 
     @app.errorhandler(InternalServerError)
     def handle_internal_server_error(error: InternalServerError):

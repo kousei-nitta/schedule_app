@@ -34,6 +34,7 @@ from app.routes.auth import (
 )
 from tests.auth_support import (
     COOKIE_NAME,
+    DEVICE_COOKIE_NAME,
     FORM_HEADERS,
     OTHER_USERNAME,
     START,
@@ -42,6 +43,7 @@ from tests.auth_support import (
     TEST_USERNAME,
     cookie_value,
     create_user,
+    device_cookie_value,
     failure_count,
     log_in,
     post_login,
@@ -1078,13 +1080,16 @@ def test_login_page_allows_no_scripts(anonymous_client):
 
 
 def test_no_other_cookies_are_set(anonymous_client):
-    # Flask の署名つきのセッション（session）は使わない
+    # Flask の署名つきのセッション（session）は使わない。Cookie は、
+    # ログインと、端末の印（app/trusted_devices.py）の2つだけ
     response = post_login(anonymous_client, TEST_USERNAME, TEST_PASSWORD)
     page = anonymous_client.get("/")
 
     for current in (response, page):
         for header in current.headers.getlist("Set-Cookie"):
-            assert header.startswith(f"{COOKIE_NAME}=")
+            assert header.startswith(
+                (f"{COOKIE_NAME}=", f"{DEVICE_COOKIE_NAME}=")
+            )
 
 
 # --- ヘッダー ---
@@ -1134,6 +1139,7 @@ def test_logs_never_contain_passwords_tokens_or_typed_ids(
         anonymous_client.post("/logout", headers=FORM_HEADERS)
 
     token = cookie_value(response)
+    device_token = device_cookie_value(response)
     assert "ログインに失敗しました（利用者：不明なID" in caplog.text
     assert f"ログインしました（利用者：{TEST_USER_ID}" in caplog.text
     assert "ログアウトしました" in caplog.text
@@ -1141,5 +1147,11 @@ def test_logs_never_contain_passwords_tokens_or_typed_ids(
     addresses = re.findall(r"接続元：(.+?)）", caplog.text)
     assert len(addresses) == 3
     assert set(addresses) == {"'127.0.0.1'"}
-    for secret in [typed_id, TEST_PASSWORD, "wrong password", token]:
+    for secret in [
+        typed_id,
+        TEST_PASSWORD,
+        "wrong password",
+        token,
+        device_token,
+    ]:
         assert secret not in caplog.text

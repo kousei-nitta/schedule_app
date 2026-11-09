@@ -1,7 +1,6 @@
 import os
-from datetime import date
 
-from app import create_app
+from app import clock, create_app
 from app.backup import backup_real_database_on_startup
 from app.database_files import describe_database
 
@@ -10,6 +9,14 @@ app = create_app()
 
 
 if __name__ == "__main__":
+    # run.py は、Flask の開発用のサーバーで、Mac の中だけで使う。本番は、
+    # ホストの uWSGI で動かす（wsgi.py。docs/development/deploy.md）
+    if app.config["PRODUCTION"]:
+        raise SystemExit(
+            "本番の設定（APP_ENV=production）では、run.py を使いません"
+            "（本番は uWSGI で動かします。docs/development/deploy.md）"
+        )
+
     # デバッグモードは、環境変数 FLASK_DEBUG が 1 のときだけ使う
     # （例：FLASK_DEBUG=1 python run.py）。デバッグモードでは、エラーの
     # 画面から、サーバーの中でコードを実行できる道具（デバッガー）が動く
@@ -31,7 +38,7 @@ if __name__ == "__main__":
                 "デバッグモード：オン（FLASK_DEBUG）。開発のときだけ"
                 "使ってください"
             )
-        # 実データのDBの、その日の自動バックアップ
+        # 実データのDBの、その日（日本時間）の自動バックアップ
         # （その日の分があれば作らない）
-        backup_real_database_on_startup(app, date.today())
+        backup_real_database_on_startup(app, clock.japan_today())
     app.run(host="127.0.0.1", port=5001, debug=debug)
